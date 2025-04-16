@@ -28,8 +28,8 @@
         url = "https://gitlab.haskell.org/ghc/ghc";
         version = "9.10.1";
         flavour = "release+split_sections+ipe";
-        rev = "cd00672d9eb50cdad53d37499c93b0b022efe21a";
-        hash = "sha256-Kzo23TE8Mgk7lesLXkodkbmqa0Mt9rpV7N5MwBMO5eY=";
+        rev = "fe5932d418e8221bb5bcd34954caca07ff8d9310";
+        hash = "sha256-4ZhFSs6ZC3XXmrcmZ72ca0sn+RZVNgx5rbiwZuRJigY=";
       };
 
       # Some as `mwb-26-04`, but with fixed nodes.
@@ -37,8 +37,8 @@
         url = "https://gitlab.haskell.org/ghc/ghc";
         version = "9.10.1";
         flavour = "release+split_sections+ipe";
-        rev = "debb34edd90921c93f4c8fe67cbb30615951e843";
-        hash = "sha256-OfH9kwzJMRFHS1rGzUZhEYEKnh1PLnc94xBL9MrnS0M=";
+        rev = "630ee987758fe2fce24113afd445fa95e4b82503";
+        hash = "sha256-frUOGkwnYbCJooJtMYVpdGEWmi05rKjP6Dd2h0zq/8Q=";
       };
 
       ghc914.nixpkgs = "ghc914";
