@@ -1,0 +1,28 @@
+load("@buck2-haskell//:defs.bzl", "haskell_library")
+
+haskell_library(
+    name = "no-worker-l1",
+    srcs = [
+        "L1.hs",
+    ],
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+    ],
+    _ghc_proxy = "toolchains//:ghc_proxy",
+)
+
+haskell_library(
+    name = "no-worker-l2",
+    srcs = [
+        "L2.hs",
+    ],
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+        ":no-worker-l1",
+        "//haskell:dep1",
+    ],
+    _ghc_proxy = "toolchains//:ghc_proxy",
+)
+

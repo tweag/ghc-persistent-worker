@@ -1,0 +1,43 @@
+[cells]
+root = .
+prelude = prelude
+buck2-haskell = buck2-haskell
+toolchains = toolchains
+nix = nix
+none = none
+
+[cell_aliases]
+config = prelude
+ovr_config = prelude
+fbcode = none
+fbsource = none
+fbcode_macros = none
+buck = none
+
+[external_cells]
+prelude = bundled
+buck2-haskell = git
+
+[external_cell_buck2-haskell]
+git_origin = https://github.com/tek/buck2-haskell.git
+commit_hash = d3be96deba41ad8216cfc41a64a7b708a49e7e89
+
+[parser]
+target_platform_detector_spec = \
+    target:root//...->prelude//platforms:default \
+    target:toolchains//...->prelude//platforms:default \
+    target:nix//...->prelude//platforms:default \
+    target:buck2-haskell//...->prelude//platforms:default
+
+[project]
+ignore = .git, tmp, ghcHEAD-toolchains
+
+[buck2]
+materializations = deferred
+hash_all_commands = true
+
+[build]
+execution_platforms = root//platforms:host-persistent-worker
+
+[ghc-worker]
+enable = true

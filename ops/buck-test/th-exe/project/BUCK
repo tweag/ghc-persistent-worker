@@ -1,0 +1,30 @@
+load("//haskell:custom.bzl", "haskell_lib")
+
+haskell_lib(
+    name = "th-exe-run",
+    srcs = [
+        "M1.hs",
+    ],
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+        "//haskell:process",
+    ],
+    external_tools = [
+        "@toolchains//:th-exe",
+    ],
+)
+
+
+haskell_lib(
+    name = "th-exe-use",
+    srcs = [
+        "M2.hs",
+    ],
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+        ":th-exe-run",
+    ],
+)
+
