@@ -8,7 +8,7 @@
   profiledFixedPkg = build.packages.profiled-fixed.ghc-server.package;
   profiteur = build.envs.tools.toolchain.packages.profiteur;
 
-  # Prebuilt ext dep packages for the mwb-26-04-linkables GHC, used by profiling apps.
+  # Prebuilt ext dep packages for the mwb-26-07-linkables GHC, used by profiling apps.
   fixedGhc = build.envs.mwb-26-04-fixed.toolchain.packages.ghc;
   fixedExtDeps = import ./test-ext-deps.nix {
     inherit (config) pkgs;

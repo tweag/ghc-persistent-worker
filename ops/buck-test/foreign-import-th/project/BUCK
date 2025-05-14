@@ -1,0 +1,40 @@
+load("//haskell:custom.bzl", "haskell_lib")
+
+haskell_lib(
+    name = "foreign-import-th-l1",
+    srcs = [
+        "L1.hs",
+    ],
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+        "//haskell:uuid",
+        "//haskell:uuid-types",
+        "//haskell:primitive",
+    ],
+    extra_libraries = select({
+        "@prelude//os:linux": [
+            "@toolchains//:libuuid",
+        ],
+        "@prelude//os:macos": [],
+    }),
+    compiler_flags = [
+        "-L/nix/store/8h9qgd6yp7ld34q6vh1waz5df0d7z3s2-util-linux-minimal-2.39.4-lib/lib",
+        "-luuid",
+    ],
+    linker_flags = [
+        "-optl-Wl,-rpath,/nix/store/8h9qgd6yp7ld34q6vh1waz5df0d7z3s2-util-linux-minimal-2.39.4-lib/lib",
+    ],
+)
+
+haskell_lib(
+    name = "foreign-import-th-l2",
+    srcs = [
+        "L2.hs",
+    ],
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+        ":foreign-import-th-l1",
+    ],
+)
