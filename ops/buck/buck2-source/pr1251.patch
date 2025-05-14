@@ -1,0 +1,183 @@
+From 6288a90b14cb80c8b3f584f425f46306a8c9ce61 Mon Sep 17 00:00:00 2001
+From: Jade Lovelace <jadel@mercury.com>
+Date: Mon, 23 Feb 2026 14:48:48 -0800
+Subject: [PATCH 2/2] bxl: allow users to make atarget sets
+
+Previously this was just not exposed.
+---
+ .../src/bxl/starlark_defs/analysis_result.rs  | 17 ++++++
+ .../src/bxl/starlark_defs/functions.rs        | 26 +++++++++
+ tests/core/query/aquery/test_aquery.py        | 12 +++++
+ .../query/aquery/test_aquery_data/aquery.bxl  | 53 +++++++++++++++++++
+ 4 files changed, 108 insertions(+)
+
+diff --git a/app/buck2_bxl/src/bxl/starlark_defs/analysis_result.rs b/app/buck2_bxl/src/bxl/starlark_defs/analysis_result.rs
+index 87461ce6c9..0478576c3f 100644
+--- a/app/buck2_bxl/src/bxl/starlark_defs/analysis_result.rs
++++ b/app/buck2_bxl/src/bxl/starlark_defs/analysis_result.rs
+@@ -13,6 +13,7 @@ use allocative::Allocative;
+ use buck2_build_api::analysis::AnalysisResult;
+ use buck2_build_api::interpreter::rule_defs::provider::dependency::Dependency;
+ use buck2_core::provider::label::ConfiguredProvidersLabel;
++use buck2_interpreter::types::configured_providers_label::StarlarkConfiguredProvidersLabel;
+ use dupe::Dupe;
+ use starlark::any::ProvidesStaticType;
+ use starlark::environment::Methods;
+@@ -96,6 +97,22 @@ fn starlark_analysis_result_methods(builder: &mut MethodsBuilder) {
+         }
+     }
+ 
++    /// Gets the configured providers label for this analysis result.
++    ///
++    /// Sample usage:
++    /// ```python
++    /// def _impl_label(ctx):
++    ///     actions = ctx.aquery().all_actions("//target")
++    ///     for node in actions:
++    ///         if analysis := node.analysis():
++    ///             ctx.output.print(analysis.label())
++    /// ```
++    fn label<'v>(
++        this: &StarlarkAnalysisResult,
++    ) -> starlark::Result<StarlarkConfiguredProvidersLabel> {
++        Ok(StarlarkConfiguredProvidersLabel::new(this.label.dupe()))
++    }
++
+     /// Converts the analysis result into a `dependency`. Currently, you can only get a `dependency` without any
+     /// transitions. This means that you cannot create an exec dep or toolchain from an analysis result.
+     ///
+diff --git a/app/buck2_bxl/src/bxl/starlark_defs/functions.rs b/app/buck2_bxl/src/bxl/starlark_defs/functions.rs
+index 70dee022d6..ac3748fbac 100644
+--- a/app/buck2_bxl/src/bxl/starlark_defs/functions.rs
++++ b/app/buck2_bxl/src/bxl/starlark_defs/functions.rs
+@@ -9,6 +9,7 @@
+ 
+ use std::time::Instant;
+ 
++use buck2_build_api::actions::query::ActionQueryNode;
+ use buck2_build_api::interpreter::rule_defs::artifact::starlark_artifact_like::ValueAsArtifactLikeUnpack;
+ use buck2_build_api::interpreter::rule_defs::cmd_args::value_as::ValueAsCommandLineLike;
+ use buck2_node::nodes::configured::ConfiguredTargetNode;
+@@ -32,6 +33,7 @@ use super::context::output::get_cmd_line_inputs;
+ use super::nodes::unconfigured::StarlarkTargetNode;
+ use crate::bxl::starlark_defs::context::BxlContext;
+ use crate::bxl::starlark_defs::eval_extra::BxlEvalExtra;
++use crate::bxl::starlark_defs::nodes::action::StarlarkActionQueryNode;
+ use crate::bxl::starlark_defs::nodes::configured::StarlarkConfiguredTargetNode;
+ use crate::bxl::starlark_defs::targetset::StarlarkTargetSet;
+ use crate::bxl::starlark_defs::time::StarlarkInstant;
+@@ -80,6 +82,30 @@ pub(crate) fn register_target_function(builder: &mut GlobalsBuilder) {
+                 .map(|node| node.0),
+         ))
+     }
++
++    /// Creates a target set from a list of action query nodes.
++    ///
++    /// Sample usage:
++    /// ```python
++    /// def _impl_atarget_set(ctx):
++    ///     actions = ctx.aquery().all_actions("//target")
++    ///     action_a = actions[0]
++    ///     action_b = actions[1]
++    ///     action_set = bxl.atarget_set([action_a, action_b])
++    ///     # Now can use in further queries
++    ///     deps = ctx.aquery().deps(action_set)
++    /// ```
++    fn atarget_set(
++        nodes: Option<UnpackList<StarlarkActionQueryNode>>,
++    ) -> starlark::Result<StarlarkTargetSet<ActionQueryNode>> {
++        Ok(StarlarkTargetSet::from_iter(
++            nodes
++                .unwrap_or(UnpackList::default())
++                .items
++                .into_iter()
++                .map(|node| node.0),
++        ))
++    }
+ }
+ 
+ #[derive(Debug, buck2_error::Error, Clone)]
+diff --git a/tests/core/query/aquery/test_aquery.py b/tests/core/query/aquery/test_aquery.py
+index fc11e3e61a..6cf12c3b25 100644
+--- a/tests/core/query/aquery/test_aquery.py
++++ b/tests/core/query/aquery/test_aquery.py
+@@ -166,3 +166,15 @@ async def test_bxl_action_deps_0(buck: Buck) -> None:
+ async def test_bxl_action_deps(buck: Buck) -> None:
+     """Test that you can isolate the deps of one action by itself"""
+     await buck.bxl("//:aquery.bxl:action_deps")
++
++
++@buck_test()
++async def test_bxl_atarget_set(buck: Buck) -> None:
++    """Test bxl.atarget_set() creates a target set from ActionQueryNodes"""
++    await buck.bxl("//:aquery.bxl:atarget_set_test")
++
++
++@buck_test()
++async def test_bxl_analysis_label(buck: Buck) -> None:
++    """Test analysis.label() returns the configured providers label"""
++    await buck.bxl("//:aquery.bxl:analysis_label_test")
+diff --git a/tests/core/query/aquery/test_aquery_data/aquery.bxl b/tests/core/query/aquery/test_aquery_data/aquery.bxl
+index c3f156c5b2..358cd02dc0 100644
+--- a/tests/core/query/aquery/test_aquery_data/aquery.bxl
++++ b/tests/core/query/aquery/test_aquery_data/aquery.bxl
+@@ -175,3 +175,56 @@ action_deps = bxl_main(
+     impl = _impl_action_deps,
+     cli_args = {},
+ )
++
++def _impl_atarget_set_test(ctx):
++    """Test bxl.atarget_set() creates a target set from ActionQueryNodes"""
++    nodes = ctx.aquery().eval("//:test")
++
++    # Get two action query nodes
++    node_a = nodes[0]
++    node_b = nodes[1]
++
++    # Create a target set from action query nodes
++    action_set = bxl.atarget_set([node_a, node_b])
++
++    # Verify it's a target_set type
++    _assert_eq(type(action_set), "target_set")
++
++    # Verify we can use it in further aquery operations
++    deps = ctx.aquery().deps(action_set, depth = 0)
++    _assert_eq(len(deps), 2)
++
++atarget_set_test = bxl_main(
++    impl = _impl_atarget_set_test,
++    cli_args = {},
++)
++
++def _impl_analysis_label_test(ctx):
++    """Test analysis.label() returns the configured providers label"""
++    nodes = ctx.aquery().eval("//:test")
++
++    # Find an analysis node by iterating through results
++    analysis = None
++    for node in nodes:
++        if node.rule_type == "analysis":
++            analysis = node.analysis()
++            break
++
++    if not analysis:
++        fail("No analysis node found in results")
++
++    _assert_eq(type(analysis), "bxl.AnalysisResult")
++
++    # Test the label() method
++    label = analysis.label()
++    _assert_eq(type(label), "Label")
++
++    # Verify it's a valid label (should contain the target)
++    label_str = str(label)
++    if "root//:test" not in label_str:
++        fail("Expected label to contain 'root//:test', got: {}".format(label_str))
++
++analysis_label_test = bxl_main(
++    impl = _impl_analysis_label_test,
++    cli_args = {},
++)
+-- 
+2.52.0
+

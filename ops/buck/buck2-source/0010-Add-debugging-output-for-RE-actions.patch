@@ -1,0 +1,95 @@
+From 253448515f1b49a00079d1b6ccd6125c5e159c97 Mon Sep 17 00:00:00 2001
+From: Claudio Bley <claudio.bley@tweag.io>
+Date: Thu, 15 Jan 2026 16:12:10 +0100
+Subject: [PATCH 10/22] Add debugging output for RE actions
+
+---
+ remote_execution/oss/re_grpc/src/client.rs   | 14 ++++++++++++++
+ remote_execution/oss/re_grpc/src/metadata.rs |  8 ++++----
+ 2 files changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/remote_execution/oss/re_grpc/src/client.rs b/remote_execution/oss/re_grpc/src/client.rs
+index 3532fa1a8d..d49aa1b3e8 100644
+--- a/remote_execution/oss/re_grpc/src/client.rs
++++ b/remote_execution/oss/re_grpc/src/client.rs
+@@ -94,6 +94,7 @@ use tonic::transport::Channel;
+ use tonic::transport::Identity;
+ use tonic::transport::Uri;
+ use tonic::transport::channel::ClientTlsConfig;
++use tracing::info;
+ 
+ use crate::error::*;
+ use crate::metadata::*;
+@@ -753,6 +754,9 @@ impl REClient {
+             ..Default::default()
+         };
+ 
++        info!(?request, "RE ACTION REQUEST");
++        info!(?metadata, "RE ACTION REQUEST METADATA");
++
+         let stream = client
+             .execute(with_re_metadata(
+                 request,
+@@ -768,6 +772,14 @@ impl REClient {
+                 None => return Ok(None),
+             };
+ 
++            info!(?msg, "RE ACTION RESPONSE");
++
++            if let Some(metadata) = &msg.metadata {
++                if let Ok(meta) = ExecuteOperationMetadata::decode(&metadata.value[..]) {
++                    info!(?meta, "RE ACTION RESPONSE METADATA");
++                }
++            }
++
+             let status = if msg.done {
+                 match msg
+                     .result
+@@ -791,6 +803,8 @@ impl REClient {
+                             .result
+                             .with_context(|| "The action result is not defined.")?;
+ 
++                        info!(?action_result, "BUCK2 ACTION RESULT");
++
+                         let action_result = convert_action_result(action_result)?;
+ 
+                         let execute_response = ExecuteResponse {
+diff --git a/remote_execution/oss/re_grpc/src/metadata.rs b/remote_execution/oss/re_grpc/src/metadata.rs
+index f4c30fedd6..560e841b23 100644
+--- a/remote_execution/oss/re_grpc/src/metadata.rs
++++ b/remote_execution/oss/re_grpc/src/metadata.rs
+@@ -13,27 +13,27 @@ use std::collections::BTreeMap;
+ pub type TPlatform = crate::grpc::Platform;
+ pub type TProperty = crate::grpc::Property;
+ 
+-#[derive(Clone, Default)]
++#[derive(Clone, Debug, Default)]
+ pub struct ActionHistoryInfo {
+     pub action_key: String,
+     pub disable_retry_on_oom: bool,
+     pub _dot_dot: (),
+ }
+ 
+-#[derive(Clone, Default)]
++#[derive(Clone, Debug, Default)]
+ pub struct BuckInfo {
+     pub build_id: String,
+     pub version: String,
+     pub _dot_dot: (),
+ }
+ 
+-#[derive(Clone, Default)]
++#[derive(Clone, Debug, Default)]
+ pub struct TClientContextMetadata {
+     pub attributes: BTreeMap<String, String>,
+     pub _dot_dot: (),
+ }
+ 
+-#[derive(Clone, Default)]
++#[derive(Clone, Debug, Default)]
+ pub struct RemoteExecutionMetadata {
+     pub action_history_info: Option<ActionHistoryInfo>,
+     pub buck_info: Option<BuckInfo>,
+-- 
+2.51.2
+

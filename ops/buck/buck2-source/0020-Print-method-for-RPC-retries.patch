@@ -1,0 +1,125 @@
+From 8ac42bb2d994bc5cd592eb8996432b9fb9da7506 Mon Sep 17 00:00:00 2001
+From: Claudio Bley <claudio.bley@tweag.io>
+Date: Sat, 7 Feb 2026 11:52:23 +0100
+Subject: [PATCH 20/22] Print method for RPC retries
+
+---
+ remote_execution/oss/re_grpc/src/client.rs |  9 +++++++++
+ remote_execution/oss/re_grpc/src/retry.rs  | 11 +++++++++--
+ 2 files changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/remote_execution/oss/re_grpc/src/client.rs b/remote_execution/oss/re_grpc/src/client.rs
+index 86d82afbe7..3ce5fd1086 100644
+--- a/remote_execution/oss/re_grpc/src/client.rs
++++ b/remote_execution/oss/re_grpc/src/client.rs
+@@ -698,6 +698,7 @@ impl REClient {
+         request: ActionResultRequest,
+     ) -> anyhow::Result<ActionResultResponse> {
+         retry(
++            "GetActionResultRequest",
+             || async {
+                 let mut client = self.grpc_clients.action_cache_client.clone();
+                 let request = request.clone();
+@@ -734,6 +735,7 @@ impl REClient {
+         request: WriteActionResultRequest,
+     ) -> anyhow::Result<WriteActionResultResponse> {
+         retry(
++            "UpdateActionResult",
+             || async {
+                 let mut client = self.grpc_clients.action_cache_client.clone();
+                 let request = request.clone();
+@@ -791,6 +793,7 @@ impl REClient {
+         info!(?metadata, "RE ACTION REQUEST METADATA");
+ 
+         let stream = retry(
++            "Execute",
+             || async {
+                 let mut client = self.grpc_clients.execution_client.clone();
+                 let request = request.clone();
+@@ -930,6 +933,7 @@ impl REClient {
+                 let runtime_opts = self.runtime_opts;
+ 
+                 retry(
++                    "BatchUpdateBlobs",
+                     move || {
+                         let metadata = metadata.clone();
+                         let mut cas_client = cas_client.clone();
+@@ -958,6 +962,7 @@ impl REClient {
+                 let runtime_opts = self.runtime_opts;
+ 
+                 retry(
++                    "BS.write",
+                     move || {
+                         let metadata = metadata.clone();
+                         let mut bytestream_client = bytestream_client.clone();
+@@ -1023,6 +1028,7 @@ impl REClient {
+                 let runtime_opts = self.runtime_opts;
+ 
+                 retry(
++                    "BatchReadBlobs",
+                     move || {
+                         let metadata = metadata.clone();
+                         let mut client = client.clone();
+@@ -1051,6 +1057,7 @@ impl REClient {
+                 async move {
+                     let mut client = self.grpc_clients.bytestream_client.clone();
+                     retry(
++                        "Read",
+                         move || {
+                             let metadata = metadata.clone();
+                             let mut client = client.clone();
+@@ -1122,6 +1129,7 @@ impl REClient {
+                 tracing::debug!(num_digests = digests_to_check.len(), "FindMissingBlobs");
+                 let runtime_opts = self.runtime_opts;
+                 let missing_blobs = retry(
++                    "FindMissingBlobs",
+                     || {
+                         let mut cas_client = cas_client.clone();
+                         let metadata = metadata.clone();
+@@ -1622,6 +1630,7 @@ where
+     Cas: Future<Output = anyhow::Result<BatchReadBlobsResponse>>,
+ {
+     retry(
++        "BatchReadBlobs",
+         || async { cas_f(read_blobs_request.clone()).await },
+         opts.max_retries,
+         INITIAL_DELAY,
+diff --git a/remote_execution/oss/re_grpc/src/retry.rs b/remote_execution/oss/re_grpc/src/retry.rs
+index 1432ecaf47..c049a3b9a4 100644
+--- a/remote_execution/oss/re_grpc/src/retry.rs
++++ b/remote_execution/oss/re_grpc/src/retry.rs
+@@ -13,6 +13,7 @@ use crate::error::{REClientError, TCode};
+ use tracing::warn;
+ 
+ pub async fn retry<F, Fut, T>(
++    method: &str,
+     mut f: F,
+     max_retries: usize,
+     initial_delay: Duration,
+@@ -53,7 +54,10 @@ where
+                 };
+ 
+                 if retryable == Retryable::WAIT {
+-                    warn!("Retrying request after error: {}. Attempt {}/{} (waiting {:?})", msg, retries, max_retries, delay);
++                    warn!(
++                        "Retrying {} request after error: {}. Attempt {}/{} (waiting {:?})",
++                        method, msg, retries, max_retries, delay
++                    );
+                     tokio::time::sleep(delay).await;
+ 
+                     delay *= 2;
+@@ -61,7 +65,10 @@ where
+                         delay = max_delay;
+                     }
+                 } else {
+-                    warn!("Retrying request after error: {}. Attempt {}/{}", msg, retries, max_retries);
++                    warn!(
++                        "Retrying {} request after error: {}. Attempt {}/{}",
++                        method, msg, retries, max_retries
++                    );
+                 }
+             }
+         }
+-- 
+2.51.2
+
