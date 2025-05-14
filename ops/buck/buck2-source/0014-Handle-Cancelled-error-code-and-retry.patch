@@ -1,0 +1,32 @@
+From b61d1256620d25ac1a109f7c88b581b2814e1d43 Mon Sep 17 00:00:00 2001
+From: Claudio Bley <claudio.bley@tweag.io>
+Date: Fri, 30 Jan 2026 20:19:25 +0100
+Subject: [PATCH 14/22] Handle Cancelled error code and retry
+
+---
+ remote_execution/oss/re_grpc/src/retry.rs | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/remote_execution/oss/re_grpc/src/retry.rs b/remote_execution/oss/re_grpc/src/retry.rs
+index 7ad3f3cc44..185bda2366 100644
+--- a/remote_execution/oss/re_grpc/src/retry.rs
++++ b/remote_execution/oss/re_grpc/src/retry.rs
+@@ -69,6 +69,7 @@ fn is_retryable(err: &anyhow::Error, retry_not_found: bool) -> bool {
+         if let Some(re_err) = cause.downcast_ref::<REClientError>() {
+             return match re_err.code {
+                 TCode::UNKNOWN
++                | TCode::CANCELLED
+                 | TCode::DEADLINE_EXCEEDED
+                 | TCode::ABORTED
+                 | TCode::INTERNAL
+@@ -81,6 +82,7 @@ fn is_retryable(err: &anyhow::Error, retry_not_found: bool) -> bool {
+         if let Some(status) = cause.downcast_ref::<tonic::Status>() {
+             return match status.code() {
+                 tonic::Code::Unknown
++                | tonic::Code::Cancelled
+                 | tonic::Code::DeadlineExceeded
+                 | tonic::Code::Aborted
+                 | tonic::Code::Internal
+-- 
+2.51.2
+

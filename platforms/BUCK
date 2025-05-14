@@ -1,0 +1,28 @@
+load(":defs.bzl", "build_mode", "local_execution_platform", "remote_execution_platform")
+load(":nativelink.bzl", "nativelink_cache")
+
+host_cpu = "prelude//cpu:" + ("arm64" if host_info().arch.is_aarch64 else "x86_64")
+host_os = "prelude//os:" + ("macos" if host_info().os.is_macos else "linux")
+
+local_execution_platform(
+    name = "host-persistent-worker",
+    cpu_configuration = host_cpu,
+    os_configuration = host_os,
+)
+
+remote_execution_platform(
+    name = "host-bazel-remote-worker",
+    cpu_configuration = host_cpu,
+    os_configuration = host_os,
+)
+
+nativelink_cache(
+    name = "nativelink",
+    cpu_configuration = host_cpu,
+    os_configuration = host_os,
+)
+
+build_mode(
+    name = "build_mode",
+    visibility = ["PUBLIC"],
+)

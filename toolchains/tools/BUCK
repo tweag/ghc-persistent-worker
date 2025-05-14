@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 Mercury Technologies, Inc.
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+python_bootstrap_binary(
+    name = "nix_wrapper",
+    main = "nix_wrapper.py",
+    visibility = ["PUBLIC"],
+)
+
+python_bootstrap_binary(
+    name = "nix_drv_json",
+    main = "nix_drv_json.py",
+    visibility = ["toolchains//:"],
+)

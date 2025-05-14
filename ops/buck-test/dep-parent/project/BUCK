@@ -1,0 +1,27 @@
+load("//haskell:custom.bzl", "haskell_lib", "haskell_bin")
+
+haskell_lib(
+    name = "dep-parent1",
+    srcs = [
+        "M1.hs",
+    ],
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+        # "//haskell:tdep1",
+        "//haskell:data-fix",
+    ],
+)
+
+haskell_lib(
+    name = "dep-parent2",
+    srcs = [
+        "M2.hs",
+    ],
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+        ":dep-parent1",
+    ],
+)
+

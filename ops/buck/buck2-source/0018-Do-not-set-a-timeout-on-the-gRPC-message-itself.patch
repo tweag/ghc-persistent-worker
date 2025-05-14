@@ -1,0 +1,24 @@
+From 0fa07e6dd04c7ff003545e8e49975a1ca6c0f248 Mon Sep 17 00:00:00 2001
+From: Claudio Bley <claudio.bley@tweag.io>
+Date: Sat, 7 Feb 2026 11:14:03 +0100
+Subject: [PATCH 18/22] Do not set a timeout on the gRPC message itself
+
+---
+ remote_execution/oss/re_grpc/src/client.rs | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/remote_execution/oss/re_grpc/src/client.rs b/remote_execution/oss/re_grpc/src/client.rs
+index 96eddc557e..8d535fca89 100644
+--- a/remote_execution/oss/re_grpc/src/client.rs
++++ b/remote_execution/oss/re_grpc/src/client.rs
+@@ -1882,7 +1882,6 @@ fn with_re_metadata<T>(
+     // Meta builds catch those issues earlier.
+ 
+     let mut msg = tonic::Request::new(t);
+-    msg.set_timeout(runtime_opts.rpc_timeout);
+ 
+     if runtime_opts.use_fbcode_metadata {
+         // This is pretty ugly, but the protobuf spec that defines this is
+-- 
+2.51.2
+

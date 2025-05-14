@@ -1,0 +1,237 @@
+From 4d98dab13cd338bf1b07478f194988a1cc8a0743 Mon Sep 17 00:00:00 2001
+From: Jade Lovelace <jadel@mercury.com>
+Date: Fri, 20 Feb 2026 16:07:26 -0800
+Subject: [PATCH 1/2] bxl aquery: allow passing in bxl.Action
+
+This allows for fine grained action graph debugging by letting bxl ask
+about individual Actions' dependencies.
+
+I chose this API because it's the smallest API surface change I could
+think of to improve this.
+
+One thing which Claude pointed out is that you can't have heterogeneous
+lists of Actions and aquery nodes. This is sorta unfortunate.
+
+Allows users to implement "What deps does my action have recorded for
+it" from https://github.com/facebook/buck2/issues/1217 themselves.
+
+Note that I tried running the tests I could using buck bxl but
+I have not gone to https://metacareers.com to be able to run the python
+side.
+
+Example usage:
+Use `ctx.audit.output()` to obtain an Action object and then ask about
+its dependencies.
+---
+ app/buck2_build_api/src/query/bxl.rs          |  6 ++++
+ app/buck2_bxl/src/bxl/starlark_defs/aquery.rs | 16 +++++++++
+ app/buck2_query_impls/src/aquery/bxl.rs       | 19 ++++++++++
+ tests/core/query/aquery/test_aquery.py        | 13 +++++++
+ .../query/aquery/test_aquery_data/aquery.bxl  | 35 +++++++++++++++++++
+ .../query/aquery/test_aquery_data/prelude.bzl |  3 +-
+ 6 files changed, 91 insertions(+), 1 deletion(-)
+
+diff --git a/app/buck2_build_api/src/query/bxl.rs b/app/buck2_build_api/src/query/bxl.rs
+index cdf7df504e..749d961118 100644
+--- a/app/buck2_build_api/src/query/bxl.rs
++++ b/app/buck2_build_api/src/query/bxl.rs
+@@ -11,6 +11,7 @@ use std::future::Future;
+ use std::pin::Pin;
+ 
+ use async_trait::async_trait;
++use buck2_artifact::actions::key::ActionKey;
+ use buck2_core::cells::CellResolver;
+ use buck2_core::cells::name::CellName;
+ use buck2_core::configuration::compatibility::MaybeCompatible;
+@@ -181,6 +182,11 @@ pub trait BxlAqueryFunctions: Send {
+         dice: &mut DiceComputations<'_>,
+         targets: &TargetSet<ActionQueryNode>,
+     ) -> buck2_error::Result<TargetSet<ActionQueryNode>>;
++    async fn get_action_nodes(
++        &self,
++        dice: &mut DiceComputations<'_>,
++        action_keys: Vec<ActionKey>,
++    ) -> buck2_error::Result<TargetSet<ActionQueryNode>>;
+ }
+ 
+ pub static NEW_BXL_CQUERY_FUNCTIONS: LateBinding<
+diff --git a/app/buck2_bxl/src/bxl/starlark_defs/aquery.rs b/app/buck2_bxl/src/bxl/starlark_defs/aquery.rs
+index 9f73f97afe..ca7e6aaba4 100644
+--- a/app/buck2_bxl/src/bxl/starlark_defs/aquery.rs
++++ b/app/buck2_bxl/src/bxl/starlark_defs/aquery.rs
+@@ -8,6 +8,7 @@
+  */
+ 
+ use allocative::Allocative;
++use buck2_artifact::actions::key::ActionKey;
+ use buck2_build_api::actions::query::ActionQueryNode;
+ use buck2_build_api::query::bxl::BxlAqueryFunctions;
+ use buck2_build_api::query::bxl::NEW_BXL_AQUERY_FUNCTIONS;
+@@ -46,6 +47,7 @@ use starlark::values::type_repr::StarlarkTypeRepr;
+ use crate::bxl::starlark_defs::context::BxlContext;
+ use crate::bxl::starlark_defs::context::BxlContextNoDice;
+ use crate::bxl::starlark_defs::context::ErrorPrinter;
++use crate::bxl::starlark_defs::nodes::action::StarlarkAction;
+ use crate::bxl::starlark_defs::nodes::action::StarlarkActionQueryNode;
+ use crate::bxl::starlark_defs::providers_expr::AnyProvidersExprArg;
+ use crate::bxl::starlark_defs::providers_expr::ProvidersExpr;
+@@ -123,6 +125,7 @@ enum UnpackActionNodes<'v> {
+     ActionQueryNodesSet(&'v StarlarkTargetSet<ActionQueryNode>),
+     ConfiguredProviders(AnyProvidersExprArg<'v>),
+     ConfiguredTargets(ConfiguredTargetListExprArg<'v>),
++    StarlarkActions(UnpackList<StarlarkAction>),
+ }
+ 
+ // Aquery operates on `ActionQueryNode`s. Under the hood, the target set of action query nodes is obtained
+@@ -141,6 +144,14 @@ async fn unpack_action_nodes<'v>(
+             return Ok(action_nodes.into_iter().map(|v| v.0).collect());
+         }
+         UnpackActionNodes::ActionQueryNodesSet(action_nodes) => return Ok(action_nodes.0.clone()),
++        UnpackActionNodes::StarlarkActions(actions) => {
++            let action_keys: Vec<ActionKey> = actions
++                .into_iter()
++                .map(|starlark_action| starlark_action.0.key().dupe())
++                .collect();
++
++            return aquery_env.get_action_nodes(dice, action_keys).await;
++        }
+         UnpackActionNodes::ConfiguredProviders(arg) => {
+             ProvidersExpr::<ConfiguredProvidersLabel>::unpack(
+                 arg,
+@@ -181,6 +192,11 @@ async fn unpack_action_nodes<'v>(
+ ///
+ /// Query results are `target_set`s of `action_query_node`s, which supports iteration,
+ /// indexing, `len()`, set addition/subtraction, and `equals()`.
++///
++/// Actions can be specified as:
++/// - Target expressions (configured targets/providers)
++/// - Existing action query nodes or target sets
++/// - `bxl.Action` objects (obtained from `ctx.audit().output()`)
+ #[starlark_module]
+ fn aquery_methods(builder: &mut MethodsBuilder) {
+     /// The deps query for finding the transitive closure of dependencies.
+diff --git a/app/buck2_query_impls/src/aquery/bxl.rs b/app/buck2_query_impls/src/aquery/bxl.rs
+index 76fe16cbd9..24b347b484 100644
+--- a/app/buck2_query_impls/src/aquery/bxl.rs
++++ b/app/buck2_query_impls/src/aquery/bxl.rs
+@@ -11,6 +11,7 @@ use std::marker::PhantomData;
+ use std::sync::Arc;
+ 
+ use async_trait::async_trait;
++use buck2_artifact::actions::key::ActionKey;
+ use buck2_build_api::actions::query::ActionQueryNode;
+ use buck2_build_api::analysis::calculation::RuleAnalysisCalculation;
+ use buck2_build_api::query::bxl::BxlAqueryFunctions;
+@@ -301,6 +302,24 @@ impl BxlAqueryFunctions for BxlAqueryFunctionsImpl {
+         })
+         .await
+     }
++
++    async fn get_action_nodes(
++        &self,
++        dice: &mut DiceComputations<'_>,
++        action_keys: Vec<ActionKey>,
++    ) -> buck2_error::Result<TargetSet<ActionQueryNode>> {
++        dice.with_linear_recompute(|dice| async move {
++            let delegate = self.aquery_delegate(&dice).await?;
++            let mut result = TargetSet::new();
++            let nodes = buck2_util::future::try_join_all(
++                action_keys.iter().map(|key| delegate.get_action_node(&key)),
++            )
++            .await?;
++            result.extend(nodes);
++            Ok(result)
++        })
++        .await
++    }
+ }
+ 
+ pub(crate) fn init_new_bxl_aquery_functions() {
+diff --git a/tests/core/query/aquery/test_aquery.py b/tests/core/query/aquery/test_aquery.py
+index 4b5985ec08..fc11e3e61a 100644
+--- a/tests/core/query/aquery/test_aquery.py
++++ b/tests/core/query/aquery/test_aquery.py
+@@ -153,3 +153,16 @@ async def test_bxl_aquery_eval(buck: Buck) -> None:
+ @buck_test()
+ async def test_bxl_aquery_action_query_node(buck: Buck) -> None:
+     await buck.bxl("//:aquery.bxl:action_query_node")
++
++
++# Tests for bxl.Action support in aquery operations
++@buck_test()
++async def test_bxl_action_deps_0(buck: Buck) -> None:
++    """Test passing a bxl.Action to aquery.deps() with depth=0 returns itself"""
++    await buck.bxl("//:aquery.bxl:action_deps_0")
++
++
++@buck_test()
++async def test_bxl_action_deps(buck: Buck) -> None:
++    """Test that you can isolate the deps of one action by itself"""
++    await buck.bxl("//:aquery.bxl:action_deps")
+diff --git a/tests/core/query/aquery/test_aquery_data/aquery.bxl b/tests/core/query/aquery/test_aquery_data/aquery.bxl
+index 3ed9f4429c..c3f156c5b2 100644
+--- a/tests/core/query/aquery/test_aquery_data/aquery.bxl
++++ b/tests/core/query/aquery/test_aquery_data/aquery.bxl
+@@ -140,3 +140,38 @@ action_query_node = bxl_main(
+     impl = _impl_action_query_node,
+     cli_args = {},
+ )
++
++def _impl_action_deps_0(ctx):
++    """Test passing a bxl.Action to aquery.deps() returns itself"""
++    nodes = ctx.aquery().eval("//:test")
++
++    action = nodes[0].action()
++
++    # Pass the bxl.Action rather than a target to aquery.deps()
++    result = ctx.aquery().deps([action], depth = 0)
++    _assert_eq(action.outputs(), result[0].action().outputs())
++
++action_deps_0 = bxl_main(
++    impl = _impl_action_deps_0,
++    cli_args = {},
++)
++
++def _impl_action_deps(ctx):
++    """Test that you can isolate the deps of one action by itself"""
++    nodes = ctx.aquery().eval("//:test")
++
++    action = nodes[0].action()
++
++    # Pass the bxl.Action rather than a target to aquery.deps()
++    result = ctx.aquery().deps([action], depth = 1)
++
++    _assert_eq(len(result), 2)
++    # First should be itself
++    _assert_eq(action.outputs(), result[0].action().outputs())
++    dep = result[1]
++    _assert_eq(dep.action().outputs()[0].short_path, "dep")
++
++action_deps = bxl_main(
++    impl = _impl_action_deps,
++    cli_args = {},
++)
+diff --git a/tests/core/query/aquery/test_aquery_data/prelude.bzl b/tests/core/query/aquery/test_aquery_data/prelude.bzl
+index a2de5a4f4c..1086257f6d 100644
+--- a/tests/core/query/aquery/test_aquery_data/prelude.bzl
++++ b/tests/core/query/aquery/test_aquery_data/prelude.bzl
+@@ -8,6 +8,7 @@
+ def _test(ctx: AnalysisContext):
+     dep = ctx.actions.write("dep", "")
+     default = ctx.actions.copy_file("default", dep)
++    other_default = ctx.actions.copy_file("other_default", dep)
+     other = ctx.actions.write("other", "")
+ 
+     sub_default = ctx.actions.write("sub_default", "")
+@@ -17,7 +18,7 @@ def _test(ctx: AnalysisContext):
+     ctx.actions.write("unused", "")
+ 
+     return [DefaultInfo(
+-        default_outputs = [default],
++        default_outputs = [default, other_default],
+         other_outputs = [other],
+         sub_targets = {
+             "sub": [
+-- 
+2.52.0
+

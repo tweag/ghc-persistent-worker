@@ -1,0 +1,43 @@
+From faf320c3a1b4e8058a41955cccf9b5552c04899f Mon Sep 17 00:00:00 2001
+From: Claudio Bley <claudio.bley@tweag.io>
+Date: Sat, 7 Feb 2026 11:35:07 +0100
+Subject: [PATCH 19/22] Set tcp_keepalive to 180 seconds
+
+See https://www.buildbuddy.io/docs/troubleshooting-rbe/#warning-remote-cache-unavailable-io-exception
+---
+ remote_execution/oss/re_grpc/src/client.rs | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/remote_execution/oss/re_grpc/src/client.rs b/remote_execution/oss/re_grpc/src/client.rs
+index 8d535fca89..86d82afbe7 100644
+--- a/remote_execution/oss/re_grpc/src/client.rs
++++ b/remote_execution/oss/re_grpc/src/client.rs
+@@ -344,6 +344,7 @@ impl REClientBuilder {
+             // be set here instead of on the endpoint
+             let mut http = HttpConnector::new();
+             http.enforce_http(false);
++            http.set_keepalive(Some(Duration::from_secs(180)));
+             let connector = CountingConnector::new(http);
+ 
+             endpoint = endpoint.timeout(Duration::from_secs(opts.rpc_timeout));
+@@ -1621,14 +1622,13 @@ where
+     Cas: Future<Output = anyhow::Result<BatchReadBlobsResponse>>,
+ {
+     retry(
+-        || async {
+-            cas_f(read_blobs_request.clone()).await
+-        },
++        || async { cas_f(read_blobs_request.clone()).await },
+         opts.max_retries,
+         INITIAL_DELAY,
+         MAX_DELAY,
+         true,
+-    ).await
++    )
++    .await
+ }
+ 
+ async fn upload_impl<Byt, Cas>(
+-- 
+2.51.2
+

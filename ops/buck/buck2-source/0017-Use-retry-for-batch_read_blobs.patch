@@ -1,0 +1,51 @@
+From c007e42358973c39dedc6e9c8e163c5d8633418c Mon Sep 17 00:00:00 2001
+From: Claudio Bley <claudio.bley@tweag.io>
+Date: Thu, 5 Feb 2026 09:37:44 +0100
+Subject: [PATCH 17/22] Use `retry` for `batch_read_blobs`
+
+---
+ remote_execution/oss/re_grpc/src/client.rs | 28 +++++++---------------
+ 1 file changed, 9 insertions(+), 19 deletions(-)
+
+diff --git a/remote_execution/oss/re_grpc/src/client.rs b/remote_execution/oss/re_grpc/src/client.rs
+index a6d66b9ad8..96eddc557e 100644
+--- a/remote_execution/oss/re_grpc/src/client.rs
++++ b/remote_execution/oss/re_grpc/src/client.rs
+@@ -1620,25 +1620,15 @@ async fn batch_read_blobs<Cas>(
+ where
+     Cas: Future<Output = anyhow::Result<BatchReadBlobsResponse>>,
+ {
+-    for i in 1..=opts.max_retries + 1 {
+-        // TODO: Hopefully this isn't too expensive? Can we take a reference to the request
+-        // instead?
+-        match cas_f(read_blobs_request.clone()).await {
+-            Ok(resp) => {
+-                return Ok(resp);
+-            }
+-            Err(e) => {
+-                tracing::debug!(
+-                    "Failed to make BatchReadBlobs request, retrying after sleeping {} seconds: {:#?}",
+-                    i,
+-                    e
+-                );
+-                tokio::time::sleep(Duration::from_secs(i as u64)).await;
+-            }
+-        }
+-    }
+-
+-    cas_f(read_blobs_request).await
++    retry(
++        || async {
++            cas_f(read_blobs_request.clone()).await
++        },
++        opts.max_retries,
++        INITIAL_DELAY,
++        MAX_DELAY,
++        true,
++    ).await
+ }
+ 
+ async fn upload_impl<Byt, Cas>(
+-- 
+2.51.2
+

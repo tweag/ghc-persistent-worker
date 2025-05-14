@@ -1,0 +1,48 @@
+load("//haskell:custom.bzl", "haskell_lib", "haskell_bin")
+
+# Oneshot target that uses the legacy build plan mode in GHC with `-M`
+haskell_lib(
+    name = "hybrid1",
+    srcs = [
+        "Hybrid/M1.hs",
+    ],
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+        "//haskell:process",
+    ],
+    external_tools = [
+        "@toolchains//:th-exe",
+    ],
+    allow_worker = False,
+)
+
+# Oneshot target that uses the new build plan mode in the worker with the GHC proxy executable
+haskell_lib(
+    name = "hybrid2",
+    srcs = [
+        "M2.hs",
+    ],
+    deps = [
+        "//haskell:base",
+        ":hybrid1",
+    ],
+    allow_worker = False,
+    _ghc_proxy = "toolchains//:ghc_proxy",
+)
+
+# Worker target depending on both oneshot targets, loading units from cache
+haskell_lib(
+    name = "hybrid3",
+    srcs = [
+        "M3.hs",
+        "M4.hs",
+    ],
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+        ":hybrid1",
+        ":hybrid2",
+        "//haskell:dep1",
+    ],
+)

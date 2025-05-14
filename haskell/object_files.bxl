@@ -1,0 +1,18 @@
+"""
+Temporary bxl to avoid linking by building [shared][object] subtargets for a target pattern.
+"""
+
+def _shared_objects(ctx: bxl.Context):
+    universe = ctx.target_universe(ctx.cli_args.target_patterns).target_set()
+    analysis_res_dict = ctx.analysis(ctx.cquery().kind("haskell_library", universe))
+    for analysis_res in analysis_res_dict.values():
+        per_module = analysis_res.as_dependency()[DefaultInfo].sub_targets["shared"][DefaultInfo].sub_targets["objects"][DefaultInfo]
+        for single in per_module.sub_targets.values():
+            ctx.output.ensure_multiple(single[DefaultInfo].default_outputs)
+
+objects = bxl_main(
+    impl = _shared_objects,
+    cli_args = {
+        "target_patterns": cli_args.list(cli_args.string()),
+    },
+)

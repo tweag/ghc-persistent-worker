@@ -1,0 +1,34 @@
+From 96f8436f79356cb7fa3b0077c5ed8b4feef7b816 Mon Sep 17 00:00:00 2001
+From: Claudio Bley <claudio.bley@tweag.io>
+Date: Tue, 24 Feb 2026 10:33:48 +0100
+Subject: [PATCH 21/22] fixup
+
+---
+ remote_execution/oss/re_grpc/src/client.rs | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/remote_execution/oss/re_grpc/src/client.rs b/remote_execution/oss/re_grpc/src/client.rs
+index 3ce5fd1086..489a856ddd 100644
+--- a/remote_execution/oss/re_grpc/src/client.rs
++++ b/remote_execution/oss/re_grpc/src/client.rs
+@@ -1133,7 +1133,7 @@ impl REClient {
+                     || {
+                         let mut cas_client = cas_client.clone();
+                         let metadata = metadata.clone();
+-                        let digest_to_check = digest_to_check.clone();
++                        let digests_to_check = digests_to_check.clone();
+                         let instance_name = self.instance_name.as_str().to_owned();
+ 
+                         async move {
+@@ -1141,7 +1141,7 @@ impl REClient {
+                                 .find_missing_blobs(with_re_metadata(
+                                     FindMissingBlobsRequest {
+                                         instance_name,
+-                                        blob_digests: digest_to_check
++                                        blob_digests: digests_to_check
+                                             .map(|b| tdigest_to(b.clone())),
+                                         ..Default::default()
+                                     },
+-- 
+2.51.2
+
