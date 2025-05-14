@@ -6,30 +6,17 @@ GHC persistent worker currently works with Buck2.
 
 <img src="docs/config.png" width="400">
 
-The system consists of three components.
+Buck
+====
 
-* **ghc-persistent-worker-plugin**: GHC frontend plugin. With this plugin installed,
-  GHC runs as server that keeps receiving compilation requests. Input/Output interface
-  is through stdin/stdout pipe, i.e. gets CLI arguments and environment variables
-  through stdin, and then reports the compilation result back to stdout.
-  After serving one request, it will reinitialize its state, but it can also retain
-  sharable state between requests, such as loaded dynamic library and loaded byte code.
-  What is shared throughout the whole running process will be customizable.
-* **ghc-persistent-worker-server**: Orchestrator daemon that spawns multiple GHC processes
-  with ghc-persistent-server-plugin. The server manages a pool of GHCs and listen a Unix
-  socket for getting the requests from the client, and distribute the works to the pool.
-  Individual GHCs are connected with the server by stdin/stdout pipes.
-* **ghc-persistent-worker-client**: GHC Client. The CLI arguments of this client is identical
-  to ordinary GHC and it sends those arguments to the server.
+The flake provides a test environment for Buck with a locally Nix-built worker.
+Enter the shell `buck` to use it:
 
-
-To start:
 ```
-$ cabal install --lib ghc-persistent-worker-plugin
-$ cabal run ghc-persistent-worker-server -- --ghc ~/repo/srcc/ghcHEAD/_build/stage1/bin/ghc --socket-path /tmp/ghc_server.ipc -n 10
-$ GHC_PERSISTENT_WORKER_SOCKET=/tmp/ghc_server.ipc cabal run ghc-persistent-worker-client -- test/A.hs
+$ nix develop .#buck
+$ buck build //ops/buck-test/three-layers/project/...
+
 ```
-(optionally, one can set `--package-db (pkg_db_path)`. One can have multiple `--package-db`.)
 
 Cabal Flags
 ===========
@@ -62,3 +49,94 @@ For example, running `cabal build -ffixed-nodes` enables the fixed nodes feature
 
   This is a simple optimization that allows reusing old module graphs when recomputing a new graph, which we use to
   provide dependency graphs from our state.
+
+The flake provides the module option `buckCompilers` (at `ops/options.nix`) that allows you to select the set of
+compilers you would like to make available to Buck builds.
+The option definition lists the supported values, currently `["mwb-26-01" "ghc914"]`.
+If you want to add an entry, you will have to create new config values in `envs` and `package-sets` with your chosen
+name.
+You can copy an existing config and adapt it.
+
+In order to select a different compiler for a Buck build, you can specify a config option:
+
+```
+$ buck build --config=ghc-worker.env=ghc914 //ops/buck-test/restore/project/...
+```
+
+The tests in `ops/buck-test` can also be run as flake apps:
+
+```bash
+$ nix run .#buck-test-restore
+$ nix run .#buck-tests # All tests
+```
+
+Local GHC development
+=====================
+
+You can build the worker executable with a GHC built in a local checkout, as long as the GHC configured in `flake.nix`
+is binary compatible (i.e. you made some changes to the branch used here, and didn't change the interface format).
+
+Assuming the build directory is `/path/to/ghc/_build`, you can execute:
+
+```
+nix run .#rebuild-impure-worker /path/to/ghc/_build
+```
+
+The app will print the path of the executable, which can then be inserted into the `binary_path` attribute of the
+`impure_worker` target named `impure_ghc_worker` in `toolchains/BUCK`.
+In order to use it, the `persistent_worker` target must set the attribute `worker = ":impure_ghc_worker"`.
+
+This will cause subsequent Buck builds to use the new worker executable.
+
+HLS
+===
+
+When the GHC used to build HLS includes patches that influence CPP pragmas in the worker, you need to enable those in
+`cabal.project`.
+
+An HLS version patched for the MWB GHC can be run with `nix run .#hls`.
+
+Cachix
+======
+
+In order to avoid having to rebuild GHC when first using a new upstream change, you can add this Cachix instance to your
+Nix config:
+
+```nix
+  nix = {
+    settings.substituters = ["https://tek.cachix.org"];
+    settings.trusted-public-keys = ["tek.cachix.org-1:+sdc73WFq8aEKnrVv5j/kuhmnW2hQJuqdPJF5SnaCBk="];
+  };
+```
+
+It can be provided as CLI arguments as well:
+
+```
+$ nix --option extra-substituters https://tek.cachix.org --option extra-trusted-public-keys tek.cachix.org-1:+sdc73WFq8aEKnrVv5j/kuhmnW2hQJuqdPJF5SnaCBk= run .#buck-tests
+```
+
+Without Buck
+
+The package `ghc-server` provides two executables that allow testing the worker in server mode without a Buck build from
+the CLI.
+The executable `ghc-server` starts the worker's gRPC server, while `ghc-client` sends requests in a custom format:
+
+```
+$ nix run .#ghc-server -- path/to/project &
+$ nix run .#ghc-client -- path/to/project unit1:metadata unit1:modules
+$ nix run .#ghc-client -- path/to/project unit2 unit3:Module3
+```
+
+Units are configured with JSON files in their directory:
+
+```
+$ ls path/to/project/unit2
+Module2.hs unit.json
+$ cat path/to/project/unit2/unit.json
+{
+  "deps": ["unit1"],
+  "args": ["-package", "base"]
+}
+```
+
+You can run the flake app `.#test-server` to see an example build.
