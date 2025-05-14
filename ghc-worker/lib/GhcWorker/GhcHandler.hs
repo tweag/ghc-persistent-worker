@@ -55,6 +55,7 @@ compileAndReadAbiHash ::
   Ghc (Maybe CompileResult)
 compileAndReadAbiHash ghcMode compile hooks args target = do
   liftIO $ hooks.compileStart args (Just target)
+  -- TODO set this in compileModuleWithDepsInHpt
   modifySession $ hscUpdateFlags \ d -> d {ghcMode}
   compile target >>= traverse \ artifacts -> do
     hsc_env <- getSession

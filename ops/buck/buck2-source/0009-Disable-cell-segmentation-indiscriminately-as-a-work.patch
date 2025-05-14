@@ -1,0 +1,54 @@
+From deb545e7d8d9265980438d781d3fb4efded9f891 Mon Sep 17 00:00:00 2001
+From: Ian-Woo Kim <ianwookim@gmail.com>
+Date: Fri, 21 Nov 2025 15:05:42 -0800
+Subject: [PATCH 09/22] Disable cell segmentation indiscriminately as a
+ workaround.
+
+Change-Id: Ibf084a8cc674875291d84c6798c82a5edf61e219
+---
+ app/buck2_core/src/bzl.rs | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/app/buck2_core/src/bzl.rs b/app/buck2_core/src/bzl.rs
+index b0848292f8..2ca5d8e365 100644
+--- a/app/buck2_core/src/bzl.rs
++++ b/app/buck2_core/src/bzl.rs
+@@ -53,7 +53,7 @@ impl ImportPath {
+ 
+     pub fn new_with_build_file_cells(
+         path: CellPath,
+-        build_file_cell: BuildFileCell,
++        mut build_file_cell: BuildFileCell,
+     ) -> buck2_error::Result<Self> {
+         if path.parent().is_none() {
+             return Err(ImportPathError::Invalid(path).into());
+@@ -67,6 +67,8 @@ impl ImportPath {
+             return Err(ImportPathError::Suffix(path).into());
+         }
+ 
++        build_file_cell = BuildFileCell::new(path.cell());
++
+         Ok(Self {
+             path,
+             build_file_cell,
+@@ -76,7 +78,7 @@ impl ImportPath {
+     /// LSP creates imports for non-bzl files.
+     pub fn new_hack_for_lsp(
+         path: CellPath,
+-        build_file_cell: BuildFileCell,
++        mut build_file_cell: BuildFileCell,
+     ) -> buck2_error::Result<Self> {
+         if path.parent().is_none() {
+             return Err(ImportPathError::Invalid(path).into());
+@@ -86,6 +88,8 @@ impl ImportPath {
+             return Err(ImportPathError::Invalid(path).into());
+         }
+ 
++        build_file_cell = BuildFileCell::new(path.cell());
++
+         Ok(Self {
+             path,
+             build_file_cell,
+-- 
+2.51.2
+

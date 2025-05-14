@@ -76,7 +76,10 @@ library
     ghc-debug-stub,
     grapesy ^>=1.0.1,
     process,
-    text
+    stm,
+    temporary,
+    text,
+    unix
 
   if (flag(debug))
       cpp-options: -D__DEBUG__
