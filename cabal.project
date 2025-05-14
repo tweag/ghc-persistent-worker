@@ -10,7 +10,7 @@ packages: ./buck-proxy
 tests: true
 
 -- For MWB-customized GHC, turn this on.
--- flags: +mwb
+flags: +mwb
 
 package ghc-worker
   executable-dynamic: true

@@ -1,0 +1,32 @@
+From 7f918365a810d0d6c9d8f58041f66e1606fb6434 Mon Sep 17 00:00:00 2001
+From: Ian-Woo Kim <ianwookim@gmail.com>
+Date: Wed, 5 Feb 2025 15:18:08 -0800
+Subject: [PATCH 07/22] disable dep file check for now!
+
+---
+ app/buck2_action_impl/src/actions/impls/run/dep_files.rs | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/app/buck2_action_impl/src/actions/impls/run/dep_files.rs b/app/buck2_action_impl/src/actions/impls/run/dep_files.rs
+index 0a2e3ce356..8bdb3ecf7a 100644
+--- a/app/buck2_action_impl/src/actions/impls/run/dep_files.rs
++++ b/app/buck2_action_impl/src/actions/impls/run/dep_files.rs
+@@ -841,13 +841,14 @@ fn check_action(
+     declared_outputs: &[BuildArtifact],
+     declared_dep_files: &DeclaredDepFiles,
+ ) -> InitialDepFileLookupResult {
++    /*
+     if !declared_dep_files.declares_same_dep_files(previous_state.declared_dep_files()) {
+         // We first need to check if the same dep files existed before or not. If not, then we
+         // can't assume they'll still be on disk, and we have to bail.
+         tracing::trace!("Dep files miss: Dep files declaration has changed");
+         DEP_FILES.remove(key);
+         return InitialDepFileLookupResult::Miss;
+-    }
++    }*/
+ 
+     if !outputs_are_reusable(declared_outputs, &previous_state.result) {
+         tracing::trace!("Dep files miss: Output declaration has changed");
+-- 
+2.51.2
+
