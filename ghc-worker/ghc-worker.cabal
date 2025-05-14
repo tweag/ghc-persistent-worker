@@ -74,7 +74,10 @@ library
     optparse-applicative,
     os-string,
     process,
-    text
+    stm,
+    temporary,
+    text,
+    unix
   if (flag(ghc-debug))
     build-depends:
        ghc-debug-stub
