@@ -1,0 +1,112 @@
+load("@buck2-haskell//:persistent_worker.bzl", "persistent_worker")
+load("@buck2-haskell//:ghc_proxy.bzl", "ghc_proxy")
+load("@toolchains//nix:default_toolchains.bzl", "default_flake_attrs", "default_nix_toolchains", "exec_compatible_with")
+load("@toolchains//nix:nix_build.bzl", "nix_build")
+load("@toolchains//nix:nix_haskell_toolchain.bzl", "nix_haskell_toolchain")
+load("@toolchains//nix:nix_native_lib.bzl", "nix_native_lib")
+
+load(":impure_worker.bzl", "impure_worker")
+
+# Define cxx, rust, bash, and python toolchains
+default_nix_toolchains()
+
+default_flake_attrs()
+
+################################################################################
+
+nix_build(
+    name = "ghc",
+    binaries = [
+        "ghc-pkg",
+        "haddock",
+    ],
+    binary = "ghc",
+    flake = "root//:nix_overlays",
+)
+
+nix_build(
+    name = "ghc_worker",
+    binary = "ghc-worker",
+    attr = "ghc-worker-buck",
+    flake = "root//:nix_overlays",
+)
+
+nix_build(
+    name = "buck_proxy",
+    binary = "buck-proxy",
+    attr = "buck-proxy-buck",
+    flake = "root//:nix_overlays",
+)
+
+nix_build(
+    name = "ghc_proxy_bin",
+    binary = "ghc-proxy",
+    attr = "ghc-proxy-buck",
+    flake = "@root//:nix_overlays",
+)
+
+nix_haskell_toolchain(
+    name = "haskell",
+    compiler_flags = [
+        "-fwrite-ide-info",
+    ],
+    exec_compatible_with = exec_compatible_with,
+    flake = "root//:nix_overlays",
+    visibility = ["PUBLIC"],
+#     worker = ":impure_ghc_worker",
+#     worker_proxy = ":impure_buck_proxy",
+)
+
+persistent_worker(
+    name = "persistent_worker",
+    visibility = ["PUBLIC"],
+    worker = ":ghc_worker",
+    worker_proxy = ":buck_proxy",
+    # worker = ":impure_ghc_worker",
+    # worker_proxy = ":impure_buck_proxy",
+    # worker_args = ["--instrument"],
+    proxy_args = [],
+)
+
+ghc_proxy(
+    name = "ghc_proxy",
+    visibility = ["PUBLIC"],
+    exe = ":ghc_proxy_bin",
+)
+
+impure_worker(
+   name = "impure_buck_proxy",
+   binary_path = "/data/mercury/code/haskell/persistent-worker/dist-newstyle/build/x86_64-linux/ghc-9.10.1/buck-proxy-0.1/x/buck-proxy/build/buck-proxy/buck-proxy",
+)
+
+impure_worker(
+   name = "impure_ghc_worker",
+   binary_path = "/data/mercury/code/haskell/persistent-worker/dist-newstyle/build/x86_64-linux/ghc-9.10.1/ghc-worker-0.1/x/ghc-worker/build/ghc-worker/ghc-worker",
+)
+
+nix_build(
+    name = "th-exe",
+    binary = "th-exe",
+    flake = "@root//:nix_overlays",
+    visibility = ["PUBLIC"],
+)
+
+# NB: This does not exist on macOS. It's not _needed_ on macOS, where the base
+# libc includes `uuid_generate_time`.
+#
+# See: https://developer.apple.com/documentation/kernel/1470625-uuid_generate_time
+# See: https://linear.app/mercury/issue/RID-1220/enable-uuidv1-generation-in-haskell
+nix_build(
+    name = "libuuid_nix",
+    attr = "libuuid",
+    flake = "@root//:nix_overlays",
+    suffix = "lib",
+    visibility = ["PUBLIC"],
+)
+
+nix_native_lib(
+    name = "libuuid",
+    input = ":libuuid_nix",
+    lib_name = "uuid",
+    visibility = ["PUBLIC"],
+)

@@ -1,0 +1,22 @@
+load("//haskell:custom.bzl", "haskell_lib")
+
+# A library with TH that imports from a toolchain dep.
+# The toolchain dep in the cache caused a crash due to a bug in the build plan logic.
+haskell_lib(
+    name = "restore-th-ext-lib",
+    srcs = ["Lib.hs"],
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+        "//haskell:dep1",
+    ],
+)
+
+haskell_lib(
+    name = "restore-th-ext-use",
+    srcs = ["Use.hs"],
+    deps = [
+        "//haskell:base",
+        ":restore-th-ext-lib",
+    ],
+)
