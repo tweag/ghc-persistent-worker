@@ -1,0 +1,9 @@
+load("//haskell:custom.bzl", "haskell_lib")
+
+haskell_lib(
+    name = "haddock",
+    srcs = glob(["*.hs"]),
+    deps = [
+        "//haskell:base",
+    ],
+)

@@ -1,0 +1,38 @@
+From b5ae580a84f3893e9b5727cca4750fe24cc5d587 Mon Sep 17 00:00:00 2001
+From: Brian Vincent <brianvincent@roblox.com>
+Date: Sun, 22 Feb 2026 12:18:43 -0800
+Subject: [PATCH 22/22] Fix find_missing_cache LRU size from ~52M entries to
+ 500K (#1247)
+
+Summary:
+LruCache::new() takes an entry count, not a byte size. The previous value of 50 << 20 (52,428,800) created a cache capable of holding ~52 million entries, not 50MB as the comment claimed. Each entry is roughly 150-200 bytes (TDigest with a heap-allocated SHA256 hash string + LRU node overhead), so the cache was effectively unbounded at ~8-10GB.
+
+Reduce to 500,000 entries which is more than sufficient for even very large builds and uses ~100MB in the worst case.
+
+Pull Request resolved: https://github.com/facebook/buck2/pull/1247
+
+Reviewed By: scottcao
+
+Differential Revision: D93754738
+
+fbshipit-source-id: 5262457af2fc655de1609797bc6b85b6f023e2b5
+---
+ remote_execution/oss/re_grpc/src/client.rs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/remote_execution/oss/re_grpc/src/client.rs b/remote_execution/oss/re_grpc/src/client.rs
+index 489a856ddd..02cd9a0520 100644
+--- a/remote_execution/oss/re_grpc/src/client.rs
++++ b/remote_execution/oss/re_grpc/src/client.rs
+@@ -684,7 +684,7 @@ impl REClient {
+             capabilities,
+             instance_name,
+             find_missing_cache: Mutex::new(FindMissingCache {
+-                cache: LruCache::new(NonZeroUsize::new(50 << 20).unwrap()), // 50Mb
++                cache: LruCache::new(NonZeroUsize::new(500_000).unwrap()),
+                 ttl: Duration::from_hours(12), // 12 hours TODO: Tune this parameter
+                 last_check: Instant::now(),
+             }),
+-- 
+2.51.2
+

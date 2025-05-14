@@ -1,0 +1,16 @@
+load("//haskell:custom.bzl", "haskell_lib")
+
+haskell_lib(
+    name = "reexport",
+    srcs = [
+        "M1.hs",
+        "M2.hs",
+        "M3.hs",
+    ],
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+        "//haskell:require-callstack",
+    ],
+)
+

@@ -1,0 +1,58 @@
+name: Buck Tests
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+env:
+  hix_test_verbose: 1
+
+jobs:
+
+  test-names:
+    name: Run tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      tests: ${{ steps.ci-matrix.outputs.tests }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+      - uses: cachix/cachix-action@v16
+        with:
+          name: ghc-server
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+      - id: ci-matrix
+        name: Output CI matrix
+        run: |
+          echo -n "tests=" >> "$GITHUB_OUTPUT"
+          nix --show-trace eval --json .#ci-matrix >> "$GITHUB_OUTPUT"
+
+  tests:
+    name: 🛠️ ${{ matrix.test }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    needs: test-names
+    strategy:
+      matrix:
+        test: ${{ fromJSON(needs.test-names.outputs.tests) }}
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+      - uses: cachix/cachix-action@v16
+        with:
+          name: ghc-server
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+      - name: Free up space
+        run: rm -rf /opt/hostedtoolcache
+      - name: Run test '${{ matrix.test }}'
+        run: nix --show-trace run .#${{ matrix.test }}

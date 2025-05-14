@@ -1,0 +1,53 @@
+diff --git a/app/buck2_test/src/orchestrator.rs b/app/buck2_test/src/orchestrator.rs
+index 9fbcc87165..1c39c99ef7 100644
+--- a/app/buck2_test/src/orchestrator.rs
++++ b/app/buck2_test/src/orchestrator.rs
+@@ -536,14 +536,14 @@ struct TestExecutionKey {
+ #[derive(Clone, Dupe, Debug, Eq, Hash, PartialEq, Allocative)]
+ enum TestExecutionPrefix {
+     Listing,
+-    Testing(Arc<ForwardRelativePathBuf>),
++    Testing,
+ }
+ 
+ impl TestExecutionPrefix {
+-    fn new(stage: &TestStage, session: &TestSession) -> Self {
++    fn new(stage: &TestStage, _session: &TestSession) -> Self {
+         match stage {
+             TestStage::Listing { .. } => TestExecutionPrefix::Listing,
+-            TestStage::Testing { .. } => TestExecutionPrefix::Testing(session.prefix().dupe()),
++            TestStage::Testing { .. } => TestExecutionPrefix::Testing,
+         }
+     }
+ }
+@@ -552,7 +552,7 @@ impl Display for TestExecutionPrefix {
+     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+         match self {
+             TestExecutionPrefix::Listing => write!(f, "Listing"),
+-            TestExecutionPrefix::Testing(prefix) => write!(f, "Testing({})", prefix),
++            TestExecutionPrefix::Testing => write!(f, "Testing"),
+         }
+     }
+ }
+@@ -618,7 +618,7 @@ async fn prepare_and_execute(
+                 false
+             }
+         }
+-        TestStage::Testing { .. } => false,
++        TestStage::Testing { .. } => true,
+     };
+     if execute_on_dice {
+         let result = tokio::select! {
+@@ -1949,9 +1949,9 @@ async fn resolve_output_root(
+                 .resolve_test_discovery(test_target)?
+                 .into_forward_relative_path_buf()
+         }
+-        TestExecutionPrefix::Testing(prefix) => prefix.join(ForwardRelativePathBuf::unchecked_new(
+-            Uuid::new_v4().to_string(),
+-        )),
++        TestExecutionPrefix::Testing => {
++            ForwardRelativePathBuf::unchecked_new(Uuid::new_v4().to_string())
++        }
+     };
+     Ok(output_root)
+ }
