@@ -1,0 +1,47 @@
+load("//haskell:custom.bzl", "haskell_lib", "haskell_bin")
+
+haskell_lib(
+    name = "restore-l1",
+    srcs = glob(["lib1/L1_*.hs"]),
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+    ],
+    strip_prefix = ["lib1"],
+)
+
+# This library is between `l1` and `l2` to ensure that the dependency graph isn't lexically sorted.
+# Otherwise, we wouldn't notice that the dependencies need to be ordered before loading them.
+haskell_lib(
+    name = "restore-l4",
+    srcs = glob(["L4_*.hs"]),
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+        ":restore-l1",
+    ],
+    module_prefix = "L4.Prefix",
+)
+
+haskell_lib(
+    name = "restore-l2",
+    srcs = glob(["L2_*.hs"]),
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+        ":restore-l1",
+        ":restore-l4",
+        "//haskell:dep2",
+    ],
+)
+
+haskell_lib(
+    name = "restore-l3",
+    srcs = glob(["L3_*.hs"]),
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+        ":restore-l2",
+        "//haskell:dep1",
+    ],
+)

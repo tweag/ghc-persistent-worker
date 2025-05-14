@@ -1,0 +1,26 @@
+load("//haskell:custom.bzl", "haskell_lib", "haskell_bin")
+
+haskell_lib(
+    name = "restore-unchanged-l1",
+    srcs = [
+        "L1.hs",
+    ],
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+    ],
+)
+
+haskell_lib(
+    name = "restore-unchanged-l2",
+    srcs = [
+        "L2.hs",
+    ],
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+        ":restore-unchanged-l1",
+        "//haskell:dep1",
+    ],
+)
+

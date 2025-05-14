@@ -1,0 +1,25 @@
+From bccea62daecf63254c793c6411a418d9e525fedb Mon Sep 17 00:00:00 2001
+From: Claudio Bley <claudio.bley@tweag.io>
+Date: Fri, 30 Jan 2026 16:23:44 +0100
+Subject: [PATCH 06/22] Allow all tests on RE
+
+---
+ app/buck2_client/src/commands/test.rs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/app/buck2_client/src/commands/test.rs b/app/buck2_client/src/commands/test.rs
+index aab67baa63..a52ba9f6f1 100644
+--- a/app/buck2_client/src/commands/test.rs
++++ b/app/buck2_client/src/commands/test.rs
+@@ -122,7 +122,7 @@ If include patterns are present, regardless of whether exclude patterns are pres
+ 
+     /// Will run tests to on RE even if they are missing required settings (running from the root +
+     /// relative paths). Those required settings just get overridden.
+-    #[clap(long, group = "re_options", alias = "unstable-force-tests-on-re")]
++    #[clap(long, group = "re_options", alias = "unstable-force-tests-on-re", default_value_t = true)]
+     unstable_allow_all_tests_on_re: bool,
+ 
+     #[clap(name = "TARGET_PATTERNS", help = "Patterns to test", value_hint = clap::ValueHint::Other)]
+-- 
+2.51.2
+

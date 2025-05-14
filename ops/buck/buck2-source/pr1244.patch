@@ -1,0 +1,197 @@
+From b18891c7600ce353c9dff4522b2a67e0f16f8b7b Mon Sep 17 00:00:00 2001
+From: Jade Lovelace <jadel@mercury.com>
+Date: Wed, 18 Feb 2026 12:02:26 -0800
+Subject: [PATCH] fix: warn when --include/--exclude are used suspiciously
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This is a workaround to not break users, but still make the UX okay. I
+suspect that inside fb, there are lots of people that do:
+buck test //... --include myproject myotherproject
+
+I chose not to error out on this case, since I suspect scripts might do
+`["buck", "test", *targets, "--include", *labels]`, which is valid for
+no targets and shouldn't be an edge case.
+
+Fixes: https://github.com/facebook/buck2/issues/1243
+
+Test plan with reproducer in //foobar:
+```
+$ target/debug/buck2 test --exclude meow //foobar/...
+No target patterns specified, but --include/--exclude flags are set.
+This is likely a mistake: put targets first, then --include/--exclude, since include/exclude consume all remaining args
+hint: The following requested labels look like target patterns: '//foobar/...'
+hint: Try putting them before --include/--exclude.
+hint: For example: buck2 test //foo --include mylabel
+
+Build ID: 925dd280-7479-4ddb-82d8-2f0773b40412
+Command: test.
+Time elapsed: 0.0s
+Tests finished: Pass 0. Fail 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 0
+NO TESTS RAN
+
+$ target/debug/buck2 test //foobar/... --exclude meow
+✓ Pass: gh_facebook_buck2//foobar:test_without_label (0.0s)
+---- STDOUT ----
+
+---- STDERR ----
+
+✓ Pass: gh_facebook_buck2//foobar:test_with_label (0.0s)
+---- STDOUT ----
+
+---- STDERR ----
+
+Build ID: a979dac1-d6b0-4cab-ae66-98020371b729
+Loading targets.   Remaining     0/9                                                                        80 targets declared
+Analyzing targets. Remaining     0/16                                                                       1 actions, 1 artifacts declared
+Command: test.
+Time elapsed: 0.3s
+Tests finished: Pass 2. Fail 0. Fatal 0. Skip 0. Omit 0. Infra Failure 0. Build failure 0
+```
+---
+ app/buck2_client/src/commands/test.rs | 113 ++++++++++++++++++++++++++
+ 1 file changed, 113 insertions(+)
+
+diff --git a/app/buck2_client/src/commands/test.rs b/app/buck2_client/src/commands/test.rs
+index e25929e95ee8..62afdc85cdfb 100644
+--- a/app/buck2_client/src/commands/test.rs
++++ b/app/buck2_client/src/commands/test.rs
+@@ -8,6 +8,8 @@
+  * above-listed licenses.
+  */
+ 
++use std::fmt::Write;
++
+ use async_trait::async_trait;
+ use buck2_cli_proto::CounterWithExamples;
+ use buck2_cli_proto::TestRequest;
+@@ -77,6 +79,29 @@ fn print_error_counter(
+     }
+     Ok(())
+ }
++
++/// Check if we should warn about potentially misplaced --include/--exclude flags.
++/// Returns Some(suspicious_labels) if warning should be shown, where suspicious_labels
++/// are label values that look like they might be target patterns (contain '/' or ':').
++fn should_warn_about_flag_position(
++    patterns: &[String],
++    include: &[String],
++    exclude: &[String],
++) -> Option<Vec<String>> {
++    if patterns.is_empty() && (!include.is_empty() || !exclude.is_empty()) {
++        let suspicious_labels: Vec<String> = include
++            .iter()
++            .chain(exclude.iter())
++            .filter(|label| label.contains('/') || label.contains(':'))
++            .cloned()
++            .collect();
++
++        Some(suspicious_labels)
++    } else {
++        None
++    }
++}
++
+ #[derive(Debug, clap::Parser)]
+ #[clap(name = "test", about = "Build and test the specified targets")]
+ pub struct TestCommand {
+@@ -208,6 +233,42 @@ impl StreamingCommand for TestCommand {
+         ctx: &mut ClientCommandContext<'_>,
+         events_ctx: &mut EventsCtx,
+     ) -> ExitResult {
++        // Warn if no target patterns but label filters are set
++        // This usually means the patterns were accidentally consumed as label values
++        // NOTE: maybe these should accept just one arg, but that probably breaks users who
++        // are doing buck test //... --include myproject myproject2
++        if let Some(suspicious_labels) =
++            should_warn_about_flag_position(&self.patterns, &self.include, &self.exclude)
++        {
++            let console = self.common_opts.console_opts.final_console();
++
++            let mut message = String::new();
++            writeln!(
++                &mut message,
++                "No target patterns specified, but --include/--exclude flags are set."
++            )
++            .unwrap();
++            writeln!(
++                &mut message,
++                "This is likely a mistake: put targets first, then --include/--exclude, since include/exclude consume all remaining args"
++            ).unwrap();
++            if !suspicious_labels.is_empty() {
++                writeln!(
++                    &mut message,
++                    "hint: The following requested labels look like target patterns: {sus}\n\
++                    hint: Try putting them before --include/--exclude.\n\
++                    hint: For example: buck2 test //foo --include mylabel",
++                    sus = suspicious_labels
++                        .iter()
++                        .map(|s| format!("'{}'", s))
++                        .collect::<Vec<_>>()
++                        .join(", ")
++                )
++                .unwrap();
++            }
++            console.print_warning(&message)?;
++        }
++
+         let context = ctx.client_context(matches, &self)?;
+         let response = buckd
+             .with_flushing()
+@@ -391,3 +452,55 @@ impl StreamingCommand for TestCommand {
+         &self.common_opts.starlark_opts
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn test_warn_when_no_patterns_with_include() {
++        let result = should_warn_about_flag_position(&[], &["some_label".to_owned()], &[])
++            .expect("should warn");
++        assert!(result.is_empty());
++    }
++
++    #[test]
++    fn test_warn_when_no_patterns_with_exclude() {
++        let result = should_warn_about_flag_position(&[], &[], &["some_label".to_owned()])
++            .expect("should warn");
++        assert!(result.is_empty());
++    }
++
++    #[test]
++    fn test_warn_detects_suspicious_target_pattern_with_slashes() {
++        let result = should_warn_about_flag_position(
++            &[],
++            &["some_label".to_owned(), "//foobar/...".to_owned()],
++            &["//foobar2/...".to_owned(), "//foobar2:".to_owned()],
++        )
++        .expect("should warn");
++
++        assert_eq!(result, vec!["//foobar/...", "//foobar2/...", "//foobar2:"]);
++    }
++
++    #[test]
++    fn test_no_warn_when_patterns_present() {
++        let result = should_warn_about_flag_position(
++            &["//target/...".to_owned()],
++            &["some_label".to_owned()],
++            &["some_other_label".to_owned()],
++        );
++
++        assert!(
++            result.is_none(),
++            "Should not warn when patterns are present"
++        );
++    }
++
++    #[test]
++    fn test_no_warn_when_nothing_specified() {
++        let result = should_warn_about_flag_position(&[], &[], &[]);
++
++        assert!(result.is_none(), "Should not warn when nothing specified");
++    }
++}

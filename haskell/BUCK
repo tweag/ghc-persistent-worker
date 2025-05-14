@@ -1,5 +1,6 @@
 load("@buck2-haskell//:defs.bzl", "haskell_toolchain_library")
 load("@toolchains//:haskell_all.bzl", "haskell_toolchain_all")
+load("@toolchains//:libs.bzl", "toolchain_libraries")
 
 [haskell_toolchain_library(
     name = lib,
@@ -35,3 +36,10 @@ load("@toolchains//:haskell_all.bzl", "haskell_toolchain_all")
     "unix",
     "vector",
 ]]
+
+python_bootstrap_binary(
+    name = "generate_toolchain_libs",
+    main = "generate_toolchain_libs.py",
+)
+
+# [haskell_toolchain_library(name = lib, visibility = ["//..."]) for lib in toolchain_libraries]

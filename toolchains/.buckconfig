@@ -1,0 +1,3 @@
+[ghc-worker]
+# Enable/disable the persistent worker. Pass `-m worker` to buck2 as well (e.g. `buck2 build -m worker //:mwb`)
+enable = true
