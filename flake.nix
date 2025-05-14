@@ -58,9 +58,11 @@
 
   })
 
+  (import ./ops/options.nix)
   (import ./ops/packages.nix)
   (import ./ops/tools.nix)
   (import ./ops/package-sets.nix inputs)
+  (import ./ops/buck/default.nix inputs)
 
   ];
 
