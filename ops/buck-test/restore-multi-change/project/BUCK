@@ -1,0 +1,38 @@
+load("//haskell:custom.bzl", "haskell_lib", "haskell_bin")
+
+haskell_lib(
+    name = "restore-multi-change-l1",
+    srcs = glob(["L1*.hs"]),
+    deps = [
+        "//haskell:base",
+    ],
+)
+
+haskell_lib(
+    name = "restore-multi-change-l2",
+    srcs = glob(["L2*.hs"]),
+    deps = [
+        "//haskell:base",
+        ":restore-multi-change-l1",
+    ],
+)
+
+haskell_lib(
+    name = "restore-multi-change-l3",
+    srcs = glob(["L3*.hs"]),
+    deps = [
+        "//haskell:base",
+        ":restore-multi-change-l1",
+    ],
+)
+
+haskell_lib(
+    name = "restore-multi-change-l4",
+    srcs = glob(["L4*.hs"]),
+    deps = [
+        "//haskell:base",
+        ":restore-multi-change-l1",
+        ":restore-multi-change-l2",
+        ":restore-multi-change-l3",
+    ],
+)

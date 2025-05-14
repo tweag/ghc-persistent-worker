@@ -1,0 +1,90 @@
+From 958658bcd2ebb51a5caf8c1c344c9026f83701dc Mon Sep 17 00:00:00 2001
+From: Jade Lovelace <jadel@mercury.com>
+Date: Mon, 9 Feb 2026 17:01:37 -0800
+Subject: [PATCH] bxl: get output artifacts for an Action
+
+- Rename action to bxl.Action so it is findable in docs (I don't know if
+  that was what was preventing docs generation, but it's worth a try!)
+- Add a method to get the output artifacts for an action in bxl. This
+  allows selectively rebuilding the action by ensuring those outputs.
+
+I added a test, but I have no way to run those besides
+www.metacareers.com: https://github.com/facebook/buck2/issues/1027
+
+This is part of making action graph debugging slightly easier, which I
+want to prototype by writing some rather nasty BXLs:
+https://github.com/facebook/buck2/issues/1217
+
+Unfortunately I *think* there's no way to get the dependencies after the
+fact, since I *just* have a RegisteredAction. I believe that I can
+probably do something very bad with owner() then rerunning the analysis
+to get deps though.
+---
+ .../src/bxl/starlark_defs/nodes/action.rs       | 17 +++++++++++++++--
+ tests/core/bxl/test_audit_data/audit.bxl        |  1 +
+ 2 files changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/app/buck2_bxl/src/bxl/starlark_defs/nodes/action.rs b/app/buck2_bxl/src/bxl/starlark_defs/nodes/action.rs
+index d97bce6d4db5d..48917dd6960e5 100644
+--- a/app/buck2_bxl/src/bxl/starlark_defs/nodes/action.rs
++++ b/app/buck2_bxl/src/bxl/starlark_defs/nodes/action.rs
+@@ -12,9 +12,11 @@ use std::convert::Infallible;
+ use std::sync::Arc;
+ 
+ use allocative::Allocative;
++use buck2_artifact::artifact::artifact_type::Artifact;
+ use buck2_build_api::actions::RegisteredAction;
+ use buck2_build_api::actions::query::ActionQueryNode;
+ use buck2_build_api::actions::query::OwnedActionAttr;
++use buck2_build_api::interpreter::rule_defs::artifact::starlark_artifact::StarlarkArtifact;
+ use buck2_core::deferred::base_deferred_key::BaseDeferredKey;
+ use buck2_error::buck2_error;
+ use buck2_interpreter::types::target_label::StarlarkConfiguredTargetLabel;
+@@ -49,7 +51,7 @@ pub(crate) struct StarlarkAction(pub(crate) Arc<RegisteredAction>);
+ 
+ starlark_simple_value!(StarlarkAction);
+ 
+-#[starlark_value(type = "action")]
++#[starlark_value(type = "bxl.Action")]
+ impl<'v> StarlarkValue<'v> for StarlarkAction {
+     fn get_methods() -> Option<&'static Methods> {
+         static RES: MethodsStatic = MethodsStatic::new();
+@@ -67,7 +69,7 @@ impl<'a> UnpackValue<'a> for StarlarkAction {
+     }
+ }
+ 
+-/// Methods for an action.
++/// Methods for an action obtained from [`bxl.AuditContext.output()`](../AuditContext#output).
+ #[starlark_module]
+ fn action_methods(builder: &mut MethodsBuilder) {
+     /// Gets the owning configured target label for an action.
+@@ -90,6 +92,17 @@ fn action_methods(builder: &mut MethodsBuilder) {
+             .into()),
+         }
+     }
++
++    /// Gets the artifacts built by this action.
++    fn outputs<'v>(this: StarlarkAction) -> starlark::Result<Vec<StarlarkArtifact>> {
++        Ok(this
++            .0
++            .action()
++            .outputs()
++            .iter()
++            .map(|a| StarlarkArtifact::new(Artifact::from(a.clone())))
++            .collect())
++    }
+ }
+ 
+ #[derive(Debug, Display, ProvidesStaticType, Allocative)]
+diff --git a/tests/core/bxl/test_audit_data/audit.bxl b/tests/core/bxl/test_audit_data/audit.bxl
+index c9d15ec7e363e..0c182625fffb3 100644
+--- a/tests/core/bxl/test_audit_data/audit.bxl
++++ b/tests/core/bxl/test_audit_data/audit.bxl
+@@ -15,6 +15,7 @@ def _audit_output_action_exists_impl(ctx):
+     action = ctx.audit().output(buck_out)
+ 
+     asserts.equals(action.owner(), target.label)
++    asserts.equals(actions.outputs()[0].basename, "with_output.txt")
+ 
+ audit_output_action_exists = bxl_main(
+     impl = _audit_output_action_exists_impl,
