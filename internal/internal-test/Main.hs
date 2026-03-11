@@ -1,7 +1,7 @@
 {-# LANGUAGE CPP #-}
 
 module Main where
- 
+
 import BuildPlanTest (test_buildPlan)
 import CompileHptTest (test_compileHpt)
 import ProjectBuildTest (test_projectBuild)
@@ -18,6 +18,7 @@ import Test.Tasty (
   includingOptions,
   testGroup,
   )
+import UnitIndexTest (test_unitIndex)
 
 -- | Some tests require our GHC patches.
 fullTest :: Bool
@@ -36,7 +37,8 @@ testsGeneral :: [TestTree]
 testsGeneral =
   [
     test_sortScheduleOrder,
-    test_projectBuild
+    test_projectBuild,
+    test_unitIndex
   ]
   <>
   if fullTest then [
