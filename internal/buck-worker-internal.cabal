@@ -128,7 +128,10 @@ test-suite internal-test
   main-is: Main.hs
   hs-source-dirs: internal-test
   other-modules:
-    BuildPlanTest
+    BuildPlanTest,
+    Test.PackageDb,
+    Test.Run,
+    Test.Target
   ghc-options: -threaded -rtsopts "-with-rtsopts=-N -T"
   build-depends:
     aeson,
@@ -143,6 +146,7 @@ test-suite internal-test
     extra,
     generic-lens,
     ghc,
+    ghc-paths,
     hedgehog ^>= 1.7,
     lens,
     mtl,
