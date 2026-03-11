@@ -11,7 +11,7 @@ import GHC.Paths (ghc_pkg)
 import GHC.Unit (UnitId, stringToUnitId, unitIdString)
 import Internal.State (newStateWith)
 import Prelude hiding (log)
-import System.Directory (createDirectoryIfMissing, withCurrentDirectory)
+import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((<.>), (</>))
 import System.IO.Temp (withSystemTempDirectory)
 import System.Process.Typed (proc, runProcess_)
@@ -43,6 +43,13 @@ data ModuleSpec =
   }
   deriving stock (Eq, Show)
 
+data Reexport =
+  Reexport {
+    unit :: String,
+    moduleName :: String
+  }
+  deriving stock (Eq, Show)
+
 -- | Config for a single test home unit.
 data UnitSpec =
   UnitSpec {
@@ -53,7 +60,11 @@ data UnitSpec =
     deps :: [String],
 
     -- | The modules belonging to this unit.
-    modules :: NonEmpty ModuleSpec
+    modules :: NonEmpty ModuleSpec,
+
+    reexports :: [Reexport],
+
+    extraDbConf :: [String]
   }
   deriving stock (Eq, Show)
 
@@ -149,19 +160,28 @@ baseArgs tmp =
     artifactDir a = ["-" ++ a ++ "dir", tmp </> "out"]
 
 -- | A package DB config file for the given unit.
-dbConf :: FilePath -> String -> NonEmpty Module -> String
-dbConf srcDir unit modules =
-  unlines [
+dbConf ::
+  FilePath ->
+  String ->
+  NonEmpty Module ->
+  [Reexport] ->
+  [String] ->
+  String
+dbConf srcDir unit modules reexports extra =
+  unlines $ [
     "name: " ++ unit,
     "version: 1.0",
     "id: " ++ unit,
     "key: " ++ unit,
     "import-dirs: " ++ srcDir,
     "exposed: True",
-    "exposed-modules:" ++ unwords exposed
-  ]
+    "exposed-modules: " ++ mconcat (intersperse ", " (exposed ++ (formatReexport <$> reexports)))
+  ] ++ extra
   where
     exposed = [name | Module {name} <- toList modules]
+
+    formatReexport Reexport {unit = runit, ..} =
+      moduleName ++ " from " ++ runit ++ ":" ++ moduleName
 
 -- | Write a fresh package DB without a library to the specified directory, using @ghc-pkg@ from the directory in
 -- 'Conf'.
@@ -188,17 +208,16 @@ writeDb unit dir db = do
 -- performance optimizations.
 createEmptyHomeUnitDb :: UnitSpec -> FilePath -> NonEmpty Module -> IO FilePath
 createEmptyHomeUnitDb unit dir modules =
-  writeDb unit dir (dbConf dir unit.name modules)
+  writeDb unit dir (dbConf dir unit.name modules unit.reexports unit.extraDbConf)
 
 withTmp ::
   (FilePath -> IO a) ->
   IO a
 withTmp use =
   withSystemTempDirectory "buck-worker-test" \ tmp -> do
-    withCurrentDirectory tmp do
-      for_ @[] ["src", "tmp", "out"] \ dir ->
-        createDirectoryIfMissing False (tmp </> dir)
-      use tmp
+    for_ @[] ["src", "tmp", "out"] \ dir ->
+      createDirectoryIfMissing False (tmp </> dir)
+    use tmp
 
 -- | Set up an environment with dummy package DBs for the set of modules returned by the first argument, then run the
 -- second argument with the resulting unit configurations.
@@ -215,7 +234,7 @@ withProject mkTargets use =
       finder = False,
       eps = False
     }
-    let conf = Conf {tmp, state, args0 = baseArgs tmp}
+    let conf = Conf {tmp, state, args0 = baseArgs tmp, ..}
     targets <- mkTargets conf
     units <- for targets \ unit -> do
       let dir = tmp </> "src" </> unit.name
