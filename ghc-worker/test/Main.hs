@@ -10,6 +10,7 @@ import FlagParserTest (test_parseBuckArgs)
 import Incremental.BuildTest (test_incrementalBuild)
 import Incremental.FlowTest (test_incrementalFlow)
 import InterfacePathTest (test_interfacePath)
+import ProfileTest (test_profiling)
 import ProjectBuildTest (test_projectBuild)
 import Resource.BasicTest (test_resources)
 import ScheduleTest (test_sortScheduleOrder)
@@ -61,7 +62,8 @@ tests :: TestTree
 tests =
   testGroup "all" [
     test_resources,
-    afterResources (testGroup "general" testsGeneral)
+    afterResources (testGroup "general" testsGeneral),
+    afterResources test_profiling
   ]
   where
     -- tasty 1.5 has @dependentTestGroup@, but the current Nix env has 1.4, so we'll make do with this for now.

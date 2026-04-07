@@ -121,6 +121,17 @@ in {
 
   envs.profiled = defaultEnv [({notest, ...}: { ghc-worker = notest; ghc-server = notest; })];
 
+  envs.profiled-fixed = {
+    hls.enable = lib.mkForce false;
+    package-set.extends = "profiled-fixed";
+    overrides = commonOverrides ["mwb" "unit-index" "downsweep-cache" "fixed-nodes"] ++ [
+      ({notest, ...}: { ghc-worker = notest; ghc-server = notest; })
+    ] ++ [
+      ipeOverrides
+    ];
+    profiling = true;
+  };
+
   envs.ghc914 = {
     expose.scoped = true;
     package-set.extends = "ghc914";
@@ -202,6 +213,10 @@ in {
         hash = "sha256-qdhfA+AkaB/IZsmeQOfsfZyuPxnY8bbYwO/yHcmjzak=";
       };
     };
+  };
+
+  package-sets.profiled-fixed = {
+    extends = "mwb-26-04-fixed";
   };
 
   package-sets.ghc914 = {
