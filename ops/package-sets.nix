@@ -114,6 +114,14 @@ in {
 
   envs.profiled = defaultEnv [({notest, ...}: { ghc-worker = notest; ghc-server = notest; })];
 
+  envs.profiled-linkables = latestEnv [
+    ({notest, ...}: { ghc-worker = notest; ghc-server = notest; })
+  ] // {
+    hls.enable = lib.mkForce false;
+    package-set.extends = "profiled-linkables";
+    profiling = true;
+  };
+
   envs.mercury-ghc9141 = defaultEnv [buckBinOverrides] // {
     expose.scoped = true;
     package-set.extends = "mercury-ghc9141";
@@ -177,6 +185,10 @@ in {
         hash = "sha256-R3HKHj6+btPodhOyeW50xvZwFqF1IaN3+6dHN9KLjmw=";
       };
     };
+  };
+
+  package-sets.profiled-linkables = {
+    extends = "mercury-ghc9101";
   };
 
   package-sets.mercury-ghc9141 = {
