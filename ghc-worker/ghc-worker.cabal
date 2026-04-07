@@ -107,6 +107,7 @@ test-suite ghc-worker-test
     Incremental.Flow,
     Incremental.FlowData,
     Incremental.FlowTest,
+    ProfileTest,
     ProjectBuildTest,
     ResourceTest,
     ScheduleTest
