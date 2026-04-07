@@ -92,7 +92,7 @@ restoreUnit state plans =
       -- Also runMetadata is executed twice, so there could be some weirdness with controlT and TestT
       --
       -- It is, the error happens in rebuild but it shows another exception in initial
-      void $ liftIO $ loadCachedUnits env.log state dflags0 plans defaultFeatureFlags hsc_env
+      void $ liftIO $ modifyMVar state \ s -> loadCachedUnits env.log dflags0 plans defaultFeatureFlags (s, hsc_env)
 
 runMetadata :: String -> MVar WorkerState -> (Logger -> TestT Ghc a) -> TestT IO a
 runMetadata desc state prog =
