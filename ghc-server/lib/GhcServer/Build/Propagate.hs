@@ -13,6 +13,8 @@ import Control.Monad.Extra (ifM)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import GHC (ModuleName)
+import qualified GHC.Utils.Outputable as O
+import GHC.Utils.Outputable (ppr, (<+>))
 import GhcServer.Build.Compile (compileSingleModule)
 import GhcServer.Build.Metadata (runMetadata)
 import GhcServer.Build.Schedule (
@@ -74,7 +76,7 @@ skipCompileIfCached cache ext env unit moduleName =
   (compile ext env unit moduleName)
   where
     skip = do
-      env.log.debug ("Skipping compile (cached): " ++ unit.string ++ ":" ++ show moduleName)
+      env.log.debugD ("Skipping compile (cached):" <+> ppr unit O.<> ":" O.<> ppr moduleName)
       logEvent env.events (CompileSkipped unit moduleName)
       pure TaskSuccess
 
@@ -84,7 +86,7 @@ skipCompileIfCached cache ext env unit moduleName =
 -- and passes them to the worker for HPT pre-population.
 compile :: BuildExt -> BuildEnv -> UnitName -> ModuleName -> IO TaskResult
 compile ext env name modName = do
-  env.log.debug ("Compile: " ++ name.string ++ ":" ++ show modName)
+  env.log.debugD ("Compile:" <+> ppr name O.<> ":" O.<> ppr modName)
   logEvent env.events (ModuleCompiled name modName)
   let modKey = ModuleKey {unit = name, name = modName}
   let cachedDeps = buildModuleCachedDeps ext.moduleMap modKey

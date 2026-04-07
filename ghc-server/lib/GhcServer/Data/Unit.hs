@@ -8,6 +8,7 @@ import GHC.Data.Graph.Directed qualified as Graph
 import GHC.Data.Graph.Directed (Graph)
 import GHC.Unit (UnitId, stringToUnit)
 import GHC.Unit.Types (toUnitId, unitIdString)
+import GHC.Utils.Outputable (Outputable (..), text)
 import GhcServer.Path (fp, osPath)
 import System.OsPath (OsPath, (</>))
 
@@ -19,6 +20,9 @@ newtype UnitName =
   UnitName { string :: String }
   deriving stock (Show)
   deriving newtype (Eq, Ord, IsString)
+
+instance Outputable UnitName where
+  ppr (UnitName name) = text name
 
 -- | Convert a 'UnitName' to a GHC 'UnitId'.
 unitId :: UnitName -> UnitId

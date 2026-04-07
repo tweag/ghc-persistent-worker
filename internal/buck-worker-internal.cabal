@@ -134,6 +134,7 @@ test-suite internal-test
   other-modules:
     BuildPlanTest,
     CompileHptTest,
+    ProfileTest,
     ProjectBuildTest,
     ResourceTest,
     ScheduleTest,
@@ -155,6 +156,8 @@ test-suite internal-test
     Test.Log,
     Test.PackageDb,
     Test.Path,
+    Test.Profile.Build,
+    Test.Profile.Project,
     Test.ProjectBuild.Classify,
     Test.ProjectBuild.Property,
     Test.Resume,

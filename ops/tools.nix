@@ -3,6 +3,8 @@
   inherit (util) build;
 
   serverPkg = build.packages.min.ghc-server.package;
+  profiledServerPkg = build.packages.profiled.ghc-server.package;
+  profiteur = build.envs.tools.toolchain.packages.profiteur;
 
 in {
 
@@ -80,6 +82,69 @@ in {
 
     echo "Running client..."
     ${serverPkg}/bin/ghc-client $project --wait unit1:modules
+    '');
+
+    outputs.apps.profile-cache-restore = util.app (util.zscript "profile-cache-restore" ''
+    depth=''${1-2}
+    project=/tmp/ghc-server-profile-$$
+    echo "Creating ''$(($depth * 2))-level test project at $project"
+    ${serverPkg}/bin/gen-project $project $depth
+
+    cleanup() {
+      if [[ -n $server_pid ]] && kill -0 $server_pid 2>/dev/null; then
+        kill $server_pid
+        wait $server_pid 2>/dev/null
+      fi
+      if [[ -z $keep_project ]]
+      then
+        rm -rf $project
+      fi
+    }
+    trap cleanup EXIT
+
+    echo "Starting ghc-server for initial full build..."
+    ${serverPkg}/bin/ghc-server --verbose $project &
+    server_pid=$!
+
+    echo "Building all units..."
+    ${serverPkg}/bin/ghc-client $project --wait
+
+    echo "Stopping server..."
+    kill $server_pid
+    wait $server_pid || true
+    server_pid=
+
+    echo "Deleting output and cache for root units (unit0, unit1)..."
+    rm -rf $project/output/unit0 $project/output/unit1
+    rm -rf $project/cache/unit0 $project/cache/unit1
+    rm -rf $project/socket
+
+    echo "Starting profiled ghc-server..."
+    cd $project
+    ${profiledServerPkg}/bin/ghc-server --verbose $project +RTS -p &
+    server_pid=$!
+    cd -
+
+    echo "Building root units..."
+    ${serverPkg}/bin/ghc-client $project --wait unit0 unit1
+
+    echo "Stopping profiled server..."
+    kill -INT $server_pid
+    wait $server_pid || true
+    server_pid=
+
+    prof_file=$project/ghc-server.prof
+    if [[ ! -f $prof_file ]]; then
+      echo "Error: profile output not found at $prof_file"
+      exit 1
+    fi
+
+    echo "Rendering profile with profiteur..."
+    ${profiteur}/bin/profiteur $prof_file
+    html_file=''${prof_file%.prof}.prof.html
+    cp $prof_file ghc-server.prof
+    cp $html_file ghc-server.prof.html
+    echo "Profile saved: ghc-server.prof, ghc-server.prof.html"
     '');
 
     outputs.apps.profile-test = util.app (util.zscript "profile-test" ''
