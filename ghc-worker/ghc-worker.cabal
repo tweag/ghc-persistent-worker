@@ -100,6 +100,7 @@ test-suite ghc-worker-test
   other-modules:
     BuildPlanTest,
     CompileHptTest,
+    ProfileTest,
     ProjectBuildTest,
     ResourceTest,
     ScheduleTest,

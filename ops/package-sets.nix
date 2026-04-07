@@ -89,6 +89,20 @@ in {
 
   envs.profiled = defaultEnv [({notest, ...}: { ghc-worker = notest; ghc-server = notest; })];
 
+  envs.profiled-25-10 = let
+
+    overrides = {notest, ...}: {
+      ghc-worker = notest;
+      ghc-server = notest;
+    };
+
+  in {
+    hls.enable = lib.mkForce false;
+    overrides = commonOverrides ["mwb-25-10"] ++ [ipeOverrides overrides];
+    package-set.extends = "mwb-25-10";
+    profiling = true;
+  };
+
   # This environment is for building the worker with an externally provided, impure GHC.
   envs.cabal-build = {
     expose.shell = true;
@@ -134,6 +148,7 @@ in {
       bitwise = force;
       boring = force;
       cborg = force;
+      extra = hackage "1.8.1" "0q3hyffi11dazq9n25r508spvmblx21wipfw10hfkxcazv5l1pg2";
       foldl = force;
       generic-deriving = force;
       ghc-source-gen = github {
