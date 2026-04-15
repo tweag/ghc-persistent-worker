@@ -70,6 +70,7 @@ library
     GhcServer.Data.Unit
     GhcServer.Data.UnitConfig
     GhcServer.Cache
+    GhcServer.GenProject
     GhcServer.Handler
     GhcServer.Log
     GhcServer.Path
@@ -112,6 +113,15 @@ executable ghc-client
   hs-source-dirs: app/ghc-client
   ghc-options: -O2 -threaded "-with-rtsopts=-K512M -I5 -A128M -T -N"
   build-depends:
+    ghc-server
+
+executable gen-project
+  import: all
+  main-is: Main.hs
+  hs-source-dirs: app/gen-project
+  ghc-options: -O2
+  build-depends:
+    directory,
     ghc-server
 
 test-suite ghc-server-test
