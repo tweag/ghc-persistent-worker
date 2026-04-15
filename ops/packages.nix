@@ -374,6 +374,13 @@
         source-dirs = "app/ghc-client";
       };
 
+      executables.gen-project = {
+        source-dirs = "app/gen-project";
+        dependencies = [
+          "directory"
+        ];
+      };
+
       tests.ghc-server-test = {
         dependencies = [
           "aeson"
