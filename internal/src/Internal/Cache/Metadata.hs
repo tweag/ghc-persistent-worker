@@ -62,13 +62,14 @@ import GHC.Unit.Finder (addHomeModuleToFinder, mkHomeModLocation)
 import GHC.Unit.Module.Graph (ModuleNodeInfo (..))
 import System.FilePath (splitExtension)
 
-#else
+#endif
 
 import GHC.Driver.Errors.Types (GhcMessage (..))
 import GHC.Driver.Make (summariseFile)
 import Internal.Error (eitherMessages)
 
-#endif
+useFixedNodes :: Bool
+useFixedNodes = True
 
 -- | Add a fresh 'HomeUnitEnv' to the home unit graph using the supplied unit state and dependencies.
 insertHomeUnit ::
@@ -149,7 +150,13 @@ loadCachedModule hsc_env unit (JsonFs modName) CachedModule {source, modules, pa
 
 #if defined(FIXED_NODES)
 
-    createNode src name = do
+    createNode src name
+      | useFixedNodes
+      = createNodeFixed src name
+      | otherwise
+      = ModuleNodeCompile <$> createNodeLegacy src
+
+    createNodeFixed src name = do
       _ <- addHomeModuleToFinder hsc_env.hsc_FC (DefiniteHomeUnit unit Nothing) name location HsSrcFile
       pure $ ModuleNodeFixed (ModNodeKeyWithUid (GWIB name NotBoot) unit) location
       where
@@ -159,11 +166,13 @@ loadCachedModule hsc_env unit (JsonFs modName) CachedModule {source, modules, pa
 
 #else
 
-    createNode src _ = do
-      summResult <- summariseFile hsc_env (DefiniteHomeUnit unit Nothing) mempty src Nothing Nothing
-      eitherMessages GhcDriverMessage summResult
+    createNode src _ = createNodeLegacy src
 
 #endif
+
+    createNodeLegacy src = do
+      summResult <- summariseFile hsc_env (DefiniteHomeUnit unit Nothing) mempty src Nothing Nothing
+      eitherMessages GhcDriverMessage summResult
 
 -- | Restore non-GHC state from the Buck cache.
 -- Command line arguments interpreted directly by the worker aren't part of the unit args, but they can yet influence

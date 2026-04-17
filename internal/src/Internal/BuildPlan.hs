@@ -2,7 +2,7 @@
 
 module Internal.BuildPlan where
 
-#if defined(FIXED_NODES)
+#if defined(MWB_2025_10)
 
 import GHC.Types.Error (mkUnknownDiagnostic)
 
@@ -44,8 +44,8 @@ import Types.Args (BuildPlanField (..))
 import Types.BuildPlan (
   BuildPlan (..),
   BuildPlanEnv (..),
-  BuildPlanModule (..),
   BuildPlanJson (..),
+  BuildPlanModule (..),
   Dep (..),
   ModuleKey,
   PackageDep (..),
@@ -78,23 +78,20 @@ import GHC.Unit.Module.ModSummary (isTemplateHaskellOrQQNonBoot)
 
 #else
 
-import GHC.Unit.Module.Graph (isTemplateHaskellOrQQNonBoot)
+import GHC.Unit.Module.Graph (isTemplateHaskellOrQQNonBoot, mkModuleGraph)
 
 #endif
 
 #if defined(FIXED_NODES)
 
-import GHC.Unit.Module.Graph (ModuleNodeInfo (..))
-
-#else
-
-import GHC.Unit.Module.Graph (mkModuleGraph)
-
-#if defined(MWB) || defined(MWB_2025_10)
-
-import GHC.Unit.Module.Graph (mgModSummaries)
+import GHC.Unit (gwib_mod)
+import GHC.Unit.Module.Graph (ModNodeKeyWithUid (..), ModuleNodeInfo (..))
 
 #endif
+
+#if defined(DOWNSWEEP_CACHE)
+
+import GHC.Unit.Module.Graph (mgModSummaries)
 
 #endif
 
@@ -202,6 +199,26 @@ packageIndex =
       unit = ms_unitid summary
     }
 
+#if defined(FIXED_NODES)
+
+-- | Extract package dependency entries from 'ModuleNodeFixed' graph nodes.
+--
+-- When dep units are loaded from cache, their modules appear as 'ModuleNodeFixed'
+-- rather than 'ModuleNodeCompile'. These lack a 'ModSummary', so 'buildPlanNode'
+-- skips them. This function extracts their module name and unit ID directly from
+-- the 'ModNodeKeyWithUid', providing the data that 'modulePackageDeps' needs.
+fixedNodePackageDeps :: HscEnv -> [ModuleGraphNode] -> Map NodeKey Dep
+fixedNodePackageDeps hsc_env =
+  Map.fromList . mapMaybe fixedDep
+  where
+    fixedDep = \case
+      ModuleNode _ (ModuleNodeFixed (ModNodeKeyWithUid mnwib uid) _)
+        | uid /= hscActiveUnitId hsc_env
+        -> Just (NodeKey_Module (ModNodeKeyWithUid mnwib uid), Dep {name = gwib_mod mnwib, unit = uid})
+      _ -> Nothing
+
+#endif
+
 buildPlanEnv ::
   HscEnv ->
   ModuleGraph ->
@@ -213,7 +230,11 @@ buildPlanEnv hsc_env graph =
       unitNames,
       homeUnitIds,
       homeModules = localIndex (fst <$> local),
+#if defined(FIXED_NODES)
+      packageModules = packageIndex (fst <$> packages) <> fixedNodePackageDeps hsc_env (mgModSummaries' graph),
+#else
       packageModules = packageIndex (fst <$> packages),
+#endif
       ..
     }
 
@@ -256,8 +277,17 @@ downsweepCompat ::
 
 #if defined(FIXED_NODES)
 
+#if defined(MWB)
+
+downsweepCompat hsc_env summaries cache excl dup =
+  fmap mkModuleGraph <$> downsweep hsc_env summaries cache excl dup
+
+#else
+
 downsweepCompat hsc_env summaries _ =
   downsweep hsc_env mkUnknownDiagnostic Nothing summaries
+
+#endif
 
 #elif defined(MWB)
 

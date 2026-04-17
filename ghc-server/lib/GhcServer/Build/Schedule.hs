@@ -6,18 +6,25 @@
 -- applied at promotion time by the scheduler.
 -- 'promoteEnabled' then activates tasks that are both requested and resolvable,
 -- transitively promoting cross-unit dependencies.
+{-# LANGUAGE CPP #-}
+
 module GhcServer.Build.Schedule where
 
 import Control.Applicative ((<|>))
+import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 import Data.Set (Set)
-import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
 import GHC (ModuleName, mkModuleName, moduleNameString)
-import GHC.Unit.Module.Graph (ModuleGraphNode (..), nodeDependencies, nodeKeyModName, nodeKeyUnitId)
+import GHC.Unit.Module.Graph (ModuleGraphNode (..), nodeKeyModName, nodeKeyUnitId)
+#if defined(MWB_2025_10)
+import GHC.Unit.Module.Graph (mgNodeDependencies)
+#else
+import GHC.Unit.Module.Graph (nodeDependencies)
+#endif
 import GHC.Unit.Types (UnitId, unitIdString)
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..), unitId)
 import GhcServer.Path (fp, osPath)
@@ -143,9 +150,12 @@ nodeDepsToTaskKeys ::
   Set (TaskKey 'Pending)
 nodeDepsToTaskKeys nameMap srcMap node =
   Set.fromList
-    [
-      PendingSource depName depSrc
+    [PendingSource depName depSrc
+#if defined(MWB_2025_10)
+      | nk <- mgNodeDependencies True node
+#else
       | nk <- nodeDependencies True node
+#endif
       , Just depModName <- [nodeKeyModName nk]
       , let depUid = nodeKeyUnitId nk
       , Just depSrc <- [Map.lookup (depUid, depModName) srcMap]

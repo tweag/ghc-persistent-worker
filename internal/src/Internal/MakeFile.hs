@@ -18,11 +18,21 @@ module Internal.MakeFile where
 #if defined(FIXED_NODES)
 
 import Data.Either (partitionEithers)
-import GHC.Types.Error (mkUnknownDiagnostic)
 
 #else
 
-import GHC.Driver.Ppr
+import GHC (Located, GenLocated (L))
+
+#endif
+
+#if defined(MWB_2025_10)
+
+import GHC.Types.Error (mkUnknownDiagnostic)
+import GHC.Types.SrcLoc (noSrcSpan)
+
+#else
+
+import GHC.Driver.Ppr (showSDoc)
 
 #endif
 
@@ -54,7 +64,6 @@ import GHC.Prelude
 import qualified GHC.SysTools as SysTools
 import GHC.Types.Error (unionManyMessages)
 import GHC.Types.SourceError
-import GHC.Types.SrcLoc
 import GHC.Unit.Module
 import GHC.Unit.Module.Graph
 import GHC.Unit.Module.ModSummary
@@ -72,16 +81,56 @@ import System.FilePath
 import System.IO
 import System.IO.Error (isEOFError)
 
-#if !MIN_VERSION_GLASGOW_HASKELL(9,10,0,0)
-import GHC.Utils.Panic.Plain
-#endif
-
 #if !defined(MWB) && !defined(MWB_2025_10)
+
 depJSON :: DynFlags -> Maybe FilePath
 depJSON _ = Nothing
 
 ms_opts :: ModSummary -> [String]
 ms_opts _ = []
+
+#endif
+
+downsweepCompatCache :: HscEnv -> [ModuleName] -> Bool -> IO ([DriverMessages], DownsweepCompat2510Result)
+
+#if defined(DOWNSWEEP_CACHE)
+
+type DownsweepCompatCache a = [ModSummary] -> Maybe ModuleGraph -> [ModuleName] -> Bool -> IO ([DriverMessages], a)
+
+downsweepCompatCache hsc_env excl_mods allow_dup_roots =
+  downsweepCompat2510Args hsc_env (mgModSummaries mod_graph) (Just mod_graph) excl_mods allow_dup_roots
+  where
+    mod_graph = hsc_mod_graph hsc_env
+
+#else
+
+type DownsweepCompatCache a = [ModSummary] -> [ModuleName] -> Bool -> IO ([DriverMessages], a)
+
+downsweepCompatCache hsc_env =
+  downsweepCompat2510Args hsc_env []
+
+#endif
+
+downsweepCompat2510Args :: HscEnv -> DownsweepCompatCache DownsweepCompat2510Result
+
+downsweepCompat2510Result :: HscEnv -> [ModuleName] -> Bool -> IO ([DriverMessages], ModuleGraph)
+
+#if defined(MWB_2025_10)
+
+type DownsweepCompat2510Result = ModuleGraph
+
+downsweepCompat2510Args hsc_env = downsweep hsc_env mkUnknownDiagnostic Nothing
+
+downsweepCompat2510Result = downsweepCompatCache
+
+#else
+
+type DownsweepCompat2510Result = [ModuleGraphNode]
+
+downsweepCompat2510Args = downsweep
+
+downsweepCompat2510Result hsc_env excl_mods allow_dup_roots =
+  fmap mkModuleGraph <$> downsweepCompatCache hsc_env excl_mods allow_dup_roots
 
 #endif
 
@@ -99,27 +148,12 @@ doMkDependHS srcs = do
     targets <- mapM (\s -> GHC.guessTarget s Nothing Nothing) srcs
     GHC.setTargets targets
     let excl_mods = depExcludeMods dflags
-#if defined(DOWNSWEEP_CACHE)
-    hsc_env <- getSession
-    let mod_graph = hsc_mod_graph hsc_env
-    (errs, module_graph) <- withSession \ hsc_env -> liftIO $ downsweepCompat hsc_env (mgModSummaries mod_graph) (Just mod_graph) excl_mods True
-#else
-    (errs, module_graph) <- withSession \ hsc_env -> liftIO $ downsweepCompat hsc_env [] excl_mods True
-#endif
+    (errs, module_graph) <- withSession \ hsc_env ->
+      liftIO $ downsweepCompat2510Result hsc_env excl_mods True
     let msgs = unionManyMessages errs
     unless (isEmptyMessages msgs) $ throwErrors (fmap GhcDriverMessage msgs)
     doMkDependModuleGraph dflags module_graph
     pure module_graph
-    where
-#if defined(FIXED_NODES)
-      downsweepCompat hsc_env = downsweep hsc_env mkUnknownDiagnostic Nothing
-#elif defined(DOWNSWEEP_CACHE)
-      downsweepCompat hsc_env old_summaries old_graph excl_mods allow_dup_roots =
-        fmap mkModuleGraph <$> downsweep hsc_env old_summaries old_graph excl_mods allow_dup_roots
-#else
-      downsweepCompat hsc_env old_summaries excl_mods allow_dup_roots =
-        fmap mkModuleGraph <$> downsweep hsc_env old_summaries excl_mods allow_dup_roots
-#endif
 
 -----------------------------------------------------------------
 --
@@ -287,7 +321,7 @@ processDeps :: DynFlags
 
 processDeps _dflags_ _ _ _ _ _ _ (AcyclicSCC (LinkNode {})) = return ()
 
-#if defined(FIXED_NODES)
+#if defined(MWB_2025_10)
 
 processDeps _ _ _ _ _ _ _ (CyclicSCC nodes)
   =     -- There shouldn't be any cycles; report them
@@ -298,11 +332,6 @@ processDeps _ _ _ _ _ _ _ (AcyclicSCC (InstantiationNode _uid node))
       mkPlainErrorMsgEnvelope noSrcSpan $
       GhcDriverMessage $ DriverInstantiationNodeInDependencyGeneration node
 processDeps _ _ _ _ _ _ _ (AcyclicSCC (UnitNode {})) = return ()
-processDeps _ _ _ _ _ _ _ (AcyclicSCC (ModuleNode _ (ModuleNodeFixed {})))
-  -- No dependencies needed for fixed modules (already compiled)
-  = return ()
-
-processDeps dflags hsc_env excl_mods root hdl m_dep_json node_dep_map (AcyclicSCC (ModuleNode node_deps (ModuleNodeCompile node)))
 
 #else
 
@@ -317,6 +346,18 @@ processDeps dflags _ _ _ _ _ _ (AcyclicSCC (InstantiationNode _uid node))
       showSDoc dflags $
         vcat [ text "Unexpected backpack instantiation in dependency graph while constructing Makefile:"
              , nest 2 $ ppr node ]
+
+#endif
+
+#if defined(FIXED_NODES)
+
+processDeps _ _ _ _ _ _ _ (AcyclicSCC (ModuleNode _ (ModuleNodeFixed {})))
+  -- No dependencies needed for fixed modules (already compiled)
+  = return ()
+
+processDeps dflags hsc_env excl_mods root hdl m_dep_json node_dep_map (AcyclicSCC (ModuleNode node_deps (ModuleNodeCompile node)))
+
+#else
 
 processDeps dflags hsc_env excl_mods root hdl m_dep_json node_dep_map (AcyclicSCC (ModuleNode node_deps node))
 
