@@ -1,59 +1,51 @@
-module Test.Scheduler where
+-- | Simple scheduler for pre-sorted task lists.
+--
+-- Delegates to 'Test.Scheduler.Concurrent' for the actual concurrent dispatch,
+-- wrapping the simple (non-phase-indexed) task types into the concurrent
+-- scheduler's phase-indexed types via 'SimpleKey'.
+module Test.Scheduler (
+  SimpleKey (..),
+  runScheduler,
+  initScheduler,
+) where
 
-import Control.Concurrent.Async (Async, async, waitAnyCatch, waitCatch)
-import Control.Exception (Exception, SomeAsyncException, SomeException, fromException, throwIO, try)
-import Control.Lens (at, contains, use, uses, (%=), (.=))
-import Control.Monad.Extra (ifM)
-import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Reader (ReaderT (..), ask)
-import Control.Monad.State.Strict (StateT, execStateT)
+import Control.Concurrent.Async (cancel)
+import Control.Concurrent.STM (atomically, modifyTVar', readTVarIO)
 import Data.Coerce (coerce)
-import Data.Foldable (toList, traverse_)
-import Data.Generics.Labels ()
 import qualified Data.Map.Strict as Map
-import Data.Set (Set, isSubsetOf)
-import System.Timeout (timeout)
+import qualified Data.Set as Set
+import Data.Set (Set)
 import Test.Data.Env (MaxJobs (..))
 import Test.Data.Scheduler (
-  Capacity (..),
-  Task (..),
   Dispatch,
   RequestFailure (..),
-  RequestOutput (..),
   RequestResult (..),
   Schedule (..),
   SchedulerEnv (..),
   SchedulerState (..),
-  Status (..),
   Task (..),
   runDispatch,
   )
+import qualified Test.Scheduler.Concurrent as C
 
-type Scheduler key task = ReaderT (SchedulerEnv key task) (StateT (SchedulerState key task) IO)
+-- | Phase-agnostic key wrapper: both phases use the same underlying key type.
+data SimpleKey key (p :: C.Phase) where
+  SK :: key -> SimpleKey key p
 
--- | Safely wait for the request to be processed by the dispatch function and analyze its result.
--- If the task takes longer than a second, consider it failed.
---
--- GHC throws exceptions liberally and we want to be able to associate a panic with the request that caused it, so we
--- catch anything.
--- @AsyncException@ is always critical, of course.
-executeRequest :: Dispatch task -> Task key task -> IO (RequestOutput key)
-executeRequest dispatch Task {key, value = request} = do
-  result <- try (timeout 10_000_000 (runDispatch dispatch request)) >>= \case
-    Right (Just result) ->
-      pure result
-    Right Nothing ->
-      pure (RequestFailure (RequestFatal "Request took longer than 1s"))
-    Left (exc :: SomeException) ->
-      case fromException exc of
-        Just (e :: SomeAsyncException) ->
-          throwIO e
-        Nothing ->
-          pure (RequestFailure (RequestFatal (show exc)))
-  pure RequestOutput {key, result}
+deriving stock instance Show key => Show (SimpleKey key p)
+deriving stock instance Eq key => Eq (SimpleKey key p)
+deriving stock instance Ord key => Ord (SimpleKey key p)
 
+unwrapKey :: SimpleKey key p -> key
+unwrapKey (SK k) = k
+
+-- | Convert a simple 'Task' to the concurrent scheduler's phase-indexed 'Task'.
+convertTask :: Ord key => Task key task -> C.Task (SimpleKey key) 'C.Resolved task
+convertTask Task {key, deps, value} =
+  C.Task {key = SK key, deps = Set.map SK deps, enabled = True, value}
+
+-- | Set up a scheduler environment and initial state.
 initScheduler ::
-  Ord key =>
   MaxJobs ->
   Dispatch task ->
   Schedule key task ->
@@ -67,121 +59,54 @@ initScheduler maxJobs dispatch tasks completed =
     state = SchedulerState {
       schedule = tasks,
       completed,
-      activeRequests = [],
-      failures = []
+      failures = Map.empty
     }
 
-outputFailure :: RequestResult -> Maybe RequestFailure
-outputFailure = \case
-  RequestSuccess -> Nothing
-  RequestFailure failure -> Just failure
-
--- | Indicate whether the dependencies of the given task are all completed, i.e. a subset of the contents of the
--- scheduler state's 'completed' field.
-taskReady :: Ord key => Task key task -> Scheduler key task Bool
-taskReady task =
-  uses #completed (isSubsetOf task.deps)
-
--- | Pops the head of the schedule if its deps are satisfied.
--- Returns 'Blocked' without consuming the task when deps are pending, allowing it to be retried after more results
--- arrive.
-dequeue :: Ord key => Scheduler key task (Status key task)
-dequeue =
-  use #schedule >>= \case
-    Schedule [] -> pure Exhausted
-    Schedule (task : rest) ->
-      taskReady task >>= \case
-        True -> Ready task <$ (#schedule .= Schedule rest)
-        False -> pure (Blocked task)
-
--- | Execute a request in a new thread, tracking its handle in the state.
--- Decides whether the loop should continue with the next task based on the concurrency limit configured by the test
--- harness.
-startRequest :: Task key task -> Scheduler key task Capacity
-startRequest task = do
-  SchedulerEnv {dispatch, maxJobs} <- ask
-  handle <- liftIO $ async $ executeRequest dispatch task
-  #activeRequests . contains handle .= True
-  uses #activeRequests \ reqs ->
-    if length reqs >= coerce maxJobs then Full else Available
-
--- | Write a task's result to the state, remove it from the active set and add it to the completed set in the state.
-storeResult :: Ord key => Async (RequestOutput key) -> RequestOutput key -> Scheduler key task ()
-storeResult handle RequestOutput {key, result} = do
-  #activeRequests . contains handle .= False
-  #completed . contains key .= True
-  #failures . at key .= outputFailure result
-
-handleResult ::
-  Ord key =>
-  Exception e =>
-  Async (RequestOutput key) ->
-  Either e (RequestOutput key) ->
-  Scheduler key task ()
-handleResult handle =
-  either (liftIO . throwIO) (storeResult handle)
-
--- | Block on the set of active 'Async' handles until one completes.
-awaitOneRequest :: Ord key => Scheduler key task ()
-awaitOneRequest = do
-  active <- use #activeRequests
-  (handle, result) <- liftIO $ waitAnyCatch (toList active)
-  handleResult handle result
-
--- | Block on each active 'Async' handle until they've all completed.
-awaitAllRequests :: Ord key => Scheduler key task ()
-awaitAllRequests = do
-  use #activeRequests >>= traverse_ \ handle ->
-    handleResult handle =<< liftIO (waitCatch handle)
-
--- | Indicate whether the current build should continue, which is when no task has failed so far.
-buildSuccess :: Scheduler key task Bool
-buildSuccess =
-  uses #failures null
-
--- | Wait for all active requests, not adding their results to the state.
-terminateBuild :: Scheduler key task ()
-terminateBuild =
-  traverse_ (liftIO . waitCatch) =<< use #activeRequests
-
--- | Wait for one result and abort if a failure occurred.
-waitForRequestSlot :: Ord key => Scheduler key task ()
-waitForRequestSlot = do
-  awaitOneRequest
-  ifM buildSuccess loopSchedule terminateBuild
-
--- | Indicate whether no requests are currently being processed, which is treated as a fatal deadlock if the next task
--- has unsatisfied dependencies.
-noActiveRequests :: Scheduler key task Bool
-noActiveRequests =
-  uses #activeRequests null
-
-recordDeadlock :: Ord key => Task key task -> Scheduler key task ()
-recordDeadlock task =
-  #failures %= Map.insert task.key (RequestFatal "Deadlock: no active requests and next task blocked")
-
--- | Repeatedly pull the next task from the schedule, wait for its dependencies to complete processing, and start
--- processing it.
+-- | Run a pre-sorted schedule of tasks to completion using the concurrent scheduler.
 --
--- Record a deadlock failure and return if blocked on dependencies with no active requests.
+-- All tasks are submitted as a single batch and dispatched concurrently up to
+-- the configured job limit.  Dependencies are respected via the concurrent
+-- scheduler's unsatisfied\/ready tracking.
 --
--- If the schedule is empty, wait for the remaining active tasks to complete.
-loopSchedule :: Ord key => Scheduler key task ()
-loopSchedule =
-  dequeue >>= \case
-    Ready task ->
-      startRequest task >>= \case
-        Available -> loopSchedule
-        Full -> waitForRequestSlot
-    Blocked task ->
-      ifM noActiveRequests (recordDeadlock task) waitForRequestSlot
-    Exhausted ->
-      awaitAllRequests
-
+-- Early termination: when any task fails, the scheduler stops dispatching
+-- further tasks and waits for active tasks to complete.
 runScheduler ::
   Ord key =>
   SchedulerEnv key task ->
   SchedulerState key task ->
   IO (SchedulerState key task)
-runScheduler env =
-  execStateT (runReaderT loopSchedule env)
+runScheduler env initialState = do
+  resources <- C.newSchedulerState ()
+  atomically $ modifyTVar' resources.state \ s ->
+    s {C.completed = Set.map SK initialState.completed}
+  let
+    wrapDispatch _ext task = do
+      result <- runDispatch env.dispatch task.value
+      pure $ case result of
+        RequestSuccess -> C.TaskSuccess
+        RequestFailure f -> C.TaskFailed f
+
+    handlers = C.Handlers {
+      dispatch = wrapDispatch,
+      classify = \ tasks -> pure (tasks, []),
+      propagate = \ _ _ s -> pure s
+    }
+
+    cEnv = C.SchedulerEnv {
+      maxJobs = coerce env.maxJobs,
+      handlers,
+      taskTimeout = 10,
+      mkFailure = RequestFatal,
+      continueOnFailure = False
+    }
+  thread <- C.runScheduler cEnv resources
+  C.submitRequest resources (map convertTask (reverse initialState.schedule.tasks))
+  atomically (C.awaitIdle resources)
+  cancel thread
+  cState <- readTVarIO resources.state
+  pure SchedulerState {
+    schedule = Schedule [],
+    completed = Set.map unwrapKey cState.completed,
+    failures = Map.mapKeys unwrapKey cState.failures
+  }
+

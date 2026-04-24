@@ -39,7 +39,7 @@ data TestTask =
   deriving stock (Show, Eq)
 
 type Key = Int
-type State = SchedulerState TestKey TestTask ()
+type State = SchedulerState TestKey TestTask String ()
 
 -- ---------------------------------------------------------------------------
 -- Helpers
