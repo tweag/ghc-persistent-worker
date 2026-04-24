@@ -53,7 +53,7 @@ import Types.State (WorkerState)
 -- Created once, supports multiple 'scheduleBatch' calls.
 data Build =
   Build {
-    scheduler :: SchedulerResources ScheduleRequest TaskKey BuildStatus BuildExt,
+    scheduler :: SchedulerResources ScheduleRequest TaskKey BuildStatus String BuildExt,
     thread :: Async Void,
     -- | Units that were already cached at build start (metadata skipped for these).
     cachedUnits :: Set UnitName
@@ -77,7 +77,9 @@ newBuild maxJobs taskTimeout buildEnv = do
         classify = classifyBuildRequest cachedUnits buildEnv,
         propagate = propagateCompletion cache buildEnv
       },
-      taskTimeout
+      taskTimeout,
+      mkFailure = id,
+      continueOnFailure = True
     }
   thread <- runScheduler env scheduler
   pure Build {cachedUnits, ..}
