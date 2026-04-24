@@ -12,4 +12,4 @@ import GhcServer.Scheduler (Handlers)
 -- | Build-system handlers wired into the scheduler.
 --
 -- Specializes the generic 'Handlers' to the build system's types.
-type BuildSystem = Handlers ScheduleRequest TaskKey BuildStatus BuildExt
+type BuildSystem = Handlers ScheduleRequest TaskKey BuildStatus String BuildExt

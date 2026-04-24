@@ -52,13 +52,13 @@ emptyBuildExt =
   BuildExt {moduleMap = Map.empty}
 
 -- | Convert a list of error messages to a 'TaskResult'.
-taskResultFromErrors :: [(a, String)] -> TaskResult
+taskResultFromErrors :: [(a, String)] -> TaskResult String
 taskResultFromErrors = \case
   [] -> TaskSuccess
   (_, msg) : _ -> TaskFailed msg
 
 -- | Skip metadata for a cached unit.
-skipMetadata :: BuildEnv -> UnitName -> IO TaskResult
+skipMetadata :: BuildEnv -> UnitName -> IO (TaskResult String)
 skipMetadata env name = do
   env.log.debug ("Skipping metadata (cached): " ++ name.string)
   logEvent env.events (MetadataSkipped name)
@@ -69,7 +69,7 @@ skipMetadata env name = do
 -- If the module's @.dyn_hi@ interface file exists (indicating it was compiled
 -- in a prior build), the compilation is skipped.  Otherwise, compilation
 -- proceeds normally.
-skipCompileIfCached :: BuildCache -> BuildExt -> BuildEnv -> UnitName -> ModuleName -> IO TaskResult
+skipCompileIfCached :: BuildCache -> BuildExt -> BuildEnv -> UnitName -> ModuleName -> IO (TaskResult String)
 skipCompileIfCached cache ext env unit moduleName =
   ifM (cache.interfaceExists unit moduleName)
   skip
@@ -84,7 +84,7 @@ skipCompileIfCached cache ext env unit moduleName =
 --
 -- Before compilation, assembles 'CachedDeps' from the 'BuildExt' module map
 -- and passes them to the worker for HPT pre-population.
-compile :: BuildExt -> BuildEnv -> UnitName -> ModuleName -> IO TaskResult
+compile :: BuildExt -> BuildEnv -> UnitName -> ModuleName -> IO (TaskResult String)
 compile ext env name modName = do
   env.log.debugD ("Compile:" <+> ppr name O.<> ":" O.<> ppr modName)
   logEvent env.events (ModuleCompiled name modName)
@@ -99,7 +99,7 @@ compile ext env name modName = do
 -- 'compileModuleWithDepsInHpt' via 'compileSingleModule'.  Both paths support
 -- cache-based skipping that emulates an external build system omitting unchanged
 -- work items.
-dispatchTask :: BuildCache -> BuildEnv -> BuildExt -> Task TaskKey 'Resolved BuildStatus -> IO TaskResult
+dispatchTask :: BuildCache -> BuildEnv -> BuildExt -> Task TaskKey 'Resolved BuildStatus -> IO (TaskResult String)
 dispatchTask cache env ext task = case task.key of
   MetaTask name
     | not task.value.rebuild && task.value.cached -> skipMetadata env name
@@ -123,7 +123,7 @@ computeResolutions ::
   BuildCache ->
   BuildEnv ->
   UnitName ->
-  SchedulerState TaskKey BuildStatus BuildExt ->
+  SchedulerState TaskKey BuildStatus String BuildExt ->
   IO (Either String (Map ModuleKey ModuleInfo))
 computeResolutions cache env name _state =
   cache.loadUnit name >>= traverse \case
@@ -143,9 +143,9 @@ propagateCompletion ::
   BuildCache ->
   BuildEnv ->
   TaskKey 'Resolved ->
-  TaskResult ->
-  SchedulerState TaskKey BuildStatus BuildExt ->
-  IO (SchedulerState TaskKey BuildStatus BuildExt)
+  TaskResult String ->
+  SchedulerState TaskKey BuildStatus String BuildExt ->
+  IO (SchedulerState TaskKey BuildStatus String BuildExt)
 propagateCompletion cache env (MetaTask name) TaskSuccess state =
   computeResolutions cache env name state >>= \case
     Left err -> do

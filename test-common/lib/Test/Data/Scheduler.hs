@@ -1,6 +1,5 @@
 module Test.Data.Scheduler where
 
-import Control.Concurrent.Async (Async)
 import Data.Map.Strict (Map)
 import Data.Set (Set)
 import GHC.Generics (Generic)
@@ -23,25 +22,6 @@ data RequestResult =
   |
   RequestFailure RequestFailure
   deriving stock (Eq, Show)
-
-data RequestOutput key =
-  RequestOutput {
-    key :: key,
-    result :: RequestResult
-  }
-  deriving stock (Eq, Show)
-
-data Status key task =
-  Ready (Task key task)
-  |
-  Blocked (Task key task)
-  |
-  Exhausted
-
-data Capacity =
-  Available
-  |
-  Full
 
 data SchedulerEnv key task =
   SchedulerEnv {
@@ -68,7 +48,6 @@ data SchedulerState key task =
   SchedulerState {
     schedule :: Schedule key task,
     completed :: Set key,
-    activeRequests :: Set (Async (RequestOutput key)),
     failures :: Map key RequestFailure
   }
   deriving stock (Generic)
