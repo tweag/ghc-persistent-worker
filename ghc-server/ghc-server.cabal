@@ -86,6 +86,7 @@ library
     file-io,
     filepath,
     ghc,
+    ghc-worker-test-common,
     grapesy ^>=1.0.1,
     optparse-applicative,
     stm,
