@@ -17,7 +17,9 @@ import GHC.Debug.Stub (withGhcDebugUnix)
 #endif
 import GHC (DynFlags (..), Ghc, ModIface, getSession)
 import GHC.Driver.DynFlags (GhcMode (..))
-import GHC.Driver.Monad (reflectGhc, reifyGhc)
+import GHC.Driver.Env (hscUpdateFlags)
+import GHC.Driver.Monad (modifySession, reflectGhc, reifyGhc)
+import GHC.Utils.Outputable (text)
 import GhcWorker.CompileResult (CompileResult (..), writeResult)
 import GhcWorker.Instrumentation (Hooks (..), InstrumentedHandler (..))
 import Internal.AbiHash (AbiHash (..), showAbiHash)
@@ -27,7 +29,7 @@ import Internal.Debug (debugSocketPath)
 #endif
 import Internal.DynFlags (modifyGlobalFlags)
 import Internal.Evaluate (evaluate)
-import Internal.Log (newLogger)
+import Internal.Log (logDebugD, newLogger)
 import Internal.Metadata (computeMetadata)
 import Internal.Session (withGhcMakeModule, withGhcMakeSource)
 import Prelude hiding (log)
@@ -101,7 +103,7 @@ dispatch hooks env args =
         Just modTarget -> do
           case args.expr of
             Just expr -> do
-              _result <- eval args.evalTargetName modTarget expr
+              _result <- eval args.evalTargetName modTarget expr args.imports
               pure ()
             Nothing -> error "worker: no expr"
         Nothing ->
@@ -123,15 +125,16 @@ dispatch hooks env args =
 
     compileHpt = compileAndReadAbiHash CompManager (compileModuleWithDepsInHpt env.log) hooks args
 
-    eval mname modTarget stmt = do
+    eval mname modTarget stmt imports = do
       case mname of
         Nothing -> pure ()
         Just name -> env.log.setTarget (TargetUnknown name)
       withGhcMakeModule Interpreted modTarget env
         (\_ -> do
-          x <- Internal.Evaluate.evaluate env args.homeUnit modTarget stmt
+          x <- Internal.Evaluate.evaluate env args.homeUnit modTarget imports stmt
           pure (Just x)
         )
+
     withTarget f (target :: TargetSpec) =
       reifyGhc $ \session -> do
         env.log.setTarget target
