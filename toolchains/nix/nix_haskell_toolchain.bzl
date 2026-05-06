@@ -182,7 +182,11 @@ def _make_drv_json(ctx: AnalysisContext, name: str) -> Artifact:
 
     drv_json = ctx.actions.declare_output(name)
 
-    cmd = cmd_args(nix_drv_json_script, "--output", drv_json.as_output(), "--flake", cmd_args("path:", flake, "#haskellPackages.libs", delimiter = ""))
+    attr = "haskellPackages.libs"
+    if ctx.attrs.env:
+      attr = "buck.{}.{}".format(ctx.attrs.env, attr)
+
+    cmd = cmd_args(nix_drv_json_script, "--output", drv_json.as_output(), "--flake", cmd_args("path:", flake, "#{}".format(attr), delimiter = ""))
 
     ctx.actions.run(
         cmd,
@@ -318,6 +322,7 @@ nix_haskell_toolchain = rule(
             default = "//:ghc[haddock]",
         ),
         "flake": attrs.source(allow_directory = True),
+        "env": attrs.option(attrs.string(), default = None),
     },
     is_toolchain_rule = True,
 )

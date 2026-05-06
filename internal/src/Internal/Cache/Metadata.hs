@@ -151,6 +151,7 @@ decodeJsonBuildPlan =
 -- When incremental build plans are restored, this is a valid use case, representing file deletion.
 -- While this could be handled by removing the missing entries from 'CachedBuildPlan' beforehand, fixed nodes support
 -- will be guaranteed soon, so there's no reason to put the effort in.
+-- TODO Use feature flag in initial metadata as well
 loadCachedModule :: Bool -> HscEnv -> UnitId -> JsonFs ModuleName -> CachedModule -> IO (Maybe ModuleGraphNode)
 loadCachedModule useFixedNodes hsc_env unit (JsonFs modName) CachedModule {source, modules, packages} = do
   node <- createNode source modName

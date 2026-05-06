@@ -1,4 +1,4 @@
-{util}: let
+{util, compiler}: let
 
   inherit (util) pkgs lib config;
 
@@ -37,7 +37,7 @@
     postInstall = (drv.postInstall or "") + ''
     ghc-pkg recache --package-db $packageConfDir
     '';
-  }) (config.envs.${config.buckGhc}.toolchain.packages.callCabal2nix name src {});
+  }) (config.envs."buck-${compiler}".toolchain.packages.callCabal2nix name src {});
 
   modInt = {modName, bindName, expr, imports ? ""}:
   pkgs.writeText "${modName}.hs" ''
