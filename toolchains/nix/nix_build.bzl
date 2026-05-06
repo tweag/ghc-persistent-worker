@@ -15,6 +15,9 @@ def _nix_build_impl(ctx: AnalysisContext):
     binary = ctx.attrs.binary
     binaries = ctx.attrs.binaries
 
+    if ctx.attrs.env:
+      attr = "buck.{}.{}".format(ctx.attrs.env, attr)
+
     attr_suffix = attr
     out_name = "out.link"
     if ctx.attrs.suffix:
@@ -104,6 +107,7 @@ nix_build = rule(
         "flake": attrs.source(allow_directory = True),
         "attr": attrs.option(attrs.string(), doc = "name of the flake attribute, defaults to label name", default = None),
         "suffix": attrs.option(attrs.string(), default = None, doc = "out-link suffix, e.g. `lib`, used to provide a non-default output"),
+        "env": attrs.option(attrs.string(), default = None),
     },
 )
 
