@@ -1,18 +1,15 @@
-{lib, ...}: {
+{lib, ...}: let
+
+  buckCompilers = ["mwb-26-01" "ghc914"];
+in {
 
   options = {
 
-    buckGhc = lib.mkOption {
+    buckCompilers = lib.mkOption {
       description = "Which of our branches to use for the buck build";
-      type = lib.types.enum ["mwb-26-01" "ghc914"];
-      default = "mwb-26-01";
+      type = lib.types.listOf lib.types.str;
+      default = buckCompilers;
     };
-
-  };
-
-  config = {
-
-    buckGhc = "ghc914";
 
   };
 

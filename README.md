@@ -18,13 +18,21 @@ $ buck build //ops/buck-test/three-layers/project/...
 
 ```
 
-TODO outdated
-
-The flake provides the module option `buckGhc` that allows you to select the compiler you would like to use.
-The option definition lists the supported values, currently `["mwb" "mwb-25-10"]`.
+The flake provides the module option `buckCompilers` (at `ops/options.nix`) that allows you to select the set of
+compilers you would like to make available to Buck builds.
+The option definition lists the supported values, currently `["mwb-26-01" "ghc914"]`.
 If you want to add an entry, you will have to create new config values in `envs` and `package-sets` with your chosen
 name.
 You can copy an existing config and adapt it.
+
+In order to select a different compiler for a Buck build, you can specify a config option:
+
+```
+$ buck build --config=ghc-worker.env=ghc914 --config=ghc-worker.version=9.14.1 //ops/buck-test/restore/project/...
+```
+
+The version needs to specified explicitly as well, since the toolchain can't lift it into the layer where it's needed by
+running a subprocess like `ghc --print-project-version`.
 
 The tests in `ops/buck-test` can also be run as flake apps:
 

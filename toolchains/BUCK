@@ -12,6 +12,9 @@ default_nix_toolchains()
 
 default_flake_attrs()
 
+config_env = read_root_config("ghc-worker", "env", "mwb-26-01")
+config_ghc_version = read_root_config("ghc-worker", "version", "9.10.1")
+
 ################################################################################
 
 nix_build(
@@ -22,27 +25,31 @@ nix_build(
     ],
     binary = "ghc",
     flake = "root//:nix_overlays",
+    env = config_env,
 )
 
 nix_build(
     name = "ghc_worker",
     binary = "ghc-worker",
-    attr = "ghc-worker-buck",
+    attr = "ghc-worker",
     flake = "root//:nix_overlays",
+    env = config_env,
 )
 
 nix_build(
     name = "buck_proxy",
     binary = "buck-proxy",
-    attr = "buck-proxy-buck",
+    attr = "buck-proxy",
     flake = "root//:nix_overlays",
+    env = config_env,
 )
 
 nix_build(
     name = "ghc_proxy_bin",
     binary = "ghc-proxy",
-    attr = "ghc-proxy-buck",
+    attr = "ghc-proxy",
     flake = "@root//:nix_overlays",
+    env = config_env,
 )
 
 nix_haskell_toolchain(
@@ -52,7 +59,9 @@ nix_haskell_toolchain(
     ],
     exec_compatible_with = exec_compatible_with,
     flake = "root//:nix_overlays",
+    env = config_env,
     visibility = ["PUBLIC"],
+    compiler_major_version = config_ghc_version,
 #     worker = ":impure_ghc_worker",
 #     worker_proxy = ":impure_buck_proxy",
 )

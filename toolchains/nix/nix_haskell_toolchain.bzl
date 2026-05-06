@@ -182,7 +182,11 @@ def _make_drv_json(ctx: AnalysisContext, name: str) -> Artifact:
 
     drv_json = ctx.actions.declare_output(name)
 
-    cmd = cmd_args(nix_drv_json_script, "--output", drv_json.as_output(), "--flake", cmd_args("path:", flake, "#haskellPackages.libs", delimiter = ""))
+    attr = "haskellPackages.libs"
+    if ctx.attrs.env:
+      attr = "buck.{}.{}".format(ctx.attrs.env, attr)
+
+    cmd = cmd_args(nix_drv_json_script, "--output", drv_json.as_output(), "--flake", cmd_args("path:", flake, "#{}".format(attr), delimiter = ""))
 
     ctx.actions.run(
         cmd,
@@ -269,7 +273,7 @@ def _nix_haskell_toolchain_impl(ctx: AnalysisContext) -> list[Provider]:
             # (and the file that actually got created was called ghc-9.10.1)
             #
             # Messing this up will be caught by toolchains//tests/ghc_version_check.
-            compiler_major_version = "9.10.1",  # @moss-disable
+            compiler_major_version = ctx.attrs.compiler_major_version,  # @moss-disable
             # @moss-enable[end= ]: compiler_major_version = "9.10.3",
             compiler_flags = ctx.attrs.compiler_flags,
             linker_flags = ctx.attrs.linker_flags,
@@ -318,6 +322,8 @@ nix_haskell_toolchain = rule(
             default = "//:ghc[haddock]",
         ),
         "flake": attrs.source(allow_directory = True),
+        "env": attrs.option(attrs.string(), default = None),
+        "compiler_major_version": attrs.string(),
     },
     is_toolchain_rule = True,
 )
