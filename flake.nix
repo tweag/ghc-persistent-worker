@@ -25,12 +25,21 @@
     compilers = {
 
       # Roughly the GHC used by MWB.
-      mwb-26-01-ipe.source.build = {
+      mwb-26-04.source.build = {
         url = "https://gitlab.haskell.org/ghc/ghc";
         version = "9.10.1";
         flavour = "release+split_sections+ipe";
-        rev = "65d1ec83348e10082f60a4ae400cbcd31f76ad05";
-        hash = "sha256-mUnXDm708rVZH9wiglOUZ6bnS83Aln6ik+r2uTfDoP0=";
+        rev = "fe5932d418e8221bb5bcd34954caca07ff8d9310";
+        hash = "sha256-4ZhFSs6ZC3XXmrcmZ72ca0sn+RZVNgx5rbiwZuRJigY=";
+      };
+
+      # Some as `mwb-26-04`, but with fixed nodes.
+      mwb-26-04-fixed.source.build = {
+        url = "https://gitlab.haskell.org/ghc/ghc";
+        version = "9.10.1";
+        flavour = "release+split_sections+ipe";
+        rev = "630ee987758fe2fce24113afd445fa95e4b82503";
+        hash = "sha256-frUOGkwnYbCJooJtMYVpdGEWmi05rKjP6Dd2h0zq/8Q=";
       };
 
       ghc914.nixpkgs = "ghc914";
