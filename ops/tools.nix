@@ -3,7 +3,9 @@
   inherit (util) build;
 
   serverPkg = build.packages.min.ghc-server.package;
+  fixedServerPkg = build.packages.mwb-26-04-fixed.ghc-server.package;
   profiledServerPkg = build.packages.profiled.ghc-server.package;
+  profiledFixedPkg = build.packages.profiled-fixed.ghc-server.package;
   profiteur = build.envs.tools.toolchain.packages.profiteur;
 
   # Prebuilt ext dep packages for the mwb-26-04-fixed GHC, used by profiling apps.
@@ -140,16 +142,16 @@ in {
     depth=''${1-2}
     project=$(mktemp -d --tmpdir profile-cache-restore.XXXXXXXX)
     echo "Creating ''$(($depth * 2))-level test project at $project"
-    ${serverPkg}/bin/gen-project $project $depth
+    ${fixedServerPkg}/bin/gen-project $project $depth
 
     ${cleanup}
 
     echo "Starting ghc-server for initial full build..."
-    ${serverPkg}/bin/ghc-server --verbose $project &
+    ${fixedServerPkg}/bin/ghc-server --verbose $project &
     server_pid=$!
 
     echo "Building all units..."
-    ${serverPkg}/bin/ghc-client $project --wait
+    ${fixedServerPkg}/bin/ghc-client $project --wait
 
     echo "Stopping server..."
     kill $server_pid
@@ -189,11 +191,126 @@ in {
     echo "Profile saved: ghc-server.prof, ghc-server.prof.html"
     '';
 
+    outputs.apps.profile-cache-meta = util.zapp "profile-cache-meta" ''
+    depth=''${1-3}
+    project=$(mktemp -d --tmpdir profile-cache-meta.XXXXXXXX)
+    echo "Creating project with depth=$depth at $project"
+    ${serverPkg}/bin/gen-project $project $depth
+
+    ${cleanup}
+
+    echo "Starting ghc-server for initial full build..."
+    ${serverPkg}/bin/ghc-server --verbose $project &
+    server_pid=$!
+
+    echo "Building all units..."
+    ${serverPkg}/bin/ghc-client $project --wait
+
+    echo "Stopping server..."
+    kill $server_pid
+    wait $server_pid || true
+    server_pid=
+
+    echo "Deleting output and cache for root units (unit0, unit1)..."
+    rm -rf $project/output/unit0 $project/output/unit1
+    rm -rf $project/cache/unit0 $project/cache/unit1
+    rm -rf $project/socket
+
+    # Build target list: only metadata for root units
+    targets="unit0:metadata unit1:metadata"
+
+    rts_opts="''${2--p}"
+    echo "Starting profiled ghc-server with RTS opts: $rts_opts"
+    cd $project
+    ${profiledFixedPkg}/bin/ghc-server --verbose $project +RTS $rts_opts &
+    server_pid=$!
+    cd -
+
+    echo "Running metadata for root units only..."
+    ${fixedServerPkg}/bin/ghc-client $project --wait $targets
+
+    echo "Stopping profiled server..."
+    kill -INT $server_pid
+    wait $server_pid || true
+    server_pid=
+
+    # Copy profiling output
+    for f in $project/ghc-server.prof $project/ghc-server.eventlog; do
+      if [[ -f $f ]]; then
+        base=$(basename $f)
+        cp $f $base
+        echo "Copied: $base"
+        if [[ $f == *.prof ]]; then
+          ${profiteur}/bin/profiteur $f
+          cp ''${f%.prof}.prof.html $base.html
+          echo "Rendered: $base.html"
+        fi
+      fi
+    done
+    '';
+
     outputs.apps.profile-test = util.app (util.zscript "profile-test" ''
     nix develop .#test-ext-deps -c cabal test ghc-worker \
       --test-option '-p "/profiling/"' \
       $@
     '');
+
+    outputs.apps.profile-cache-wide = util.zapp "profile-cache-wide" ''
+    depth=''${1-10}
+    mods_per_unit=''${2-3}
+    project=$(mktemp -d --tmpdir profile-cache-wide.XXXXXXXX)
+
+    ${fixedServerPkg}/bin/gen-project --wide $project $depth $mods_per_unit
+
+    ${cleanup}
+
+    echo "Starting ghc-server for initial full build..."
+    ${fixedServerPkg}/bin/ghc-server --verbose $project &
+    server_pid=$!
+
+    echo "Building all units..."
+    ${fixedServerPkg}/bin/ghc-client $project --wait
+
+    echo "Stopping server..."
+    kill $server_pid
+    wait $server_pid || true
+    server_pid=
+
+    echo "Deleting output and cache for root unit (unit1)..."
+    rm -rf $project/output/unit1
+    rm -rf $project/cache/unit1
+    rm -rf $project/socket
+
+    targets="unit1:metadata"
+
+    rts_opts="''${3--p}"
+    echo "Starting profiled ghc-server with RTS opts: $rts_opts"
+    cd $project
+    ${profiledFixedPkg}/bin/ghc-server --verbose $project +RTS $rts_opts &
+    server_pid=$!
+    cd -
+
+    echo "Running metadata for root unit only..."
+    ${fixedServerPkg}/bin/ghc-client $project --wait $targets
+
+    echo "Stopping profiled server..."
+    kill -INT $server_pid
+    wait $server_pid || true
+    server_pid=
+
+    for f in $project/ghc-server.prof $project/ghc-server.eventlog; do
+      if [[ -f $f ]]; then
+        base=$(basename $f)
+        cp $f $base
+        echo "Copied: $base"
+        if [[ $f == *.prof ]]; then
+          ${profiteur}/bin/profiteur $f
+          cp ''${f%.prof}.prof.html $base.html
+          echo "Rendered: $base.html"
+        fi
+      fi
+    done
+    '';
 
   };
 
