@@ -53,6 +53,7 @@
           "containers"
           "directory"
           "extra"
+          "file-io"
           "filepath"
           "ghc"
           "ghc-boot"
@@ -114,6 +115,7 @@
           "optparse-applicative"
           "process"
           "text"
+          "unix"
         ];
       };
       executables.buck-proxy = {
