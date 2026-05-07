@@ -53,6 +53,7 @@
           "containers"
           "directory"
           "extra"
+          "file-io"
           "filepath"
           "ghc"
           "ghc-boot"

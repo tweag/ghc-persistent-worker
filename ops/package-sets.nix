@@ -278,11 +278,11 @@ in {
       Diff = hackage "0.5" "13n231179wa9xm2933f328v00jb486w740yahz4qcbza4yv39w1i";
       co-log-core = notest;
       directory-ospath-streaming = hackage "0.3" "0m0v200mgmkizm3l6pw9x9gvqx9xancgsal4z1pb7hi2pgrj0w0d";
-      doctest = github {
-        repo = "doctest";
-        rev = "f6f0ea80314ae97a550229c95b15333566c35fe0";
-        hash = "sha256-R3HKHj6+btPodhOyeW50xvZwFqF1IaN3+6dHN9KLjmw=";
-      };
+      # doctest = github {
+      #   repo = "doctest";
+      #   rev = "f6f0ea80314ae97a550229c95b15333566c35fe0";
+      #   hash = "sha256-R3HKHj6+btPodhOyeW50xvZwFqF1IaN3+6dHN9KLjmw=";
+      # };
       doctest-parallel = self.doctest;
       fourmolu = drv null;
       ghc-lib-parser = hackage "9.12.2.20250421" "0qxi41zr50chrr6isyfpff5kq6kqxhc5iri6a8ixvz27042a0hsq";
