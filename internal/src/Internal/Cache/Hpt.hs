@@ -28,12 +28,12 @@ import GHC.Unit (Definite (..), GenUnit (..), UnitId)
 import GHC.Unit.Env (UnitEnv (..))
 import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..))
 import GHC.Unit.Module.ModDetails (ModDetails (..))
-import GHC.Unit.Module.ModIface (set_mi_extra_decls)
 import GHC.Unit.Module.WholeCoreBindings (WholeCoreBindings (..))
 import GHC.Utils.Misc (modificationTimeIfExists)
 import GHC.Utils.Outputable (ppr, ($+$))
 import GHC.Utils.Panic (throwGhcExceptionIO, tryMost)
 import Internal.Cache.Metadata (loadCachedUnit, loadCachedUnits, readParseGHCArgs)
+import Internal.Compat.GHC914 (setExtraDecls)
 import Internal.Log (logTimed)
 import Internal.UnitEnv (addHomeModInfoToHpt, lookupHpt, unitEnv_member)
 import Prelude hiding (log)
@@ -145,7 +145,7 @@ loadCachedDep log name hsc_env ifaceFile = do
         hm_iface0 <- loadIface
         hm_details <- initModDetails hsc_env hm_iface0
         homeMod_bytecode <- loadCachedByteCode hsc_env ifaceFile hm_iface0 hm_details
-        let hm_iface = set_mi_extra_decls Nothing hm_iface0
+        let hm_iface = setExtraDecls Nothing hm_iface0
         let new = HomeModInfo {
           hm_iface,
           hm_linkable = HomeModLinkable {homeMod_object = Nothing, homeMod_bytecode},

@@ -2,12 +2,6 @@
 
 module Internal.BuildPlan where
 
-#if defined(FIXED_NODES)
-
-import GHC.Types.Error (mkUnknownDiagnostic)
-
-#endif
-
 import Control.Monad (unless)
 import Data.Either (partitionEithers)
 import Data.Foldable (toList)
@@ -39,6 +33,7 @@ import GHC.Unit.Module.ModSummary (ModSummary (..), isBootSummary, msHsFilePath,
 import GHC.Utils.Error (isEmptyMessages)
 import Internal.BuildPlan.External (packageName, unitImports)
 import Internal.BuildPlan.Json (assembleFields)
+import Internal.Compat.GHC914 (edgeTarget)
 import System.FilePath (splitExtension)
 import Types.Args (BuildPlanField (..))
 import Types.BuildPlan (
@@ -56,13 +51,7 @@ import Types.BuildPlan (
   )
 import Types.CachedDeps (JsonFs (..))
 
-#if !MIN_VERSION_GLASGOW_HASKELL(9,10,0,0)
-
-import GHC.Utils.Panic.Plain
-
-#endif
-
-#if defined(MWB) || defined(MWB_2025_10)
+#if defined(MWB) || defined(MWB_2025_10) || MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
 
 import GHC.Unit.Home.Graph (unitEnv_keys)
 
@@ -72,7 +61,7 @@ import GHC.Unit.Env (unitEnv_keys)
 
 #endif
 
-#if defined(MWB_2025_10)
+#if defined(MWB_2025_10) || MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
 
 import GHC.Unit.Module.ModSummary (isTemplateHaskellOrQQNonBoot)
 
@@ -85,6 +74,7 @@ import GHC.Unit.Module.Graph (isTemplateHaskellOrQQNonBoot)
 #if defined(FIXED_NODES)
 
 import GHC.Unit.Module.Graph (ModuleNodeInfo (..))
+import GHC.Types.Error (mkUnknownDiagnostic)
 
 #else
 
@@ -178,9 +168,9 @@ buildPlanNode hsc_env = \case
   ModuleNode !node_deps node
 #endif
     | hscActiveUnitId hsc_env == ms_unitid node
-    -> Just (Left (node, Set.fromList node_deps))
+    -> Just (Left (node, Set.fromList (edgeTarget <$> node_deps)))
     | otherwise
-    -> Just (Right (node, Set.fromList node_deps))
+    -> Just (Right (node, Set.fromList (edgeTarget <$> node_deps)))
   _ -> Nothing
 
 indexWith :: (ModSummary -> a) -> [ModSummary] -> Map NodeKey a

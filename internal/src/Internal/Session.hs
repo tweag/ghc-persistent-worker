@@ -34,6 +34,7 @@ import GHC.Utils.Outputable (ppr, text, (<+>))
 import GHC.Utils.Panic (panic, pprPanic)
 import GHC.Utils.TmpFs (TempDir (..), cleanTempDirs, cleanTempFiles, initTmpFs)
 import Internal.Cache.Hpt (loadCachedDeps, loadHomeUnit)
+import Internal.Compat.GHC914 (hscSetModuleGraph)
 import Internal.DynFlags (buckLocation, initDynFlags, instrumentLocation, parseFlags, setupPath)
 import Internal.Env (withDebugLog)
 import Internal.Error (handleExceptions)
@@ -203,7 +204,7 @@ withGhcMakeModule target = do
     withCacheMake env.log env.state do
       modifySessionM \ hsc_env0 -> do
         hsc_env1 <- processArg hsc_env0 (loadHomeUnit env.log env.state dflags0 (moduleUnitId target.mod)) env.args.homeUnit
-        hsc_env2 <- liftIO $ withMVar env.state \ state -> pure hsc_env1 {hsc_mod_graph = state.make.moduleGraph}
+        hsc_env2 <- liftIO $ withMVar env.state \ state -> pure (hscSetModuleGraph state.make.moduleGraph hsc_env1)
         let hsc_env3 = hscSetActiveUnitId (moduleUnitId target.mod) (hsc_env2)
         processArg hsc_env3 (loadCachedDeps env.log) env.args.cachedDeps
       initializeSessionPlugins
