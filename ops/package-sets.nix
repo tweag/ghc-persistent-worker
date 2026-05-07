@@ -110,6 +110,8 @@ in {
 
   envs.mercury-ghc9101 = latestEnv [buckBinOverrides] // {
     expose.scoped = true;
+    package-set.extends = "mwb-26-04-fixed";
+    overrides = commonOverrides ["mwb" "unit-index" "downsweep-cache" "fixed-nodes"] ++ [buckBinOverrides ipeOverrides];
   };
 
   envs.profiled = defaultEnv [({notest, ...}: { ghc-worker = notest; ghc-server = notest; })];
@@ -177,6 +179,7 @@ in {
         hash = "sha256-R3HKHj6+btPodhOyeW50xvZwFqF1IaN3+6dHN9KLjmw=";
       };
     };
+
   };
 
   package-sets.mercury-ghc9141 = {
