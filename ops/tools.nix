@@ -1,8 +1,15 @@
-{util, ...}: let
+{config, lib, util, ...}: let
 
   inherit (util) build;
 
   serverPkg = build.packages.min.ghc-server.package;
+
+  # Prebuilt ext dep packages for the mwb-26-04-fixed GHC, used by profiling apps.
+  fixedExtDeps = import ./test-ext-deps.nix {
+    inherit (config) pkgs;
+    inherit lib;
+    ghc = build.envs.mwb-26-04-fixed.toolchain.packages.ghc;
+  };
 
   setupProject = ''
   project=$(mktemp -d --tmpdir ghc-server-test.XXXXXXXX)
