@@ -128,57 +128,6 @@ in {
   #   This is fixed in nixpkgs upstream.
   envs.hix-build-tools.package-set.compiler.source = "ghc98";
 
-  package-sets.mwb-25-10 = {
-    compiler = "mwb-25-10-ipe";
-    overrides = api@{hackage, force, source, notest, ...}: let
-
-      github = mkGithub api;
-
-    in {
-      ChasingBottoms = force;
-      __all = notest;
-      aeson = force (hackage "2.2.3.0" "1a9a0z6ljbck5scwkk9r9p04y9avn9vja3n063lyqgn2v1vjb1sp");
-      bitwise = force;
-      boring = force;
-      cborg = force;
-      foldl = force;
-      generic-deriving = force;
-      ghc-source-gen = github {
-        repo = "ghc-source-gen";
-        rev = "fd010ca5229a8ff0231a0af36bd17bcf7d0c976f";
-        hash = "sha256-I+SeSO/eX/jCUhtmGVljcN+FspkSEWS6WTaU9ktGurg=";
-      };
-      happy = notest;
-      hashable = force (hackage "1.5.0.0" "1hh22f23apsjrn3h36vzw9871jqw6y4r4di1351qs5mqqabhd011");
-      hedgehog = force;
-      http-types = notest;
-      indexed-traversable = force;
-      indexed-traversable-instances = force;
-      integer-conversion = force;
-      integer-logarithms = hackage "1.0.4" "0yyj0g5xkm1pjkkr4smf25lpzc936df0fyc4nsj4bx145ggspx3k";
-      invariant = force;
-      lens = notest (hackage "5.3.5" "0cbpvsyc9nk0v6n2zcgvcjnzp7pxffnv285jdn6gldrw9pksbkpf");
-      lifted-base = force;
-      proto-lens-setup = github {
-        repo = "proto-lens";
-        rev = "901331d19c3ab90ec24e231fa69c9ed81204f73b";
-        path = "proto-lens-setup";
-        hash = "sha256-st+j4vK4N00xHB//b62/HPLRBUw/PRGL8bP8WECMU5U=";
-      };
-      scientific = force;
-      semialign = force;
-      strict = force;
-      th-abstraction = notest (hackage "0.7.1.0" "09wr7x9bpzyrys8id1mavk9wvqhh2smxdkfwi82kpcycm7a1z7sx");
-      th-compat = force;
-      these = force;
-      time-compat = force;
-      unordered-containers = notest;
-      uuid-types = force;
-      witherable = force;
-      zlib = force;
-    };
-  };
-
   overrides = {hackage, force, source, notest, super, ...}: {
     crypton = hackage "1.0.6" "0y5r1kzlgnzriydik334f5y5bxfm9mf0akxvxs810896r4hnvq0h";
     crypton-x509 = hackage "1.8.0" "0f35689cbxdv25b0xjlla4hmxjxjraiwc6v89y12nl3nxqx3q5f3";
