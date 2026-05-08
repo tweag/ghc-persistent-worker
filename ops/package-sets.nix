@@ -90,6 +90,12 @@ in {
 
   envs.profiled = defaultEnv [({notest, ...}: { ghc-worker = notest; ghc-server = notest; })];
 
+  envs.ghc914 = {
+    expose.scoped = true;
+    package-set.extends = "ghc914";
+    overrides = commonOverrides ["fixed-nodes"] ++ [buckBinOverrides ipeOverrides];
+  };
+
   # This environment is for building the worker with an externally provided, impure GHC.
   envs.cabal-build = {
     expose.shell = true;
@@ -173,39 +179,81 @@ in {
     };
   };
 
-  overrides = {hackage, force, source, notest, ...}: {
-    auto-update = hackage "0.2.6" "0sp25j3fcgmfr2zv1ccg1id1iynj3azinjg23g0vy1m1m7gnmkzi";
-    eventlog2html = hackage "0.11.1" "0l4klmfsxmikh8x7rp7l3s5sycwq2xmqz3d1p6078pcygjkzc6fv";
+  overrides = {hackage, force, source, notest, super, ...}: {
+    crypton = hackage "1.0.6" "0y5r1kzlgnzriydik334f5y5bxfm9mf0akxvxs810896r4hnvq0h";
+    crypton-x509 = hackage "1.8.0" "0f35689cbxdv25b0xjlla4hmxjxjraiwc6v89y12nl3nxqx3q5f3";
+    crypton-x509-store = hackage "1.8.0" "1irrrgm6jmw0irjgwk877smg381wlv72rcgacqrp09dplzjcg82k";
+    crypton-x509-validation = hackage "1.8.0" "1dxvbkxwlk6qhg0id65fwssda04pn9y7glq7jpakqlww8d6nl90b";
     ghc-debug-brick = source.sub ghc-debug "ghc-debug-brick";
     ghc-debug-client = force (source.sub ghc-debug "client");
     ghc-debug-common = force (source.sub ghc-debug "common");
     ghc-debug-convention = force (source.sub ghc-debug "convention");
     ghc-debug-stub = source.sub ghc-debug "stub";
-    grapesy = force (hackage "1.0.1" "0j7w0knclrhxc5h1vlbdpwvvpz6ixjw6flqfhdgk6xw30g7cwf5m");
-    grpc-spec = notest (hackage "1.0.0" "0pgq63k6p65c5ffzxwihp8j1p731qrnda5rxrzqsylanmdmnvjb8");
-    hinotify = hackage "0.4.2" "072i8d9khxwra5x05bxxm6018ga3sjf7kykxqc6km7vi01wh2h1b";
-    hedgehog = hackage "1.7" "04cjnz4i1qs3v9bza8a3ry1czapwqgxazhywkjzq2rg1544gjmby";
-    http-semantics = hackage "0.3.0" "0ghj37jr5bsz047p6i66ddkwc9mxkfpbw14nd54slmj1lpwn5z4a";
-    http2 = force (hackage "5.3.10" "025l7sxg9jhhkhxzlhylnh2b1phdk3vml3m573lvldcy812hpvjk");
-    http2-tls = force;
-    network = hackage "3.2.7.0" "08frm9gm422b9aqlmmzflj0yr80ic0ip8s4gsmr0izhizzab5420";
-    network-control = hackage "0.1.7" "0p46ymb8565909q2qzig02q91ch8c4zrkminvma1iizb3s2d81m8";
-    network-run = hackage "0.4.4" "0c2wpm9bkizaw9sbhy9yi51m04cjlbvzdjw09s5gy74wz2pz4spw";
-    proto-lens = force;
-    proto-lens-protobuf-types = force;
-    proto-lens-protoc = force (hackage "0.9.0.0" "18b0hz5z4cfimnbhjnhdk4lf2r0wy5aardngdhyy8aqvr62v5r62");
-    proto-lens-runtime = force;
-    proto-lens-setup = force;
-    serialise = force;
-    snappy-c = force;
-    tasty-hedgehog = force;
-    time-manager = hackage "0.2.2" "1ja8pimvy07b05ifkrg6q0lzs3kh0k2dmncwjdxl81199r559vf5";
-    tls = hackage "2.1.6" "11rxsmwhv6g4298a0355v6flz4n6gw64qw3iha7z0ka3nv7vq4vv";
-    uuid = force;
+    grpc-spec = force;
+    http2-tls = force (hackage "0.4.9" "06sw9z3qbsw70phh0fngpa3drg8sdrxiszjlf2i7wxyl04l3n6i4");
+    tls = hackage "2.2.2" "1arnw38a3x70264sags3yrq4c01nfcy17sjq3ycasfb2yq6fiflm";
   };
 
   package-sets.mwb-26-01 = {
     compiler = "mwb-26-01-ipe";
+    overrides = {hackage, force, source, self, ...}: {
+      auto-update = hackage "0.2.6" "0sp25j3fcgmfr2zv1ccg1id1iynj3azinjg23g0vy1m1m7gnmkzi";
+      crypton-asn1-encoding = hackage "0.10.0" "0h4cxk9yz2xgmx0kl3gg9lixhnhvxqk85gvkwldp0mlfm3mgccvm";
+      crypton-asn1-parse = hackage "0.10.0" "0dsyslbb9a3f6wj0na52qc7iimjs9xljhi6wjfch61nb9m33l1kb";
+      crypton-asn1-types = hackage "0.4.1" "01zvf9vn5a0jyaq5l6mmzv7ya35sxjrk10k06rmi31x128sfqs7s";
+      crypton-pem = hackage "0.3.0" "1bvcl2brlgqbb1kmjzlfspmm47n1g441qgsmyhz9ql3zlcz1s524";
+      ech-config = hackage "0.0.1" "0sxxxd9rlc3x14mgh92ic8s9hjncf38f9s7p3ic284mvnzj0l3s2";
+      eventlog2html = hackage "0.11.1" "0l4klmfsxmikh8x7rp7l3s5sycwq2xmqz3d1p6078pcygjkzc6fv";
+      flatparse = hackage "0.5.2.0" "06qncwbrwxpx877xxxq01zap3l33ln7ab5v3jr70mb2h5j6v97ck";
+      grapesy = force (hackage "1.1.1" "01n14bcrwshm2vkgrzg10s6rvxsw9sm75ws26py0k3f03bj94jcv");
+      grpc-spec = hackage "1.0.0" "0pgq63k6p65c5ffzxwihp8j1p731qrnda5rxrzqsylanmdmnvjb8";
+      hedgehog = force (hackage "1.7" "04cjnz4i1qs3v9bza8a3ry1czapwqgxazhywkjzq2rg1544gjmby");
+      hinotify = hackage "0.4.2" "072i8d9khxwra5x05bxxm6018ga3sjf7kykxqc6km7vi01wh2h1b";
+      hpke = hackage "0.0.0" "0vyny5gqw8rk0s75088ggs3q78fgmas9mnxnwjpny4h9nw6dysr9";
+      http-semantics = hackage "0.3.0" "0ghj37jr5bsz047p6i66ddkwc9mxkfpbw14nd54slmj1lpwn5z4a";
+      network = hackage "3.2.7.0" "08frm9gm422b9aqlmmzflj0yr80ic0ip8s4gsmr0izhizzab5420";
+      network-control = hackage "0.1.7" "0p46ymb8565909q2qzig02q91ch8c4zrkminvma1iizb3s2d81m8";
+      network-run = hackage "0.4.4" "0c2wpm9bkizaw9sbhy9yi51m04cjlbvzdjw09s5gy74wz2pz4spw";
+      proto-lens = force;
+      proto-lens-protobuf-types = force;
+      proto-lens-protoc = force (hackage "0.9.0.0" "18b0hz5z4cfimnbhjnhdk4lf2r0wy5aardngdhyy8aqvr62v5r62");
+      proto-lens-runtime = force;
+      proto-lens-setup = force;
+      ram = hackage "0.22.0" "1mwg8gha1y2hvk7yf2kd9411ibqba0r9ach1ypg6yk5mxqrfgcv7";
+      serialise = force;
+      snappy-c = force;
+      tasty = hackage "1.5.4" "0x6khif6n0rzfgkvrbiagg1sj0lwmjfr6qarjnjwmb9ywdk7598b";
+      tasty-hedgehog = force;
+      time-hourglass = hackage "0.3.0" "11fm4wywl0q5g0q34d049x7wxlp80rycp7hqrp2m7l7dmhihnn6d";
+      time-manager = hackage "0.2.2" "1ja8pimvy07b05ifkrg6q0lzs3kh0k2dmncwjdxl81199r559vf5";
+      uuid = force;
+      zlib = self.zlib_0_7_1_0;
+    };
+  };
+
+  package-sets.ghc914 = {
+    compiler = "ghc914";
+    overrides = api@{hackage, force, notest, ...}: let
+
+      github = mkGithub api;
+
+    in {
+      base64 = force;
+      lens-family = force;
+      lens-family-core = force;
+      proto-lens = force;
+      proto-lens-protobuf-types = force;
+      proto-lens-protoc = force;
+      proto-lens-runtime = force;
+
+      proto-lens-setup = github {
+        repo = "proto-lens";
+        rev = "901331d19c3ab90ec24e231fa69c9ed81204f73b";
+        path = "proto-lens-setup";
+        hash = "sha256-st+j4vK4N00xHB//b62/HPLRBUw/PRGL8bP8WECMU5U=";
+      };
+
+    };
   };
 
   envs.tools = {

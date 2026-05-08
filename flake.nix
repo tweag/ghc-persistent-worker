@@ -17,7 +17,7 @@
 
   outputs = inputs@{hix, ...}: hix [({config, lib, util, ...}: {
     compiler = "ghc910";
-    ghcVersions = [];
+    ghcVersions = ["ghc914"];
     main = "ghc-worker";
     ghci.args = ["-package ghc" "-DMWB" "-DDOWNSWEEP_CACHE" "-DUNIT_INDEX"];
     hls.genCabal = false;
@@ -40,6 +40,17 @@
         flavour = "release+split_sections+ipe";
         rev = "99d4164fcd5cbc23c1f00bf5fd2e8f710d10bf16";
         hash = "sha256-yN0jQJiVAcBNCpHUpxPzFSGgY4TAO0xpfdzQl9L5lgs=";
+      };
+
+      ghc914.nixpkgs = "ghc914";
+
+    };
+
+    nixpkgs = {
+
+      ghc914.source = {
+        rev = "c6d65881c5624c9cae5ea6cedef24699b0c0a4c0";
+        hash = "sha256-WNGcmeOZ8Tr9dq6ztCspYbzWFswr2mPebM9LpsfGxPk=";
       };
 
     };
