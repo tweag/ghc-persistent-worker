@@ -313,12 +313,6 @@
 
       flags = {
 
-        mwb-25-10 = {
-          description = "Use mwb-customized GHC (9.12) from October 2025";
-          manual = true;
-          default = false;
-        };
-
         mwb = {
           description = "Use mwb-customized GHC from January 2026";
           manual = true;
@@ -349,10 +343,6 @@
         {
           condition = "flag(mwb)";
           cpp-options = ["-DMWB" "-DUNIT_INDEX" "-DDOWNSWEEP_CACHE"];
-        }
-        {
-          condition = "flag(mwb-25-10)";
-          cpp-options = ["-DMWB_2025_10" "-DFIXED_NODES"];
         }
         {
           condition = "flag(downsweep-cache)";

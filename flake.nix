@@ -33,15 +33,6 @@
         hash = "sha256-mUnXDm708rVZH9wiglOUZ6bnS83Aln6ik+r2uTfDoP0=";
       };
 
-      # More recent GHC that includes fixed module graph nodes, with all of the custom patches present in `mwb-26-01`.
-      mwb-25-10-ipe.source.build = {
-        url = "https://gitlab.haskell.org/ghc/ghc";
-        version = "9.12.1";
-        flavour = "release+split_sections+ipe";
-        rev = "99d4164fcd5cbc23c1f00bf5fd2e8f710d10bf16";
-        hash = "sha256-yN0jQJiVAcBNCpHUpxPzFSGgY4TAO0xpfdzQl9L5lgs=";
-      };
-
       ghc914.nixpkgs = "ghc914";
 
     };
