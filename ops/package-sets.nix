@@ -180,6 +180,7 @@ in {
     ghc-debug-stub = source.sub ghc-debug "stub";
     grpc-spec = force;
     http2-tls = force (hackage "0.4.9" "06sw9z3qbsw70phh0fngpa3drg8sdrxiszjlf2i7wxyl04l3n6i4");
+    tasty = hackage "1.5.4" "0x6khif6n0rzfgkvrbiagg1sj0lwmjfr6qarjnjwmb9ywdk7598b";
     tls = hackage "2.2.2" "1arnw38a3x70264sags3yrq4c01nfcy17sjq3ycasfb2yq6fiflm";
   };
 
