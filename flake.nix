@@ -53,6 +53,17 @@
         hash = "sha256-WNGcmeOZ8Tr9dq6ztCspYbzWFswr2mPebM9LpsfGxPk=";
       };
 
+      ghc914.nixpkgs = "ghc914";
+
+    };
+
+    nixpkgs = {
+
+      ghc914.source = {
+        rev = "c6d65881c5624c9cae5ea6cedef24699b0c0a4c0";
+        hash = "sha256-WNGcmeOZ8Tr9dq6ztCspYbzWFswr2mPebM9LpsfGxPk=";
+      };
+
     };
 
     internal.hixCli.dev = true;
