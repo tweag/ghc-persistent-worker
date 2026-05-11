@@ -5,7 +5,7 @@ module GhcClient.Run where
 import BuckWorkerProto (ExecuteCommand)
 import Common.Grpc (sendRequest, waitPoll)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Trans.Except (ExceptT, except, runExceptT, throwE)
+import Control.Monad.Trans.Except (ExceptT, runExceptT, throwE)
 import Data.Bifunctor (first)
 import Data.Text qualified as Text
 import Data.Text.Encoding (encodeUtf8)
@@ -61,7 +61,7 @@ clientParserInfo =
 -- | Wait for the server to come online, then send a gRPC request to schedule jobs.
 client :: ClientConfig -> ExceptT String IO ()
 client config = do
-  socket <- except (socketPath config.projectRoot)
+  let socket = socketPath config.projectRoot
   liftIO do
     hPutStrLn stderr ("Connecting to ghc-server at " ++ socket)
     waitPoll socket

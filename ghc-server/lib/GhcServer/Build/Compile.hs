@@ -7,7 +7,7 @@ import GhcServer.Cache (loadHomeUnitCache)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
 import GhcServer.Log (withBuildLog)
-import GhcServer.Path (fp, osPath)
+import GhcServer.Path (fromOsPath, toOsPath)
 import Internal.Compile.Make (compileModuleWithDepsInHpt)
 import Internal.Session (withGhcMakeModule)
 import Prelude hiding (log)
@@ -40,13 +40,13 @@ compileSingleModule buildEnv name modName cachedDeps =
   case Map.lookup name buildEnv.project.units of
     Nothing -> pure ([(name, modName, "Unit not found in project")], [])
     Just unit -> do
-      let modTmpDir = buildEnv.tmpDir </> osPath name.string </> osPath (moduleNameString modName)
+      let modTmpDir = buildEnv.tmpDir </> toOsPath name.string </> toOsPath (moduleNameString modName)
       createDirectoryIfMissing True modTmpDir
       cachedUnit <- loadHomeUnitCache unit.cache
       withBuildLog \ logger -> do
         let
           args = buildEnv.baseArgs {
-            tempDir = Just (fp modTmpDir),
+            tempDir = Just (fromOsPath modTmpDir),
             homeUnit = cachedUnit,
             cachedDeps = Just cachedDeps
           }

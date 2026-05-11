@@ -24,7 +24,7 @@ import Distribution.Utils.Path (getSymbolicPath)
 import Distribution.Verbosity (silent)
 import GHC.Data.Graph.Directed (graphFromEdgedVerticesOrd)
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..), mkUnitCache)
-import GhcServer.Path (osPath)
+import GhcServer.Path (toOsPath)
 import GhcServer.Project (isHaskellSource, unitDepNode)
 import System.Directory.OsPath (createDirectoryIfMissing, doesFileExist, listDirectory)
 import System.OsPath (OsPath, decodeUtf, (</>))
@@ -92,7 +92,7 @@ partitionDeps pkgName locals deps =
 -- | Discover source files in a list of source directories.
 discoverSources :: OsPath -> [FilePath] -> IO [OsPath]
 discoverSources projectRoot srcDirs = do
-  let dirs = if null srcDirs then [projectRoot] else map (\ s -> projectRoot </> osPath s) srcDirs
+  let dirs = if null srcDirs then [projectRoot] else map (\ s -> projectRoot </> toOsPath s) srcDirs
   concat <$> traverse listSourceDir dirs
   where
     listSourceDir dir = do
@@ -122,12 +122,12 @@ buildUnit projectRoot outputDir tmpDir pkgName locals libName lib = do
       (localDeps, extDeps) = partitionDeps pkgName locals bi.targetBuildDepends
       ghcArgs = concatMap (\ d -> ["-package", d]) extDeps
   sources <- discoverSources projectRoot srcDirPaths
-  createDirectoryIfMissing True (outputDir </> osPath name.string)
-  createDirectoryIfMissing True (tmpDir </> osPath name.string)
+  createDirectoryIfMissing True (outputDir </> toOsPath name.string)
+  createDirectoryIfMissing True (tmpDir </> toOsPath name.string)
   pure Unit {
     name,
     dir = case srcDirPaths of
-      (d : _) -> projectRoot </> osPath d
+      (d : _) -> projectRoot </> toOsPath d
       [] -> projectRoot,
     ghcArgs,
     sources,
