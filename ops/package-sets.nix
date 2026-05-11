@@ -93,7 +93,7 @@ in {
   envs.ghc914 = {
     expose.scoped = true;
     package-set.extends = "ghc914";
-    overrides = commonOverrides ["fixed-nodes"] ++ [buckBinOverrides ipeOverrides];
+    overrides = commonOverrides ["fixed-nodes"] ++ [buckBinOverrides];
   };
 
   # This environment is for building the worker with an externally provided, impure GHC.
