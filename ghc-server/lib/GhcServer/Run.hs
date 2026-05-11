@@ -4,7 +4,7 @@ module GhcServer.Run where
 
 import Common.Grpc (fromGrpcHandler, runGrpcServer)
 import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Except (except, runExceptT)
+import Control.Monad.Trans.Except (runExceptT)
 import GhcServer.Data.Config (ServerConfig (..))
 import GhcServer.Handler (serverHandler)
 import GhcServer.Path (socketDirName, socketPath)
@@ -64,7 +64,7 @@ runServer = do
     Right () -> pure ()
   where
     server config = do
-      socket <- except (socketPath config.projectRoot)
+      let socket = socketPath config.projectRoot
       lift do
         createDirectoryIfMissing True (config.projectRoot </> socketDirName)
         hPutStrLn stderr ("Starting ghc-server on " ++ socket)

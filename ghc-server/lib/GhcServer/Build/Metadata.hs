@@ -7,7 +7,7 @@ import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (BuildEvent (..), logEvent)
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
 import GhcServer.Log (withBuildLog)
-import GhcServer.Path (fp, osPath)
+import GhcServer.Path (fromOsPath, toOsPath)
 import Internal.Metadata (computeMetadata)
 import Prelude hiding (log)
 import System.OsPath (OsPath, (</>))
@@ -47,23 +47,23 @@ metadataArgs base outputDir cachedPlans unit =
       ++ depFlags
       ++ [
         "-this-unit-id", unit.name.string,
-        "-odir", fp outDir,
-        "-hidir", fp outDir,
-        "-stubdir", fp outDir,
+        "-odir", fromOsPath outDir,
+        "-hidir", fromOsPath outDir,
+        "-stubdir", fromOsPath outDir,
         "-dep-makefile", "/dev/null"
       ]
       ++ sourcePaths
   }
   where
-    buildPlanPath = outDir </> osPath "build-plan.json"
+    buildPlanPath = outDir </> toOsPath "build-plan.json"
 
-    outDir = outputDir </> osPath unit.name.string
+    outDir = outputDir </> toOsPath unit.name.string
 
     depFlags = concatMap depFlag unit.depUnits
 
     depFlag dep = ["-package-id", dep.string]
 
-    sourcePaths = map fp unit.sources
+    sourcePaths = map fromOsPath unit.sources
 
 -- | Run the metadata step for a unit.
 --
