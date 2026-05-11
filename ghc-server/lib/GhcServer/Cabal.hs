@@ -5,9 +5,7 @@
 -- against the set of known library names in the same package.
 module GhcServer.Cabal where
 
-import Data.List (isSuffixOf)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (catMaybes)
 import qualified Data.Set as Set
 import Distribution.Compat.NonEmptySet (toList)
 import Distribution.Package (packageName)
@@ -24,24 +22,21 @@ import Distribution.Utils.Path (getSymbolicPath)
 import Distribution.Verbosity (silent)
 import GHC.Data.Graph.Directed (graphFromEdgedVerticesOrd)
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..), mkUnitCache)
-import GhcServer.Path (toOsPath)
+import GhcServer.Path (fromOsPath, toOsPath)
 import GhcServer.Project (isHaskellSource, unitDepNode)
 import System.Directory.OsPath (createDirectoryIfMissing, doesFileExist, listDirectory)
-import System.OsPath (OsPath, decodeUtf, (</>))
+import System.OsPath (OsPath, (</>), decodeUtf, takeExtension)
+import System.OsString (unsafeEncodeUtf)
 import Types.Log (Logger (..))
 
--- | Find the first @.cabal@ file in a directory.
-findCabalFile :: OsPath -> IO (Maybe FilePath)
+-- | Find a unique @.cabal@ file in a directory. Yields 'Nothing' if there are
+-- zero or more than one @.cabal@ files.
+findCabalFile :: OsPath -> IO (Maybe OsPath)
 findCabalFile dir = do
   entries <- listDirectory dir
-  paths <- catMaybes <$> traverse decode entries
-  pure (case filter (".cabal" `isSuffixOf`) paths of
-    [f] -> Just f
+  pure (case filter ((unsafeEncodeUtf ".cabal" ==) . takeExtension) entries of
+    [e] -> Just (dir </> e)
     _ -> Nothing)
-  where
-    decode e = case decodeUtf (dir </> e) of
-      Right p -> pure (Just p)
-      Left _ -> pure Nothing
 
 -- | The name of a library component.
 libraryUnitName :: String -> LibraryName -> UnitName
@@ -148,7 +143,7 @@ discoverCabalProject logger projectRoot outputDir tmpDir = do
     Nothing -> do
       root <- either (const "<decode error>") id <$> pure (decodeUtf projectRoot)
       fail ("No .cabal file found in: " ++ root)
-    Just f -> pure f
+    Just f -> pure $ fromOsPath f
   logger.info ("Loading project configuration from " ++ cabalFile)
   gpd <- readGenericPackageDescription silent cabalFile
   let pkgName = unPackageName (packageName gpd)

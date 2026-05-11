@@ -2,17 +2,16 @@ module GhcServer.Project where
 
 import Control.Monad (when)
 import Data.Aeson (eitherDecodeStrict')
-import Data.List (isSuffixOf)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes)
-import qualified Data.ByteString as BS
 import GHC.Data.Graph.Directed (graphFromEdgedVerticesOrd)
 import qualified GHC.Data.Graph.Directed as Graph (Node (..))
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitCache (..), UnitDepNode, UnitName (..), mkUnitCache)
 import GhcServer.Data.UnitConfig (UnitConfig (..))
-import GhcServer.Path (toOsPath)
+import GhcServer.Path (fromOsPath, toOsPath)
 import System.Directory.OsPath (createDirectoryIfMissing, doesFileExist, listDirectory)
-import System.OsPath (OsPath, decodeUtf, encodeUtf, (</>))
+import System.File.OsPath (readFile')
+import System.OsPath (OsPath, (</>), decodeUtf, takeExtension)
 
 -- | Build a 'UnitDepNode' for the dependency graph from a 'Unit'.
 --
@@ -27,24 +26,17 @@ unitDepNode unit =
 
 -- | The name of the JSON config file marking a unit directory.
 unitConfigPath :: OsPath
-unitConfigPath =
-  case encodeUtf "unit.json" of
-    Right p -> p
-    Left e -> error ("Failed to encode 'unit.json': " ++ show e)
+unitConfigPath = toOsPath "unit.json"
 
 -- | Read and parse a @unit.json@ file.
 readUnitConfig :: OsPath -> IO UnitConfig
 readUnitConfig path = do
-  fp <- either (fail . show) pure (decodeUtf path)
-  bytes <- BS.readFile fp
+  bytes <- readFile' path
   either fail pure (eitherDecodeStrict' bytes)
 
 -- | Check whether an 'OsPath' has a @.hs@ extension.
 isHaskellSource :: OsPath -> Bool
-isHaskellSource path =
-  case decodeUtf path of
-    Right s -> ".hs" `isSuffixOf` s
-    Left _ -> False
+isHaskellSource path = toOsPath ".hs" == takeExtension path
 
 -- | Discover a single unit from a directory that contains a @unit.json@ file.
 --
@@ -59,7 +51,7 @@ discoverUnit projectRoot outputDir tmpDir name = do
       config <- readUnitConfig configFile
       entries <- listDirectory dir
       let sources = [dir </> e | e <- entries, isHaskellSource e]
-      nameStr <- either (fail . show) pure (decodeUtf name)
+      let nameStr = fromOsPath name
       let unitName = UnitName nameStr
       createDirectoryIfMissing True (outputDir </> toOsPath nameStr)
       createDirectoryIfMissing True (tmpDir </> toOsPath nameStr)
