@@ -17,7 +17,7 @@ $ nix develop --command "cabal build all"
 
 Be mindful that this runs a patched GHC 9.10.1. If you use a stock GHC 9.10.1
 for other projects, compilation could fail since both toolchains write to the
-same store.
+same Cabal store.
 
 ```bash
 $ nix develop --command "cabal path --store-dir"
