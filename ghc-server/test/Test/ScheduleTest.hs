@@ -16,7 +16,7 @@ import Test.Tasty.Hedgehog (testProperty)
 
 import GhcServer.Build.Schedule (BuildStatus (..), ModuleInfo (..), ModuleKey (..), Resolutions, TaskKey (..), nodeDepsToTaskKeys, resolveFromCachedUnit, resolutionsFromModuleMap)
 import GhcServer.Data.Unit (UnitName (..))
-import GhcServer.Path (osPath)
+import GhcServer.Path (toOsPath)
 import GhcServer.Scheduler (Phase (..))
 import Types.CachedDeps (CachedModule (..), CachedPackageDep (..), CachedUnit (..), JsonFs (..))
 
@@ -73,7 +73,7 @@ rk unit modName = ResolvedModule (UnitName unit) (mkModuleName modName)
 
 -- | Helper to build a pending compile key.
 pk :: String -> String -> TaskKey 'Pending
-pk unit src = PendingSource (UnitName unit) (osPath src)
+pk unit src = PendingSource (UnitName unit) (toOsPath src)
 
 -- ---------------------------------------------------------------------------
 -- nodeDepsToTaskKeys spec
@@ -107,7 +107,7 @@ runNodeDepsSpec spec = do
   let
     nameMap = Map.fromList [(stringToUnitId uid, UnitName n) | (uid, n) <- spec.unitIds]
     srcMap = Map.fromList
-      [((stringToUnitId hm.uid, mkModuleName hm.modName), osPath hm.src) | hm <- spec.homeModules]
+      [((stringToUnitId hm.uid, mkModuleName hm.modName), toOsPath hm.src) | hm <- spec.homeModules]
     depKeys = [mkNodeKey uid m | (uid, m) <- spec.deps]
     node = ModuleNode depKeys undefined
   spec.expected === nodeDepsToTaskKeys nameMap srcMap node
@@ -200,7 +200,7 @@ runResolve :: ResolveSpec -> Resolutions
 runResolve spec =
   resolutionsFromModuleMap spec.priorModules newModules
   where
-    newModules = resolveFromCachedUnit (UnitName spec.unitName) (osPath "output") spec.cachedUnit
+    newModules = resolveFromCachedUnit (UnitName spec.unitName) (toOsPath "output") spec.cachedUnit
 
 defaultResolveSpec :: ResolveSpec
 defaultResolveSpec =
@@ -220,7 +220,7 @@ mkPriorModule unitName modName src =
 -- | Look up a resolved task in the resolutions map by pending key.
 lookupResolution :: String -> String -> Resolutions -> Maybe (TaskKey 'Resolved, BuildStatus, Set (TaskKey 'Pending))
 lookupResolution unit src =
-  Map.lookup (PendingSource (UnitName unit) (osPath src))
+  Map.lookup (PendingSource (UnitName unit) (toOsPath src))
 
 -- ---------------------------------------------------------------------------
 -- Tests for 'resolveFromCachedUnit'
