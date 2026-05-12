@@ -75,9 +75,6 @@ When the GHC used to build HLS includes patches that influence CPP pragmas in th
 An HLS version patched for the MWB GHC can be run with `nix run .#hls`. You
 should configure your editor to use this command as the HLS executable.
 
-You might still need to run you editor from a `nix develop` shell to make build
-tools and libraries available (e.g. `protoc` and `snappy`).
-
 Cachix
 ======
 
