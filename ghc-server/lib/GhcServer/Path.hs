@@ -1,24 +1,8 @@
 -- | Path utilities shared across GHC server modules.
-module GhcServer.Path where
+module GhcServer.Path (fromOsPath, toOsPath, outputDirName, tmpDirName, socketDirName, socketPath) where
 
-import Control.Exception (Exception, SomeException, throw)
-import System.OsPath (OsPath, decodeUtf, encodeUtf, (</>))
-
-data PathDecodingException = PathDecodingException OsPath SomeException
-  deriving stock (Show)
-
-instance Exception PathDecodingException where
-
-data PathEncodingException = PathEncodingException FilePath SomeException
-  deriving stock (Show)
-
-instance Exception PathEncodingException where
-
-fromOsPath :: OsPath -> FilePath
-fromOsPath p = either (throw . PathDecodingException p) id (decodeUtf p)
-
-toOsPath :: String -> OsPath
-toOsPath p = either (throw . PathEncodingException p) id (encodeUtf p)
+import System.OsPath (OsPath, (</>))
+import System.OsPath.Extra (fromOsPath, toOsPath)
 
 -- | Directory names under the project root for server artifacts.
 outputDirName, tmpDirName, socketDirName :: OsPath
