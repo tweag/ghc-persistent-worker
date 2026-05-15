@@ -40,6 +40,8 @@ import Types.BuckArgs (decodeJsonArg)
 import Types.CachedDeps (CachedDep (..), CachedDeps (..), CachedUnit (..), JsonFs (..))
 import Types.Log (Logger (..))
 import Types.State (WorkerState)
+import System.OsPath (OsPath)
+import System.OsPath.Extra (toOsPath)
 
 #if RECENT || defined(MWB)
 
@@ -226,7 +228,7 @@ loadHomeUnit ::
   DynFlags ->
   UnitId ->
   HscEnv ->
-  FilePath ->
+  OsPath ->
   IO HscEnv
 loadHomeUnit log stateVar dflags0 unit hsc_env0 path
   | hasUnit unit hsc_env0
@@ -235,7 +237,7 @@ loadHomeUnit log stateVar dflags0 unit hsc_env0 path
   = do
     cachedUnit@CachedUnit {unit_args} <- decodeJsonArg "--home-unit" path
     hsc_env1 <- fmap (fromMaybe hsc_env0) $ for cachedUnit.dep_units \ file -> do
-      deps <- decodeJsonArg "--home-unit" file
+      deps <- decodeJsonArg "--home-unit" (toOsPath file)
       loadCachedUnits log stateVar dflags0 deps hsc_env0
     dflags <- maybe (pure dflags0) (readParseGHCArgs hsc_env1 dflags0) unit_args
 

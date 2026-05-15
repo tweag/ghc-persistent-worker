@@ -35,7 +35,7 @@ data UnitCache =
     -- | The cache subdirectory for this unit (@cache/unitName/@).
     dir :: OsPath,
     -- | Path to @cached_unit.json@.
-    cachedUnitPath :: FilePath,
+    cachedUnitPath :: OsPath,
     -- | Path to @unit_args@.
     unitArgsPath :: FilePath,
     -- | Path to @dep_units.json@.
@@ -46,9 +46,9 @@ data UnitCache =
 -- | Compute the absolute path to a module's @.dyn_hi@ file.
 --
 -- The path is @outputDir/unitId/ModuleName.dyn_hi@.
-moduleHiPath :: OsPath -> UnitName -> ModuleName -> FilePath
+moduleHiPath :: OsPath -> UnitName -> ModuleName -> OsPath
 moduleHiPath outputDir name modName =
-  fromOsPath (outputDir </> toOsPath (unitIdString (unitId name)) </> toOsPath (moduleNameString modName ++ ".dyn_hi"))
+  outputDir </> toOsPath (unitIdString (unitId name)) </> toOsPath (moduleNameString modName ++ ".dyn_hi")
 
 -- | A unit discovered in the project, identified by its directory name.
 data Unit =
@@ -72,7 +72,7 @@ data Unit =
 --
 -- Each node's key is the 'UnitName'; its payload is the unit's own cache path
 -- (used when building 'CachedBuildPlans' from the transitive closure).
-type UnitDepNode = Graph.Node UnitName FilePath
+type UnitDepNode = Graph.Node UnitName OsPath
 
 -- | A project is the collection of all units in the build root.
 data Project =
@@ -106,7 +106,7 @@ mkUnitCache :: OsPath -> UnitName -> UnitCache
 mkUnitCache projectRoot name =
   UnitCache {
     dir = cDir,
-    cachedUnitPath = fromOsPath (cDir </> toOsPath "cached_unit.json"),
+    cachedUnitPath = cDir </> toOsPath "cached_unit.json",
     unitArgsPath = fromOsPath (cDir </> toOsPath "unit_args"),
     depUnitsPath = fromOsPath (cDir </> toOsPath "dep_units.json")
   }
