@@ -76,7 +76,7 @@ homeDep num =
 dbFlag :: String -> PackageDBFlag
 dbFlag path =
 #if defined(MWB)
-  PackageDB (PkgDbPath (unsafeEncodeUtf path))
+  PackageDB (PkgDbPath (toOsPath path))
 #else
   PackageDB (PkgDbPath path)
 #endif
