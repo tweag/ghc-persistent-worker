@@ -11,7 +11,7 @@ import GhcServer.Data.UnitConfig (UnitConfig (..))
 import GhcServer.Path (fromOsPath, toOsPath)
 import System.Directory.OsPath (createDirectoryIfMissing, doesFileExist, listDirectory)
 import System.File.OsPath (readFile')
-import System.OsPath (OsPath, (</>), decodeUtf, takeExtension)
+import System.OsPath.Extra (OsPath, (</>), decodeUtf, takeExtension)
 
 -- | Build a 'UnitDepNode' for the dependency graph from a 'Unit'.
 --
