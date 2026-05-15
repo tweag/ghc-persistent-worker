@@ -76,6 +76,7 @@ library
     ghc-debug-stub,
     grapesy ^>=1.0.1,
     optparse-applicative,
+    os-string,
     process,
     text
 
