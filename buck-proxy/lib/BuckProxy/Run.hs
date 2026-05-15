@@ -7,6 +7,7 @@ import Control.Monad (unless)
 import Data.Foldable (for_)
 import Data.Functor ((<&>))
 import Data.Map.Strict qualified as Map
+import System.OsPath (encodeUtf)
 import System.Process (terminateProcess)
 import Types.Orchestration (ServerSocketPath (..), PrimarySocketName (..))
 
@@ -45,7 +46,9 @@ parseOptions =
       [] -> pure z
       "--exe" : exe : rest -> spin z {command = Just GhcWorkerCommand {exe = WorkerExe exe, args = []}} rest
       "--remain" : rest -> spin z {remain = True} rest
-      "--socket-name" : workerSocket : rest -> spin z {workerSocket = Just (PrimarySocketName workerSocket)} rest
+      "--socket-name" : workerSocket : rest -> do
+        workerSocketPath <- encodeUtf workerSocket
+        spin z {workerSocket = Just (PrimarySocketName workerSocketPath)} rest
       "--" : args -> pure z {command = z.command <&> \ c -> c {args}}
       arg -> throwIO (userError ("Invalid worker CLI args: " ++ unwords arg))
 
