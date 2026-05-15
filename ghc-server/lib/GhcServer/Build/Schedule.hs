@@ -22,7 +22,7 @@ import GHC.Unit.Types (UnitId, unitIdString)
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..), unitId)
 import GhcServer.Path (fromOsPath, toOsPath)
 import GhcServer.Scheduler (Phase (..), Task (..))
-import System.OsPath (OsPath, (</>))
+import System.OsPath.Extra (OsPath, (</>))
 import Types.CachedDeps (
   CachedDep (..),
   CachedDeps (..),

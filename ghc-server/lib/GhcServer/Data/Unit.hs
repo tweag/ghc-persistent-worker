@@ -10,7 +10,7 @@ import GHC.Unit (UnitId, stringToUnit)
 import GHC.Unit.Types (toUnitId, unitIdString)
 import GHC.Utils.Outputable (Outputable (..), text)
 import GhcServer.Path (fromOsPath, toOsPath)
-import System.OsPath (OsPath, (</>))
+import System.OsPath.Extra (OsPath, (</>))
 
 -- | A unit name used as the identity of a build unit.
 --

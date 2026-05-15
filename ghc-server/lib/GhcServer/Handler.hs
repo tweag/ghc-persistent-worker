@@ -18,7 +18,7 @@ import Network.GRPC.Server.Protobuf (ProtobufMethodsOf)
 import Network.GRPC.Server.StreamType (Methods)
 import Prelude hiding (log)
 import Proto.Worker (Worker)
-import System.OsPath ((</>))
+import System.OsPath.Extra ((</>))
 import Types.Args (emptyArgs)
 import Types.Grpc (RequestArgs (..))
 
