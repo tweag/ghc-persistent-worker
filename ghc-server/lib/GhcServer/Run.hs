@@ -32,7 +32,7 @@ import Options.Applicative (
 import System.Directory.OsPath (createDirectoryIfMissing)
 import System.Exit (die)
 import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
-import System.OsPath.Extra ((</>), encodeUtf)
+import System.OsPath.Extra ((</>), encodeUtf, fromOsPath)
 
 -- | CLI argument parser for the server.
 serverConfigParser :: Parser ServerConfig
@@ -67,7 +67,7 @@ runServer = do
       let socket = socketPath config.projectRoot
       lift do
         createDirectoryIfMissing True (config.projectRoot </> socketDirName)
-        hPutStrLn stderr ("Starting ghc-server on " ++ socket)
+        hPutStrLn stderr ("Starting ghc-server on " ++ fromOsPath socket)
         handler <- serverHandler config
         let methods = fromGrpcHandler handler
         runGrpcServer socket methods
