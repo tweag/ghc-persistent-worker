@@ -75,6 +75,7 @@ library
     ghc,
     ghc-debug-stub,
     grapesy ^>=1.0.1,
+    os-string,
     process,
     stm,
     temporary,
