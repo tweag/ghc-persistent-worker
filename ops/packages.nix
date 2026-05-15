@@ -33,6 +33,7 @@
           "ghc"
           "ghc-debug-stub"
           "grapesy"
+          "os-string"
           "process"
           "text"
         ];
