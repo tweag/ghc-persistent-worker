@@ -11,7 +11,7 @@ import GhcServer.Data.BuildEvent (BuildEvent (..), newBuildEvents, readEvents)
 import GhcServer.Data.Request (ScheduleRequest (..), UnitRequest (..))
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
 import GhcServer.Log (newLogger, withBuildLog)
-import GhcServer.Path (osPath)
+import GhcServer.Path (toOsPath)
 import Hedgehog (TestT, annotate, assert, diff, property, test, withTests, (===))
 import Prelude hiding (log)
 import System.Directory (createDirectoryIfMissing)
@@ -39,9 +39,9 @@ acquireCabalProject :: IO FilePath -> IO TestProject
 acquireCabalProject acquireRoot = do
   root <- acquireRoot
   let
-    rootOs = osPath root
-    outputDir = osPath (root ++ "/output")
-    tmpDir = osPath (root ++ "/tmp")
+    rootOs = toOsPath root
+    outputDir = toOsPath (root ++ "/output")
+    tmpDir = toOsPath (root ++ "/tmp")
   project <- withBuildLog \ logger ->
     discoverCabalProject logger rootOs outputDir tmpDir
   pure TestProject {root, rootOs, project, outputDir, tmpDir}
