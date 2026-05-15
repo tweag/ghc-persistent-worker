@@ -37,7 +37,7 @@ import Options.Applicative (
 import Proto.Worker_Fields qualified as Fields
 import System.Exit (die)
 import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
-import System.OsPath (encodeUtf)
+import System.OsPath.Extra (encodeUtf)
 
 -- | CLI argument parser for the client.
 clientConfigParser :: Parser ClientConfig

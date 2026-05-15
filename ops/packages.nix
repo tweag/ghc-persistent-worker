@@ -215,6 +215,7 @@
           "aeson"
           "binary"
           "containers"
+          "exceptions"
           "filepath"
           "ghc"
           "ghc-paths"

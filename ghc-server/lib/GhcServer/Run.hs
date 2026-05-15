@@ -32,7 +32,8 @@ import Options.Applicative (
 import System.Directory.OsPath (createDirectoryIfMissing)
 import System.Exit (die)
 import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
-import System.OsPath (encodeUtf, (</>))
+import System.OsPath ((</>))
+import System.OsPath.Extra (encodeUtf)
 
 -- | CLI argument parser for the server.
 serverConfigParser :: Parser ServerConfig

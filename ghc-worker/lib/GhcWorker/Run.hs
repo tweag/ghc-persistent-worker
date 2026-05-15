@@ -20,8 +20,7 @@ import Types.Log (TraceId (..))
 import Types.Orchestration (ServerSocketPath (..), serverSocketFromPath)
 import Types.State (WorkerState (..))
 import Types.State.Oneshot (OneshotCacheFeatures (..))
-import System.OsPath (encodeUtf)
-import System.OsPath.Extra (toOsPath)
+import System.OsPath.Extra (encodeUtf, toOsPath)
 
 -- | Global options for the worker, passed when the process is started, in contrast to request options stored in
 -- 'BuckArgs'.

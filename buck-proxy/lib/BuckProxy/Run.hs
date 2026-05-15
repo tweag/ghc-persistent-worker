@@ -7,7 +7,7 @@ import Control.Monad (unless)
 import Data.Foldable (for_)
 import Data.Functor ((<&>))
 import Data.Map.Strict qualified as Map
-import System.OsPath (encodeUtf)
+import System.OsPath.Extra (encodeUtf)
 import System.Process (terminateProcess)
 import Types.Orchestration (ServerSocketPath (..), PrimarySocketName (..))
 
