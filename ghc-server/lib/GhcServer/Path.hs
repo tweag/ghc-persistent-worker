@@ -1,8 +1,7 @@
 -- | Path utilities shared across GHC server modules.
 module GhcServer.Path (fromOsPath, toOsPath, outputDirName, tmpDirName, socketDirName, socketPath) where
 
-import System.OsPath (OsPath, (</>))
-import System.OsPath.Extra (fromOsPath, toOsPath)
+import System.OsPath.Extra (OsPath, (</>), fromOsPath, toOsPath)
 
 -- | Directory names under the project root for server artifacts.
 outputDirName, tmpDirName, socketDirName :: OsPath

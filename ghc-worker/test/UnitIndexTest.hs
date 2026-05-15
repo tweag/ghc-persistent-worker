@@ -51,7 +51,7 @@ import TestSetup (Conf (..), ModuleSpec (..), Reexport (..), Unit (..), UnitSpec
 #if defined(MWB)
 
 import GHC.Unit.Home.Graph (unitEnv_keys, unitEnv_lookup, unitEnv_new)
-import System.OsPath (unsafeEncodeUtf)
+import System.OsPath.Extra (toOsPath)
 
 #else
 

@@ -1,7 +1,7 @@
 -- | CLI configuration types for the standalone GHC server and client.
 module GhcServer.Data.Config where
 
-import System.OsPath (OsPath)
+import System.OsPath.Extra (OsPath)
 
 -- | Configuration for the server, parsed from CLI args.
 data ServerConfig =
