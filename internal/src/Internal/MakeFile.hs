@@ -28,7 +28,7 @@ import GHC.Driver.Ppr
 
 #if defined(FIXED_NODES) || defined(MWB)
 
-import GHC.Data.OsPath (unsafeDecodeUtf, unsafeEncodeUtf)
+import System.OsPath.Extra (fromOsPath, toOsPath)
 
 #endif
 
@@ -437,7 +437,7 @@ writeDependencies include_pkgs root hdl suffixes node deps =
 
 #if defined(FIXED_NODES) || defined(MWB)
 
-    viaOsPath f a = unsafeDecodeUtf (f (unsafeEncodeUtf a))
+    viaOsPath f a = fromOsPath (f (toOsPath a))
 
 #else
 
