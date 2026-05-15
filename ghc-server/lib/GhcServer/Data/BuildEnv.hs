@@ -4,7 +4,7 @@ module GhcServer.Data.BuildEnv where
 import Control.Concurrent.MVar (MVar)
 import GhcServer.Data.BuildEvent (BuildEvents)
 import GhcServer.Data.Unit (Project)
-import System.OsPath (OsPath)
+import System.OsPath.Extra (OsPath)
 import Types.Args (Args)
 import Types.Log (Logger)
 import Types.State (WorkerState)

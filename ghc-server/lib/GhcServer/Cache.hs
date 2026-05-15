@@ -31,7 +31,7 @@ import System.Directory (doesFileExist)
 import System.Directory.OsPath (createDirectoryIfMissing)
 import qualified System.Directory.OsPath as OsPath (doesFileExist)
 import qualified System.File.OsPath as OsFile
-import System.OsPath (OsPath, (</>))
+import System.OsPath.Extra (OsPath, (</>))
 import Types.CachedDeps (CachedBuildPlan (..), CachedBuildPlans (..), CachedUnit (..), JsonFs (..))
 import Types.Log (Logger (..))
 
