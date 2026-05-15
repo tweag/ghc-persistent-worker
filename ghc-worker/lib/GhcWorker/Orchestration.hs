@@ -9,7 +9,6 @@ import Control.Concurrent.Async (async, cancel, wait)
 import Control.DeepSeq (force)
 import Control.Exception (bracket_, finally, onException, throwIO, try)
 import Control.Monad (void, when)
-import Data.List (dropWhileEnd)
 import Data.Maybe (isJust)
 import Data.Traversable (for)
 import GHC.IO.Handle.Lock (LockMode (..), hLock, hUnlock)
@@ -25,8 +24,11 @@ import Proto.Worker (Worker (..))
 import Proto.Worker_Fields qualified as Fields
 import System.Directory (createDirectoryIfMissing, removeFile)
 import System.Exit (exitFailure)
-import System.FilePath (takeDirectory)
 import System.IO (IOMode (..), hGetLine, hPutStr, withFile)
+import System.OsPath (takeDirectory)
+import System.OsPath.Extra (fromOsPath)
+import System.OsString (dropWhileEnd, unsafeFromChar)
+import qualified System.OsString as OsString
 import System.Process (ProcessHandle, getProcessExitCode)
 import Types.Grpc (CommandEnv, RequestArgs (..))
 import Types.Orchestration (
@@ -59,14 +61,14 @@ runLocalGhc ::
   Maybe InstrumentSocketPath ->
   IO ()
 runLocalGhc CreateMethods {..} socket minstr = mdo
-  dbg ("Starting ghc server on " ++ socket.path)
+  dbg ("Starting ghc server on " ++ fromOsPath socket.path)
   instrResource <- for minstr \instrumentSocket -> do
     dbg ("Instrumentation info available on " ++ instrumentSocket.path)
     (resource, instrMethods) <- createInstrumentation (\ ce (RequestArgs args) -> recompile ce (RequestArgs (args ++ ["-fforce-recomp"])))
     _instrThread <- async $ runServerWithHandlers def (grpcServerConfig instrumentSocket.path) (fromMethods instrMethods)
     pure resource
   (recompile, methods) <- createGhc instrResource
-  runServerWithHandlers def (grpcServerConfig socket.path) (fromMethods methods)
+  runServerWithHandlers def (grpcServerConfig $ fromOsPath socket.path) (fromMethods methods)
 
 -- | Start a gRPC server that runs GHC for client proxies, deleting the discovery file on shutdown.
 runCentralGhc ::
@@ -77,7 +79,7 @@ runCentralGhc ::
   IO ()
 runCentralGhc mode discovery socket instrumentSocket =
   finally (runLocalGhc mode socket instrumentSocket) do
-    dbg ("Shutting down ghc server on " ++ socket.path)
+    dbg ("Shutting down ghc server on " ++ fromOsPath socket.path)
     removeFile discovery.path
 
 -- | Forward a request received from a client to another gRPC server and forward the response back,
@@ -122,15 +124,15 @@ proxyServer :: PrimarySocketPath -> ServerSocketPath -> IO ()
 proxyServer primary socket = do
   try launch >>= \case
     Right () ->
-      dbg ("Shutting down proxy on " ++ socket.path ++ " regularly")
+      dbg ("Shutting down proxy on " ++ fromOsPath socket.path ++ " regularly")
     Left (err :: IOError) -> do
-      dbg ("Proxy on " ++ socket.path ++ " crashed: " ++ show err)
+      dbg ("Proxy on " ++ fromOsPath socket.path ++ " crashed: " ++ show err)
       exitFailure
   where
     launch =
       withProxy primary \ methods -> do
-        dbg ("Starting proxy for " ++ primary.path ++ " on " ++ socket.path)
-        runServerWithHandlers def (grpcServerConfig socket.path) $ fromMethods methods
+        dbg ("Starting proxy for " ++ primary.path ++ " on " ++ fromOsPath socket.path)
+        runServerWithHandlers def (grpcServerConfig $ fromOsPath socket.path) $ fromMethods methods
 
 messageExecute :: Proto Worker.ExecuteCommand
 messageExecute = defMessage
@@ -224,11 +226,11 @@ serveOrProxyCentralGhc methods socket = do
     Left primary -> proxyServer primary socket
   where
     run primaryFile = do
-      let primary = PrimarySocketPath socket.path
+      let primary = PrimarySocketPath (fromOsPath socket.path)
       thread <- async (runCentralGhc methods primaryFile socket instrumentSocket)
       waitPoll primary
       pure (primary, thread)
 
     instrumentSocket = Just (instrumentSocketIn socketDir)
 
-    socketDir = SocketDirectory (init (dropWhileEnd ('-' /=) (takeDirectory socket.path)))
+    socketDir = SocketDirectory (fromOsPath $ OsString.init $ dropWhileEnd (unsafeFromChar '-' /=) $ takeDirectory socket.path)
