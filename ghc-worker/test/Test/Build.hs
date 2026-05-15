@@ -19,6 +19,7 @@ import Numeric.Natural (Natural)
 import Prelude hiding (log)
 import System.Directory.OsPath (createDirectoryIfMissing)
 import System.OsPath (OsPath, (</>), osp)
+import System.OsPath.Extra (fromOsPath)
 import Test.Data.BuildSystem (BuildResult (..))
 import Test.Data.Env (MaxJobs, SessionEnv (..), TestEnv (..))
 import Test.Data.Project (
@@ -36,7 +37,7 @@ import Test.Data.Project (
 import Test.Data.Scheduler (RequestFailure (..), RequestResult (..), Schedule (..), SchedulerState (..))
 import Test.Data.TestLog (DiagnosticEntry (..), TestLog (..))
 import Test.Log (withTestLog)
-import Test.Path (compileTmpDir, fp, moduleName, moduleSourcePath, unitName, unitOutputDir, unitTmpDir)
+import Test.Path (compileTmpDir, moduleName, moduleSourcePath, unitName, unitOutputDir, unitTmpDir)
 import Test.Scheduler (initScheduler, runScheduler)
 import qualified Types.Args as Args
 import Types.Args (Args (..))
@@ -67,7 +68,7 @@ runBuildTask ::
   IO RequestResult
 runBuildTask env label tempName expectedCodes action =
   withTestLog False label \ (log, logVar) -> do
-    let taskEnv = env.env {log, args = env.env.args {Args.tempDir = Just (fp tempDir)}}
+    let taskEnv = env.env {log, args = env.env.args {Args.tempDir = Just (fromOsPath tempDir)}}
     createDirectoryIfMissing True tempDir
     success <- action taskEnv
     testLog <- readIORef logVar
@@ -127,15 +128,15 @@ metadataArgs env GenUnit {key, modules, depUnits} =
   where
     metaArgs = [
       "-this-unit-id", unitName key,
-      "-dep-json=" ++ fp (sessionTmpDir </> [osp|dep.json|]),
-      "-dep-makefile=" ++ fp (sessionTmpDir </> [osp|dep.make|]),
-      "-odir", fp outDir,
-      "-hidir", fp outDir
+      "-dep-json=" ++ fromOsPath (sessionTmpDir </> [osp|dep.json|]),
+      "-dep-makefile=" ++ fromOsPath (sessionTmpDir </> [osp|dep.make|]),
+      "-odir", fromOsPath outDir,
+      "-hidir", fromOsPath outDir
       ]
 
     unitDepArgs = concatMap (\ d -> ["-package-id", unitName d]) depUnits
 
-    srcFiles = [fp (env.sourceDir </> moduleSourcePath gm.key) | gm <- modules]
+    srcFiles = [fromOsPath (env.sourceDir </> moduleSourcePath gm.key) | gm <- modules]
 
     sessionTmpDir = env.tempDir </> unitTmpDir key
 
