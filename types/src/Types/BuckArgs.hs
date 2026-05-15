@@ -12,7 +12,8 @@ import Data.Maybe (fromMaybe, isJust)
 import GHC (mkModule, mkModuleName)
 import GHC.Unit (Definite (..), GenUnit (RealUnit), stringToUnitId)
 import System.FilePath (takeDirectory)
-import System.OsPath (encodeFS)
+import System.OsPath (OsPath, encodeUtf, encodeFS)
+import System.OsPath.Extra (fromOsPath, toOsPath)
 import qualified Types.Args
 import Types.Args (Args (Args), TargetId (..), UnitName (..))
 import Types.Grpc (CommandEnv (..), RequestArgs (..))
@@ -47,7 +48,7 @@ data BuckArgs =
     moduleName :: Maybe String,
     depModules :: Maybe String,
     depUnits :: Maybe String,
-    homeUnit :: Maybe String,
+    homeUnit :: Maybe OsPath,
     workerTargetId :: Maybe TargetId,
     pluginDb :: Maybe String,
     env :: Map String String,
@@ -104,7 +105,7 @@ options =
     withArg "--buck2-packagedb-dep" \ z a -> z {buck2PackageDbDep = Just a},
     withArg "--dep-modules" \ z a -> z {depModules = Just a},
     withArg "--dep-units" \ z a -> z {depUnits = Just a},
-    withArg "--home-unit" \ z a -> z {homeUnit = Just a},
+    withOsPathArg "--home-unit" \ z a -> z {homeUnit = Just a},
     withArg "--extra-env-key" \ z a -> z {envKey = Just a},
     withArgErr "--extra-env-value" \ z a -> addEnv z a,
     withArg "--worker-target-id" \ z a -> z {workerTargetId = Just (TargetId a)},
@@ -136,11 +137,17 @@ options =
 
     withArgErr name f = (name, \ argv z -> takeArg name argv (f z))
 
+    withOsPathArg name f = (name, \ argv z -> takeOsPathArg name argv (Right . f z))
+
     takeArg name argv store = case argv of
       [] -> Left (name ++ " needs an argument")
       arg : rest -> do
         new <- store arg
         Right (rest, new)
+
+    takeOsPathArg name argv store = takeArg name argv $ \arg -> case encodeUtf arg of
+      Left e -> Left ("could not encode " ++ name ++ "=" ++ arg ++ ": " ++ show e)
+      Right p -> store p
 
 parseBuckArgs :: CommandEnv -> RequestArgs -> Either String BuckArgs
 parseBuckArgs env =
@@ -167,12 +174,12 @@ parseBuckArgs env =
 decodeJsonArg ::
   FromJSON a =>
   String ->
-  String ->
+  OsPath ->
   IO a
 decodeJsonArg desc file =
-  eitherDecodeFileStrict' file >>= \case
+  eitherDecodeFileStrict' (fromOsPath file) >>= \case
     Right a -> pure a
-    Left err -> throwIO (userError ("Invalid JSON in file for " ++ desc ++ ": " ++ err ++ " (" ++ file ++ ")"))
+    Left err -> throwIO (userError ("Invalid JSON in file for " ++ desc ++ ": " ++ err ++ " (" ++ fromOsPath file ++ ")"))
 
 -- | @CompileHpt@ can either process a source file or pick a previously constructed @ModSummary@ from the module graph.
 -- In the latter case, we need both a unit ID and a module name, which is ensured here.
@@ -190,8 +197,8 @@ checkModuleTarget args =
 
 toGhcArgs :: BuckArgs -> IO Args
 toGhcArgs args = do
-  cachedDeps <- traverse (decodeJsonArg "--dep-modules") args.depModules
-  cachedBuildPlans <- traverse (decodeJsonArg "--dep-units") args.depUnits
+  cachedDeps <- traverse (decodeJsonArg "--dep-modules" . toOsPath) args.depModules
+  cachedBuildPlans <- traverse (decodeJsonArg "--dep-units" . toOsPath) args.depUnits
   topdir <- (<|> args.topdir) <$> readPath args.ghcDirFile
   buildPlan <- traverse encodeFS args.buildPlan
   packageDb <- readPath args.ghcDbFile

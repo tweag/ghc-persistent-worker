@@ -32,7 +32,7 @@ data Args =
     ghcOptions :: [String],
     cachedBuildPlans :: Maybe CachedBuildPlans,
     cachedDeps :: Maybe CachedDeps,
-    homeUnit :: Maybe FilePath
+    homeUnit :: Maybe OsPath
   }
   deriving stock (Eq, Show)
 
