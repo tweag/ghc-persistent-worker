@@ -57,6 +57,7 @@ library
     containers,
     filepath,
     ghc,
+    os-string,
     split,
     text
 

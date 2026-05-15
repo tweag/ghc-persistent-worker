@@ -34,9 +34,9 @@ import Network.GRPC.Server.StreamType (
   )
 import Proto.Worker (Worker (..))
 import Proto.Worker_Fields qualified as Fields
-import System.Directory (createDirectoryIfMissing)
+import System.Directory.OsPath (createDirectoryIfMissing)
 import System.Exit (exitFailure)
-import System.OsPath.Extra (fromOsPath)
+import System.OsPath.Extra (fromOsPath, toOsPath)
 import System.Process (ProcessHandle, getProcessExitCode, spawnProcess)
 import Types.Args (TargetId)
 import Types.BuckArgs (BuckArgs (workerTargetId), parseBuckArgs)
@@ -100,7 +100,7 @@ proxyHandler workerMap command socketDefault socketOverride req = do
       -- Get the build ID for the primary socket path from the command environment, and fall back to the value extracted
       -- from the gRPC socket path if the key is absent from the env.
       -- If an override was specified on the command line with @--socket-name@, it has precedence over both.
-      socketId = fromMaybe socketDefault (socketOverride <|> coerce (cmdEnv.values !? "BUCK_BUILD_ID"))
+      socketId = fromMaybe socketDefault (socketOverride <|> coerce (toOsPath <$> cmdEnv.values !? "BUCK_BUILD_ID"))
   buckArgs <- either (throwIO . userError) pure (parseBuckArgs cmdEnv (RequestArgs argv))
   case buckArgs.workerTargetId of
     Nothing -> throwIO (userError "No --worker-target-id passed")
@@ -112,12 +112,12 @@ proxyHandler workerMap command socketDefault socketOverride req = do
               let workerSocketDir = projectSocketDirectory socketId targetId
               void $ try @IOError (createDirectoryIfMissing True workerSocketDir.path)
               resource <- spawnGhcWorker command workerSocketDir
-              dbg $ "No primary socket for " ++ show targetId ++ ", so created it on " ++ resource.primarySocket.path
+              dbg $ "No primary socket for " ++ show targetId ++ ", so created it on " ++ fromOsPath resource.primarySocket.path
               pure (Map.insert targetId resource wmap, resource)
             Just resource -> do
-              dbg $ "Primary socket for " ++ show targetId ++ ": " ++ resource.primarySocket.path
+              dbg $ "Primary socket for " ++ show targetId ++ ": " ++ fromOsPath resource.primarySocket.path
               pure (wmap, resource)
-      withConnection def (ServerUnix resource.primarySocket.path) \connection ->
+      withConnection def (ServerUnix $ fromOsPath resource.primarySocket.path) \connection ->
         forwardRequest connection req
 
 grpcServerConfig :: FilePath -> ServerConfig
@@ -143,8 +143,8 @@ proxyServer workerMap command socket workerSocketOverride = do
       dbg ("buck-proxy on" ++ fromOsPath socket.path ++ " crashed" ++ show err)
       exitFailure
   where
-    (traceId, workerSpecId) = extractTraceIdAndWorkerSpecId (fromOsPath socket.path)
-    workerSocketDefault = PrimarySocketName (traceId ++ "-" ++ workerSpecId)
+    (traceId, workerSpecId) = extractTraceIdAndWorkerSpecId socket.path
+    workerSocketDefault = PrimarySocketName (toOsPath $ traceId ++ "-" ++ workerSpecId)
     methods :: Methods IO (ProtobufMethodsOf Worker)
     methods =
       Method (mkClientStreaming streamingNotImplemented) $
@@ -176,7 +176,7 @@ waitPoll socket =
 
     -- The part that throws is in @withConnection@, so this has to be executed every time.
     connect =
-      withConnection def (ServerUnix socket.path) \ connection ->
+      withConnection def (ServerUnix $ fromOsPath socket.path) \ connection ->
         withRPC connection def (Proxy @(Protobuf Worker "execute")) \ call ->
           sendFinalInput call messageExecute <* recvNextOutput call
 
@@ -198,8 +198,8 @@ spawnGhcWorker ::
   SocketDirectory ->
   IO WorkerResource
 spawnGhcWorker GhcWorkerCommand {exe, args} socketDir = do
-  dbg ("Forking GHC server at " ++ primary.path)
-  proc <- spawnProcess exe.path (args ++ ["--serve", primary.path])
+  dbg ("Forking GHC server at " ++ fromOsPath primary.path)
+  proc <- spawnProcess exe.path (args ++ ["--serve", fromOsPath primary.path])
   waitForGhcWorker proc primary
   pure WorkerResource {primarySocket = primary, processHandle = proc}
   where

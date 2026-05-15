@@ -20,6 +20,7 @@ import Types.Log (TraceId (..))
 import Types.Orchestration (ServerSocketPath (..), serverSocketFromPath)
 import Types.State (WorkerState (..))
 import Types.State.Oneshot (OneshotCacheFeatures (..))
+import System.OsPath (encodeUtf)
 import System.OsPath.Extra (toOsPath)
 
 -- | Global options for the worker, passed when the process is started, in contrast to request options stored in
@@ -50,7 +51,9 @@ parseOptions =
   where
     spin z = \case
       [] -> pure z
-      "--serve" : socket : rest -> spin z {serve = serverSocketFromPath socket} rest
+      "--serve" : socket : rest -> do
+        socketPath <- encodeUtf socket
+        spin z {serve = serverSocketFromPath socketPath} rest
       "--instrument" : rest -> spin z {instrument = FeatureInstrument True} rest
       arg -> throwIO (userError ("Invalid worker CLI args: " ++ unwords arg))
 

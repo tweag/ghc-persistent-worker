@@ -54,6 +54,7 @@ library
     ghc,
     ghc-debug-stub,
     grapesy ^>=1.0.1,
+    file-io,
     os-string,
     process,
     text
