@@ -22,10 +22,11 @@ import Network.GRPC.Server.StreamType (Methods (..), fromMethods, mkClientStream
 import Proto.Instrument (Instrument (..))
 import Proto.Worker (Worker (..))
 import Proto.Worker_Fields qualified as Fields
-import System.Directory (createDirectoryIfMissing, removeFile)
+import System.Directory.OsPath (createDirectoryIfMissing, removeFile)
 import System.Exit (exitFailure)
-import System.IO (IOMode (..), hGetLine, hPutStr, withFile)
-import System.OsPath (takeDirectory)
+import System.File.OsPath (withFile)
+import System.IO (IOMode (..), hGetLine, hPutStr)
+import System.OsPath (encodeUtf, takeDirectory)
 import System.OsPath.Extra (fromOsPath)
 import System.OsString (dropWhileEnd, unsafeFromChar)
 import qualified System.OsString as OsString
@@ -63,9 +64,14 @@ runLocalGhc ::
 runLocalGhc CreateMethods {..} socket minstr = mdo
   dbg ("Starting ghc server on " ++ fromOsPath socket.path)
   instrResource <- for minstr \instrumentSocket -> do
-    dbg ("Instrumentation info available on " ++ instrumentSocket.path)
+    dbg ("Instrumentation info available on " ++ fromOsPath instrumentSocket.path)
     (resource, instrMethods) <- createInstrumentation (\ ce (RequestArgs args) -> recompile ce (RequestArgs (args ++ ["-fforce-recomp"])))
-    _instrThread <- async $ runServerWithHandlers def (grpcServerConfig instrumentSocket.path) (fromMethods instrMethods)
+    _instrThread <-
+      async $
+      runServerWithHandlers
+        def
+        (grpcServerConfig $ fromOsPath instrumentSocket.path)
+        (fromMethods instrMethods)
     pure resource
   (recompile, methods) <- createGhc instrResource
   runServerWithHandlers def (grpcServerConfig $ fromOsPath socket.path) (fromMethods methods)
@@ -109,7 +115,7 @@ withProxy socket use = do
       Method (mkNonStreaming (forwardRequest connection)) $
       NoMoreMethods
   where
-    server = ServerUnix socket.path
+    server = ServerUnix (fromOsPath socket.path)
 
 grpcServerConfig :: FilePath -> ServerConfig
 grpcServerConfig socketPath =
@@ -131,7 +137,7 @@ proxyServer primary socket = do
   where
     launch =
       withProxy primary \ methods -> do
-        dbg ("Starting proxy for " ++ primary.path ++ " on " ++ fromOsPath socket.path)
+        dbg ("Starting proxy for " ++ fromOsPath primary.path ++ " on " ++ fromOsPath socket.path)
         runServerWithHandlers def (grpcServerConfig $ fromOsPath socket.path) $ fromMethods methods
 
 messageExecute :: Proto Worker.ExecuteCommand
@@ -156,7 +162,7 @@ waitPoll socket =
 
     -- The part that throws is in @withConnection@, so this has to be executed every time.
     connect =
-      withConnection def (ServerUnix socket.path) \ connection ->
+      withConnection def (ServerUnix $ fromOsPath socket.path) \ connection ->
         withRPC connection def (Proxy @(Protobuf Worker "execute")) \ call ->
           sendFinalInput call messageExecute <* recvNextOutput call
 
@@ -210,10 +216,11 @@ runOrProxyCentralGhc socketDir runServer = do
         -- If the file didn't exist, `hGetLine` will still return the empty string in some GHC versions.
         -- File IO is buffered/lazy, so we have to force the string to avoid read after close.
         Right !primary | not (null (force primary)) -> do
-          pure (Left (PrimarySocketPath primary))
+          primaryPath <- encodeUtf primary
+          pure (Left (PrimarySocketPath primaryPath))
         _ -> do
           (primary, resource) <- runServer primaryFile
-          hPutStr handle primary.path
+          hPutStr handle (fromOsPath primary.path)
           pure (Right (primary, resource))
   where
     primaryFile = primarySocketDiscoveryIn socketDir
@@ -226,11 +233,11 @@ serveOrProxyCentralGhc methods socket = do
     Left primary -> proxyServer primary socket
   where
     run primaryFile = do
-      let primary = PrimarySocketPath (fromOsPath socket.path)
+      let primary = PrimarySocketPath socket.path
       thread <- async (runCentralGhc methods primaryFile socket instrumentSocket)
       waitPoll primary
       pure (primary, thread)
 
     instrumentSocket = Just (instrumentSocketIn socketDir)
 
-    socketDir = SocketDirectory (fromOsPath $ OsString.init $ dropWhileEnd (unsafeFromChar '-' /=) $ takeDirectory socket.path)
+    socketDir = SocketDirectory (OsString.init $ dropWhileEnd (unsafeFromChar '-' /=) $ takeDirectory socket.path)
