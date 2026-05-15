@@ -34,7 +34,7 @@ jobs:
       - name: Build packages
         run: nix -L develop -c cabal build -fmwb all
       - name: Run resource tests
-        run: nix -L develop .#test-ext-deps -c cabal test internal-test --test-option='-p /resources/'
+        run: nix -L develop .#test-ext-deps -c cabal test ghc-worker --test-option='-p /resources/'
       - name: Clean up Cabal store to switch to vanilla GHC
         run: rm -rf $(nix develop -c cabal path --store-dir)/ghc-9.10.1-inplace dist-newstyle
       - name: Build packages with vanilla GHC
