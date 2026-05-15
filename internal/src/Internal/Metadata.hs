@@ -98,7 +98,7 @@ prepareMetadataSession env dflags = do
 
 resolveDepJson :: HscEnv -> Maybe OsPath -> Ghc OsPath
 resolveDepJson hsc_env path =
-  case (path, unsafeEncodeUtf <$> depJSON hsc_env.hsc_dflags) of
+  case (path, toOsPath <$> depJSON hsc_env.hsc_dflags) of
     (Just new, Just old)
       | new == old -> pure new
       | otherwise -> do
