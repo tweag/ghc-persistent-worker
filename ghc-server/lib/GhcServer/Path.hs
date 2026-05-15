@@ -10,7 +10,7 @@ tmpDirName = toOsPath "tmp"
 socketDirName = toOsPath "socket"
 
 -- | The Unix socket path for the server, placed under the project root.
-socketPath :: OsPath -> FilePath
+socketPath :: OsPath -> OsPath
 socketPath projectRoot = do
   let socketFile = toOsPath "server.sock"
-   in fromOsPath (projectRoot </> socketDirName </> socketFile)
+   in projectRoot </> socketDirName </> socketFile

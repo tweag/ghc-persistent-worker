@@ -37,7 +37,7 @@ import Options.Applicative (
 import Proto.Worker_Fields qualified as Fields
 import System.Exit (die)
 import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
-import System.OsPath.Extra (encodeUtf)
+import System.OsPath.Extra (encodeUtf, fromOsPath)
 
 -- | CLI argument parser for the client.
 clientConfigParser :: Parser ClientConfig
@@ -63,9 +63,9 @@ client :: ClientConfig -> ExceptT String IO ()
 client config = do
   let socket = socketPath config.projectRoot
   liftIO do
-    hPutStrLn stderr ("Connecting to ghc-server at " ++ socket)
+    hPutStrLn stderr ("Connecting to ghc-server at " ++ fromOsPath socket)
     waitPoll socket
-  response <- liftIO $ sendRequest (ServerUnix socket) request
+  response <- liftIO $ sendRequest (ServerUnix $ fromOsPath socket) request
   dbg (Text.unpack response.stderr)
   if response.exitCode == 0
   then dbg "Build succeeded."
