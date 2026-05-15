@@ -29,6 +29,7 @@ import GhcServer.Data.Unit (Project (..), Unit (..), UnitCache (..), UnitDepNode
 import GhcServer.Path (fromOsPath, toOsPath)
 import System.Directory (doesFileExist)
 import System.Directory.OsPath (createDirectoryIfMissing)
+import qualified System.Directory.OsPath as OsPath (doesFileExist)
 import qualified System.File.OsPath as OsFile
 import System.OsPath (OsPath, (</>))
 import Types.CachedDeps (CachedBuildPlan (..), CachedBuildPlans (..), CachedUnit (..), JsonFs (..))
@@ -82,7 +83,7 @@ writeUnitCache _logger unitCache depPlans buildPlanPath ghcOptions =
 -- | Check whether a cache exists for a unit.
 cacheExists :: UnitCache -> IO Bool
 cacheExists unitCache =
-  doesFileExist unitCache.cachedUnitPath
+  OsPath.doesFileExist unitCache.cachedUnitPath
 
 -- | Order the transitive dependencies of a unit for loading by 'loadCachedUnits'.
 --
@@ -122,12 +123,12 @@ depLoadOrder depGraph root =
 -- @cached_unit.json@ files.
 buildDepPlans :: Graph UnitDepNode -> Unit -> IO CachedBuildPlans
 buildDepPlans depGraph unit =
-  CachedBuildPlans . fmap plan <$> filterM (doesFileExist . (.node_payload)) (depLoadOrder depGraph selfNode)
+  CachedBuildPlans . fmap plan <$> filterM (OsPath.doesFileExist . (.node_payload)) (depLoadOrder depGraph selfNode)
   where
     plan node =
       CachedBuildPlan {
         name = JsonFs (toUnitId (stringToUnit node.node_key.string)),
-        build_plan = node.node_payload
+        build_plan = fromOsPath node.node_payload
       }
 
     selfNode = Graph.DigraphNode {
@@ -140,16 +141,16 @@ buildDepPlans depGraph unit =
 -- | If the unit's @cached_unit.json@ exists from a prior build, return its path.
 --
 -- This is used before compilation to let 'withGhcMakeModule' restore the home unit via 'loadHomeUnit'.
-loadHomeUnitCache :: UnitCache -> IO (Maybe FilePath)
+loadHomeUnitCache :: UnitCache -> IO (Maybe OsPath)
 loadHomeUnitCache unitCache =
-  whenMaybeM (doesFileExist unitCache.cachedUnitPath) (pure unitCache.cachedUnitPath)
+  whenMaybeM (OsPath.doesFileExist unitCache.cachedUnitPath) (pure unitCache.cachedUnitPath)
 
 -- | Check whether a module's interface file (@.dyn_hi@) exists.
 --
 -- The interface file is the reliable indicator that a module was compiled in a prior build.
 interfaceExists :: OsPath -> UnitName -> ModuleName -> IO Bool
 interfaceExists outputDir name modName =
-  doesFileExist (moduleHiPath outputDir name modName)
+  OsPath.doesFileExist (moduleHiPath outputDir name modName)
 
 -- | Compute the set of all units with cache from a prior build.
 cachedUnitsForProject :: Project -> IO (Set UnitName)
@@ -179,12 +180,12 @@ mkBuildCache outputDir project =
 -- @Left err@ on decode failure.
 loadCachedUnit :: UnitCache -> IO (Either String (Maybe CachedUnit))
 loadCachedUnit unitCache =
-  doesFileExist unitCache.cachedUnitPath >>= \case
+  OsPath.doesFileExist unitCache.cachedUnitPath >>= \case
     False -> pure (Right Nothing)
     True ->
-      eitherDecodeFileStrict' unitCache.cachedUnitPath >>= \case
+      eitherDecodeFileStrict' (fromOsPath unitCache.cachedUnitPath) >>= \case
         Left err ->
-          pure (Left ("Failed to decode cached unit " ++ unitCache.cachedUnitPath ++ ": " ++ err))
+          pure (Left ("Failed to decode cached unit " ++ fromOsPath unitCache.cachedUnitPath ++ ": " ++ err))
         Right cu -> pure (Right (Just cu))
 
 
