@@ -50,6 +50,10 @@ import Types.Log (Logger (..), TraceId, newLog)
 import Types.State (WorkerState (..))
 import Types.Target (TargetSpec (..))
 
+import Internal.Log (dbg)
+import System.IO (stdout)
+import System.IO.Silently (hCapture)
+
 #if __DEBUG__
 
 import Internal.State (dumpState)
@@ -103,12 +107,17 @@ dispatch hooks env args =
         Just modTarget -> do
           case args.expr of
             Just expr -> do
-              _result <- eval args.evalTargetName modTarget expr args.imports
-              pure ()
-            Nothing -> error "worker: no expr"
-        Nothing ->
+              result <- eval args.evalTargetName modTarget expr args.imports
+              case result of
+                Nothing -> pure (1, Just (TargetUnknown "test"))
+                Just isSuccessful ->
+                  pure (if isSuccessful then 0 else 1, Just (TargetUnknown "test"))
+            Nothing -> do
+              error "worker: no expr"
+              pure (1, Just (TargetUnknown "test"))
+        Nothing -> do
           error "worker: No modTarget"
-      pure (1, Just (TargetUnknown "test"))
+          pure (1, Just (TargetUnknown "test"))
     Just m -> error ("worker: mode not implemented: " ++ show m)
     Nothing -> error "worker: no mode specified"
   where
@@ -129,11 +138,15 @@ dispatch hooks env args =
       case mname of
         Nothing -> pure ()
         Just name -> env.log.setTarget (TargetUnknown name)
-      withGhcMakeModule Interpreted modTarget env
-        (\_ -> do
-          x <- Internal.Evaluate.evaluate env args.homeUnit modTarget imports stmt
-          pure (Just x)
-        )
+      (res_stdout, r) <-
+        hCapture [stdout] $
+          withGhcMakeModule Interpreted modTarget env
+            (\_ -> do
+              isSuccessful <- Internal.Evaluate.evaluate env args.homeUnit modTarget imports stmt
+              pure (Just isSuccessful)
+            )
+      env.log.infoD (text res_stdout)
+      pure r
 
     withTarget f (target :: TargetSpec) =
       reifyGhc $ \session -> do

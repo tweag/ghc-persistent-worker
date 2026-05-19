@@ -74,6 +74,7 @@ library
     optparse-applicative,
     os-string,
     process,
+    silently,
     stm,
     temporary,
     text,

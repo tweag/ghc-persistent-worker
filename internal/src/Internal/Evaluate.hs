@@ -31,7 +31,12 @@ import GHC.Runtime.Context (
   InteractiveImport (..),
   replaceImportEnv,
   )
-import GHC.Runtime.Eval (execLineNumber, execOptions, execSourceFile, execStmt, setContext)
+import GHC.Runtime.Eval (
+  execLineNumber,
+  execOptions,
+  execSourceFile,
+  setContext,
+  )
 import GHC.Runtime.Eval.Types (
   ExecResult (..),
   IcGlobalRdrEnv (..),
@@ -88,14 +93,28 @@ import Types.Target (ModuleTarget (..))
 
 import System.IO (hPutStrLn, stderr)
 
-evaluate :: Env -> Maybe String -> ModuleTarget -> [String] -> String -> Ghc ()
+import GHC.Driver.Config (initEvalOpts)
+import GHC.Driver.Flags (WarningFlag (..))
+import GHC.Driver.Env (hsc_interp, mkInteractiveHscEnv)
+import GHC.Driver.Main (hscParsedStmt)
+import GHC.Driver.Monad (GhcMonad)
+import GHC.Hs.Extension (GhcPs)
+-- import GHC.Runtime.Eval (updateFixityEnv)
+import GHC.Runtime.Eval.Types (ExecOptions (..), isStep)
+import GHC.Runtime.Interpreter (evalStmt, wormhole)
+import GHCi.Message (EvalResult (..), EvalStatus_ (..))
+import GHCi.RemoteTypes (ForeignHValue, HValueRef)
+import Language.Haskell.Syntax.Expr (GhciLStmt)
+import Unsafe.Coerce (unsafeCoerce)
+
+evaluate :: Env -> Maybe String -> ModuleTarget -> [String] -> String -> Ghc Bool
 evaluate env mHomeUnit target@(ModuleTarget modu) imports expr = do
   logTimed env.log "evaluate is called" do
     hsc_env0 <- GHC.getSession
     dflags0 <- GHC.getSessionDynFlags
 
     case mHomeUnit of
-      Nothing -> logDebugD env.log (text "Nothing")
+      Nothing -> logDebugD env.log (text "Nothing") >> pure False
       Just homeUnit -> do
         logDebugD env.log (text (show homeUnit))
         hsc_env1 <- liftIO $ loadHomeUnit env.log env.state dflags0 (moduleUnitId target.mod) hsc_env0 homeUnit
@@ -108,7 +127,6 @@ evaluate env mHomeUnit target@(ModuleTarget modu) imports expr = do
             home_unit_id = homeUnitId home_unit
             uid = moduleUnitId target.mod
 
-
         let modname = moduleName modu
             pkgqual = ThisPkg home_unit_id
 
@@ -117,12 +135,12 @@ evaluate env mHomeUnit target@(ModuleTarget modu) imports expr = do
 
         case result of
           Found modLoc modu -> do
-            let unit = moduleUnit modu
+            {- let unit = moduleUnit modu
             case unit of
               RealUnit (Definite uid') ->
                 logDebugD env.log (text "RealUnit" <+> ppr uid')
               VirtUnit {} -> logDebugD env.log (text "VirtUnit")
-              HoleUnit -> logDebugD env.log (text "HoleUnit")
+              HoleUnit -> logDebugD env.log (text "HoleUnit") -}
             setContext [IIModule modname]
 
             for_ imports $ \imp -> do
@@ -131,17 +149,36 @@ evaluate env mHomeUnit target@(ModuleTarget modu) imports expr = do
                 Left _ -> pure ()
                 Right rdr_env -> updateGlobalRdrEnv env rdr_env
 
-            r <- execStmt expr execOptions
+            r <- evalStmtCustom expr execOptions
             case r of
-              ExecComplete {execResult} -> do
+              -- x :: [ForeignHValue]
+              EvalComplete _ (EvalSuccess (fhv:_)) -> do
+                let Just interp = hsc_interp hsc_env
+                logDebugD env.log (text "eval complete")
+                hv <- liftIO $ wormhole interp fhv
+                logDebugD env.log (text "fhv -> hv")
+                let (total, failed) = (unsafeCoerce hv :: {- IO () -} {- IO (Int, Int) -} (Int, Int))
+                -- hv'' <- liftIO hv'
+                -- let hv'' = hv'
+                -- logDebugD env.log (text "hv = " <+> text (show hv'))
+                -- let (total, failed) = hv'
+                pure (failed == 0)
+
+              _ -> logDebugD env.log (text "eval not complete") >> pure False
+            {- case r of
+              ExecComplete {execResult, execAllocation} -> do
                 case execResult of
                   Left e -> logDebugD env.log (text "complete: left" <+> text (show e))
-                  Right xs -> logDebugD env.log (text "complete: right:" <+> (foldr (<+>) empty (map pprName xs)))
-              ExecBreak {} -> logDebugD env.log (text "break")
-            pure ()
-          NoPackage _ -> logDebugD env.log (text "No Package")
-          FoundMultiple _ -> logDebugD env.log (text "Found Multiple")
-          NotFound {} -> logDebugD env.log (text "Not Found")
+                  Right [] -> logDebugD env.log (text "finished, but no results?")
+                  Right xs@(it : _) -> do
+                    logDebugD env.log (text "complete: right:" <+> (foldr (<+>) empty (map pprName xs)))
+                    logDebugD env.log (text "execAlocation = " <+> ppr execAllocation)
+
+              ExecBreak {} -> logDebugD env.log (text "break") -}
+
+          NoPackage _ -> logDebugD env.log (text "No Package") >> pure False
+          FoundMultiple _ -> logDebugD env.log (text "Found Multiple") >> pure False
+          NotFound {} -> logDebugD env.log (text "Not Found") >> pure False
 
 loadImport :: Env -> ModuleName -> Ghc (Either String (GlobalRdrEnvX GREInfo))
 loadImport env modname = do
@@ -197,3 +234,54 @@ checkGlobalRdrEnv env = do
   let rdr_env = igre_env (ic_gre_cache (hsc_IC hsc_env))
   logDebugD env.log (text "==== checkGlobalRdrEnv ====")
   logDebugD env.log (ppr rdr_env)
+
+-- | Run a statement in the current interactive context.
+evalStmtCustom
+  :: GhcMonad m
+  => String             -- ^ a statement (bind or expression)
+  -> ExecOptions
+  -> m (EvalStatus_ [ForeignHValue] [HValueRef]) -- ExecResult
+evalStmtCustom input exec_opts@ExecOptions{..} = do
+    hsc_env <- getSession
+
+    mb_stmt <-
+      liftIO $
+      runInteractiveHsc hsc_env $
+      hscParseStmtWithLocation execSourceFile execLineNumber input
+
+    case mb_stmt of
+      -- empty statement / comment
+      -- FOR NOW
+      Nothing -> return undefined -- (EvalComplete (Right []) 0)
+      Just stmt -> evalStmt' stmt input exec_opts
+
+evalStmt' :: GhcMonad m => GhciLStmt GhcPs -> String -> ExecOptions -> m (EvalStatus_ [ForeignHValue] [HValueRef])-- ExecResult
+evalStmt' stmt stmt_text ExecOptions{..} = do
+    hsc_env <- getSession
+    let interp = hscInterp hsc_env
+
+    -- Turn off -fwarn-unused-local-binds when running a statement, to hide
+    -- warnings about the implicit bindings we introduce.
+    let ic       = hsc_IC hsc_env -- use the interactive dflags
+        -- FOR NOW
+        -- idflags' = ic_dflags ic `wopt_unset` Opt_WarnUnusedLocalBinds
+        idflags' = ic_dflags ic
+        hsc_env' = mkInteractiveHscEnv (hsc_env{ hsc_IC = ic { ic_dflags = idflags' }})
+
+    r <- liftIO $ hscParsedStmt hsc_env' stmt
+
+    case r of
+      Nothing ->
+        -- empty statement / comment
+        -- FOR NOW
+        return undefined -- (ExecComplete (Right []) 0)
+      Just (ids, hval, fix_env) -> do
+        -- FOR NOW
+        -- updateFixityEnv fix_env
+
+        status <-
+          -- withVirtualCWD $
+            liftIO $ do
+              let eval_opts = initEvalOpts idflags' (isStep execSingleStep)
+              evalStmt interp eval_opts (execWrap hval)
+        pure status
