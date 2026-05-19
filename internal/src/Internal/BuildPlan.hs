@@ -42,6 +42,7 @@ import GHC.Utils.Error (isEmptyMessages)
 import Internal.BuildPlan.External (packageName, unitImports)
 import Internal.BuildPlan.Json (assembleFields)
 import System.FilePath (splitExtension)
+import System.OsPath.Extra (toOsPath)
 import Types.Args (BuildPlanField (..))
 import Types.BuildPlan (
   BuildPlan (..),
@@ -162,7 +163,7 @@ buildPlanModule env (summary, depKeys) = do
   }
   pure (summaryModuleKey summary, bpModule)
   where
-    source = msHsFilePath summary
+    source = toOsPath (msHsFilePath summary)
 
     (modules, modulesBoot) = partitionEithers $ Map.elems $ Map.restrictKeys env.homeModules depKeys
 
