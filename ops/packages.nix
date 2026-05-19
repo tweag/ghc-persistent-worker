@@ -310,6 +310,7 @@
           "ghc"
           "grapesy"
           "optparse-applicative"
+          "os-string"
           "stm"
           "text"
           "transformers"
