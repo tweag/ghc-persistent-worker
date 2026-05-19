@@ -40,6 +40,8 @@ data Mode =
   |
   ModeMetadata
   |
+  ModeEval
+  |
   ModeUnknown String
   deriving stock (Eq, Show)
 
@@ -48,6 +50,7 @@ parseMode = \case
   "compile" -> ModeCompile
   "link" -> ModeLink
   "metadata" -> ModeMetadata
+  "eval" -> ModeEval
   mode -> ModeUnknown mode
 
 data IsInterpreted =
@@ -88,7 +91,9 @@ data BuckArgs =
     closeInput :: Maybe String,
     closeOutput :: Maybe String,
     isBinary :: Bool,
-    interp :: IsInterpreted
+    interp :: IsInterpreted,
+    expr :: Maybe String,
+    evalTargetName :: Maybe String
   }
   deriving stock (Eq, Show)
 
@@ -123,7 +128,9 @@ emptyBuckArgs env =
     closeInput = Nothing,
     closeOutput = Nothing,
     isBinary = False,
-    interp = Compiled
+    interp = Compiled,
+    expr = Nothing,
+    evalTargetName = Nothing
   }
 
 options :: Map String ([String] -> BuckArgs -> Either String ([String], BuckArgs))
@@ -157,6 +164,8 @@ options =
     withArg "--close-input" \z a -> z {closeInput = Just a},
     withArg "--close-output" \z a -> z {closeOutput = Just a},
     flag "--interp" \ z -> z {interp = Interpreted},
+    withArg "--expr" \ z a -> z {expr = Just a},
+    withArg "--eval-target-name" \ z a -> z {evalTargetName = Just a},
     ("-c", \ rest z -> Right (rest, z {mode = Just ModeCompile})),
     ("-M", \ rest z -> Right (rest, z {mode = Just ModeMetadata}))
   ]

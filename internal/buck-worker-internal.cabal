@@ -95,6 +95,7 @@ library
                       Internal.Env
                       Internal.Error
                       Internal.Json
+                      Internal.Evaluate
                       Internal.Log
                       Internal.Metadata
                       Internal.Session

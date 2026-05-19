@@ -26,13 +26,21 @@ import Internal.Compile.Make (compileModuleWithDepsInHpt)
 import Internal.Debug (debugSocketPath)
 #endif
 import Internal.DynFlags (modifyGlobalFlags)
+import Internal.Evaluate (evaluate)
 import Internal.Log (newLogger)
 import Internal.Metadata (computeMetadata)
 import Internal.Session (withGhcMakeModule, withGhcMakeSource)
 import Prelude hiding (log)
 import Types.Args (Args (..))
 import qualified Types.BuckArgs
-import Types.BuckArgs (BuckArgs, IsInterpreted (..), Mode (..), parseBuckArgs, toGhcArgs)
+import Types.BuckArgs (
+  BuckArgs,
+  IsInterpreted (..),  
+  Mode (..),
+  checkModuleTarget,
+  parseBuckArgs,
+  toGhcArgs,
+  )
 import Types.Env (Env (..))
 import Types.FeatureFlags (FeatureFlags (..))
 import Types.Grpc (RequestArgs (..))
@@ -87,6 +95,18 @@ dispatch hooks env args =
     Just ModeMetadata -> do
       (success, target) <- computeMetadata env
       pure (if success then 0 else 1, target)
+    Just ModeEval -> do
+      mModTarget <- checkModuleTarget args
+      case mModTarget of
+        Just modTarget -> do
+          case args.expr of
+            Just expr -> do
+              _result <- eval args.evalTargetName modTarget expr
+              pure ()
+            Nothing -> error "worker: no expr"
+        Nothing ->
+          error "worker: No modTarget"
+      pure (1, Just (TargetUnknown "test"))
     Just m -> error ("worker: mode not implemented: " ++ show m)
     Nothing -> error "worker: no mode specified"
   where
@@ -103,6 +123,15 @@ dispatch hooks env args =
 
     compileHpt = compileAndReadAbiHash CompManager (compileModuleWithDepsInHpt env.log) hooks args
 
+    eval mname modTarget stmt = do
+      case mname of
+        Nothing -> pure ()
+        Just name -> env.log.setTarget (TargetUnknown name)
+      withGhcMakeModule Interpreted modTarget env
+        (\_ -> do
+          x <- Internal.Evaluate.evaluate env args.homeUnit modTarget stmt
+          pure (Just x)
+        )
     withTarget f (target :: TargetSpec) =
       reifyGhc $ \session -> do
         env.log.setTarget target
