@@ -218,6 +218,7 @@
           "filepath"
           "ghc"
           "ghc-paths"
+          "os-string"
           "split"
           "text"
         ];
