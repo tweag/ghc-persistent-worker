@@ -18,7 +18,8 @@ import Internal.Session (sessionWithDebugLog, withDynFlags)
 import Internal.State (newState, updateMakeStateVar)
 import Internal.State.Make (insertUnitEnv, storeModuleGraph)
 import Prelude hiding (log)
-import System.FilePath (takeFileName, (</>))
+import System.FilePath ((</>))
+import System.OsPath.Extra (takeFileName, toOsPath)
 import Test.PackageDb (ModuleSpec (..), UnitSpec (..), createEmptyHomeUnitDb, moduleSpec, toBoot)
 import Test.Run (persistentSession, transientSession, unitTest, withTemp)
 import Test.Target (fileUnitTargets, ghcOptions, pureUnitTargets)
@@ -122,17 +123,17 @@ expected1 =
     th_modules = Just [],
     cache = Just [
       ("U1M1", CachedModule {
-        source = "U1M1.hs",
+        source = toOsPath "U1M1.hs",
         modules = [],
         packages = []
       }),
       ("U1M2", CachedModule {
-        source = "U1M2.hs",
+        source = toOsPath "U1M2.hs",
         modules = [jmn "U1M1"],
         packages = []
       }),
       ("U1M2-boot", CachedModule {
-        source = "U1M2.hs-boot",
+        source = toOsPath "U1M2.hs-boot",
         modules = [],
         packages = []
       })
@@ -165,12 +166,12 @@ expected2 oneshot =
     th_modules = Just [],
     cache = Just [
       ("U2M1", CachedModule {
-        source = "Dummy.hs",
+        source = toOsPath "Dummy.hs",
         modules = [],
         packages = []
       }),
       ("U2M2", CachedModule {
-        source = "Dummy.hs",
+        source = toOsPath "Dummy.hs",
         modules = [jmn "U2M1"],
         packages = if oneshot then [] else [CachedPackageDep {id = jui "unit1", modules = [jmn "U1M2"]}]
       })

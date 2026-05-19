@@ -38,7 +38,7 @@ jfsUid = JsonFs . stringToUnitId
 mkCachedModule :: String -> [String] -> [CachedPackageDep] -> CachedModule
 mkCachedModule source mods pkgs =
   CachedModule {
-    source,
+    source=toOsPath source,
     modules = map jfs mods,
     packages = pkgs
   }

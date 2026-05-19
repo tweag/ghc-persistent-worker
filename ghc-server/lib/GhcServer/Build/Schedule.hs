@@ -207,7 +207,7 @@ resolveFromCachedUnit name outputDir cu =
     | (JsonFs mn, cm) <- Map.toList moduleMap
     , let modName = mkModuleName (moduleNameString mn)
     , let key = ModuleKey {unit = name, name = modName}
-    , let pendingKey = PendingSource name (toOsPath cm.source)
+    , let pendingKey = PendingSource name cm.source
     ]
   where
     moduleMap = fromMaybe Map.empty (cu.cache <|> cu.build_plan)
