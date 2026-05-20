@@ -47,15 +47,16 @@ import Internal.State.UnitIndex (newUnitIndex)
 import Prelude hiding (log)
 import Test.Run (expectNoDiagnostics, testSession)
 import TestSetup (Conf (..), ModuleSpec (..), Reexport (..), Unit (..), UnitSpec (..), withProject)
+import System.OsPath.Extra (OsPath)
 
 #if defined(MWB)
 
 import GHC.Unit.Home.Graph (unitEnv_keys, unitEnv_lookup, unitEnv_new)
-import System.OsPath.Extra (toOsPath)
 
 #else
 
 import GHC.Unit.Env (unitEnv_keys, unitEnv_lookup, unitEnv_new)
+import System.OsPath.Extra (fromOsPath)
 
 #endif
 
@@ -73,12 +74,12 @@ homeDep num =
   where
     name = "unit" ++ show (num - 1)
 
-dbFlag :: String -> PackageDBFlag
+dbFlag :: OsPath -> PackageDBFlag
 dbFlag path =
 #if defined(MWB)
-  PackageDB (PkgDbPath (toOsPath path))
-#else
   PackageDB (PkgDbPath path)
+#else
+  PackageDB $ PkgDbPath (fromOsPath path)
 #endif
 
 testDepUnits ::

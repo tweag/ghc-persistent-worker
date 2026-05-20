@@ -27,9 +27,11 @@ import Internal.Metadata (computeMetadata)
 import Internal.Session (withGhcMakeSource)
 import Internal.State.Stats (logMemStats)
 import Prelude hiding (log)
-import System.Directory (createDirectoryIfMissing, listDirectory, removeDirectoryRecursive)
-import System.FilePath (dropExtension, takeBaseName, takeExtension, takeFileName, (</>))
-import System.OsPath.Extra (fromOsPath)
+import System.Directory (createDirectoryIfMissing)
+import System.Directory.OsPath (listDirectory, removeDirectoryRecursive)
+import System.FilePath ((</>))
+import System.OsPath.Extra (fromOsPath, dropExtension, takeBaseName, takeExtension, takeFileName, toOsPath)
+import qualified System.OsPath as OsPath ((</>))
 import Test.Tasty (TestTree)
 import Test.Run (unitTest)
 import TestSetup (Conf (..), Module (..), ModuleSpec (..), Unit (..), UnitSpec (..), withProject)
@@ -50,7 +52,11 @@ stepMetadata Conf {state, tmp, args0} unit deps = do
   logVar <- newLog Nothing
   createDirectoryIfMissing False sessionTmpDir
   names <- listDirectory unit.dir
-  let srcs = [unit.dir </> name | name <- names, takeExtension name == ".hs"]
+  let srcs =
+        [ fromOsPath (unit.dir OsPath.</> name)
+        | name <- names
+        , takeExtension name == toOsPath ".hs"
+        ]
       env = Env {log = newLogger logVar, state, args = args srcs}
   dbgp (text ">>> metadata for" <+> ppr unit.uid)
   (success, _) <- computeMetadata env
@@ -75,7 +81,7 @@ stepMetadata Conf {state, tmp, args0} unit deps = do
       "-package", "template-haskell"
       ]
 
-    sessionTmpDir = tmp </> "tmp" </> unit.name
+    sessionTmpDir = fromOsPath tmp </> "tmp" </> unit.name
 
 stepCompile :: Conf -> Module -> IO ()
 stepCompile Conf {state, tmp, args0} Module {unit, src} = do
@@ -84,7 +90,7 @@ stepCompile Conf {state, tmp, args0} Module {unit, src} = do
   liftIO $ createDirectoryIfMissing False sessionTmpDir
   result <- liftIO $ withGhcMakeSource env \ target -> do
     dbg ""
-    dbg (">>> compiling " ++ takeFileName (fromOsPath target.path))
+    dbg (">>> compiling " ++ fromOsPath (takeFileName target.path))
     modifySession $ hscUpdateFlags \ d -> d {ghcMode = CompManager}
     compileModuleWithDepsInHpt env.log (TargetSource target)
   when (isNothing result) do
@@ -98,7 +104,7 @@ stepCompile Conf {state, tmp, args0} Module {unit, src} = do
         tempDir = Just sessionTmpDir
       }
 
-    sessionTmpDir = tmp </> "tmp" </> takeBaseName src
+    sessionTmpDir = fromOsPath $ tmp OsPath.</> toOsPath "tmp" OsPath.</> takeBaseName src
 
     fileOptions =
       [
@@ -106,13 +112,13 @@ stepCompile Conf {state, tmp, args0} Module {unit, src} = do
         "-this-unit-id",
         unit,
         "-o",
-        tmp </> "out" </> (modName ++ ".dyn_o"),
+        fromOsPath tmp </> "out" </> (modName ++ ".dyn_o"),
         "-ohi",
-        tmp </> "out" </> (modName ++ ".dyn_hi"),
-        src
+        fromOsPath tmp </> "out" </> (modName ++ ".dyn_hi"),
+        fromOsPath src
       ]
 
-    modName = dropExtension (takeFileName src)
+    modName = fromOsPath $ dropExtension (takeFileName src)
 
 errContent :: String
 errContent =
@@ -305,10 +311,10 @@ targets2 =
 
 removeGhcTmpDir :: Conf -> IO ()
 removeGhcTmpDir conf = do
-  dirs <- liftIO (listDirectory (conf.tmp </> "tmp"))
+  dirs <- listDirectory (conf.tmp OsPath.</> toOsPath "tmp")
   for_ dirs \ ghcTmpRel -> do
-    let ghcTmp = conf.tmp </> "tmp" </> ghcTmpRel
-    liftIO $ removeDirectoryRecursive ghcTmp
+    let ghcTmp = conf.tmp OsPath.</> toOsPath "tmp" OsPath.</> ghcTmpRel
+    removeDirectoryRecursive ghcTmp
 
 data TestStep =
   StepMetadata Unit [Unit]
@@ -343,7 +349,7 @@ testWorker mkSpecs = do
     -- ensure that each session gets its own @TmpFs@.
     liftIO (removeGhcTmpDir conf)
     runStep conf (NonEmpty.last steps)
-    dbgs =<< listDirectory (conf.tmp </> "out")
+    dbgs =<< listDirectory (conf.tmp OsPath.</> toOsPath "out")
 
 -- | A very simple test consisting of two home units, using a transitive TH dependency across unit boundaries.
 test_compileHpt :: TestTree
