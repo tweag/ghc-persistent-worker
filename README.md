@@ -6,6 +6,23 @@ GHC persistent worker currently works with Buck2.
 
 <img src="docs/config.png" width="400">
 
+Building the project
+====================
+
+The project can be built with
+
+```bash
+$ nix develop --command "cabal build all"
+```
+
+Be mindful that this runs a patched GHC 9.10.1. If you use a stock GHC 9.10.1
+for other projects, compilation could fail since both toolchains write to the
+same store.
+
+```bash
+$ nix develop --command "cabal path --store-dir"
+```
+
 Buck
 ====
 
@@ -55,7 +72,11 @@ HLS
 When the GHC used to build HLS includes patches that influence CPP pragmas in the worker, you need to enable those in
 `cabal.project`.
 
-An HLS version patched for the MWB GHC can be run with `nix run .#hls`.
+An HLS version patched for the MWB GHC can be run with `nix run .#hls`. You
+should configure your editor to use this command as the HLS executable.
+
+You might still need to run you editor from a `nix develop` shell to make build
+tools and libraries available (e.g. `protoc` and `snappy`).
 
 Cachix
 ======
