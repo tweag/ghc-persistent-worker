@@ -34,7 +34,7 @@ import GhcServer.Data.Request (ScheduleRequest (..), UnitRequest (..))
 import GhcServer.Data.Unit (ClientModule (..), Project (..), Unit (..), UnitCache (..), UnitName (..))
 import GhcServer.Data.UnitConfig (UnitConfig (..))
 import GhcServer.Log (newLogger)
-import GhcServer.Path (osPath)
+import GhcServer.Path (toOsPath)
 import GhcServer.Project (discoverProject)
 import Hedgehog (TestT, annotate, assert, diff, property, test, withTests, (===))
 import Internal.UnitEnv (lookupHpt)
@@ -98,9 +98,9 @@ acquireProject :: IO FilePath -> IO TestProject
 acquireProject acquireRoot = do
   root <- acquireRoot
   let
-    rootOs = osPath root
-    outputDir = osPath (root ++ "/output")
-    tmpDir = osPath (root ++ "/tmp")
+    rootOs = toOsPath root
+    outputDir = toOsPath (root ++ "/output")
+    tmpDir = toOsPath (root ++ "/tmp")
   project <- discoverProject rootOs outputDir tmpDir
   pure TestProject {root, rootOs, project, outputDir, tmpDir}
 

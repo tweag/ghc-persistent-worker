@@ -10,7 +10,7 @@ import GHC.Data.Graph.Directed (graphFromEdgedVerticesOrd)
 import qualified GHC.Data.Graph.Directed as Graph (Node (..))
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitCache (..), UnitDepNode, UnitName (..), mkUnitCache)
 import GhcServer.Data.UnitConfig (UnitConfig (..))
-import GhcServer.Path (osPath)
+import GhcServer.Path (toOsPath)
 import System.Directory.OsPath (createDirectoryIfMissing, doesFileExist, listDirectory)
 import System.OsPath (OsPath, decodeUtf, encodeUtf, (</>))
 
@@ -61,8 +61,8 @@ discoverUnit projectRoot outputDir tmpDir name = do
       let sources = [dir </> e | e <- entries, isHaskellSource e]
       nameStr <- either (fail . show) pure (decodeUtf name)
       let unitName = UnitName nameStr
-      createDirectoryIfMissing True (outputDir </> osPath nameStr)
-      createDirectoryIfMissing True (tmpDir </> osPath nameStr)
+      createDirectoryIfMissing True (outputDir </> toOsPath nameStr)
+      createDirectoryIfMissing True (tmpDir </> toOsPath nameStr)
       pure (Just Unit {
         name = unitName,
         dir,

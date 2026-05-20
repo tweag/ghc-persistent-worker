@@ -20,7 +20,7 @@ import GHC (ModuleName, mkModuleName, moduleNameString)
 import GHC.Unit.Module.Graph (ModuleGraphNode (..), nodeDependencies, nodeKeyModName, nodeKeyUnitId)
 import GHC.Unit.Types (UnitId, unitIdString)
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..), unitId)
-import GhcServer.Path (fp, osPath)
+import GhcServer.Path (fromOsPath, toOsPath)
 import GhcServer.Scheduler (Phase (..), Task (..))
 import System.OsPath (OsPath, (</>))
 import Types.CachedDeps (
@@ -207,7 +207,7 @@ resolveFromCachedUnit name outputDir cu =
     | (JsonFs mn, cm) <- Map.toList moduleMap
     , let modName = mkModuleName (moduleNameString mn)
     , let key = ModuleKey {unit = name, name = modName}
-    , let pendingKey = PendingSource name (osPath cm.source)
+    , let pendingKey = PendingSource name (toOsPath cm.source)
     ]
   where
     moduleMap = fromMaybe Map.empty (cu.cache <|> cu.build_plan)
@@ -228,7 +228,7 @@ resolveFromCachedUnit name outputDir cu =
           ]
 
     modHiPath modName =
-      fp (outputDir </> osPath (unitIdString (unitId name)) </> osPath (moduleNameString modName ++ ".dyn_hi"))
+      fromOsPath (outputDir </> toOsPath (unitIdString (unitId name)) </> toOsPath (moduleNameString modName ++ ".dyn_hi"))
 
     jsonFsVal :: JsonFs a -> a
     jsonFsVal (JsonFs a) = a

@@ -1,29 +1,33 @@
 -- | Path utilities shared across GHC server modules.
 module GhcServer.Path where
 
-import System.OsPath (OsPath, decodeUtf, encodeUtf, unsafeEncodeUtf, (</>))
+import Control.Exception (Exception, SomeException, throw)
+import System.OsPath (OsPath, decodeUtf, encodeUtf, (</>))
 
-fp :: OsPath -> FilePath
-fp p =
-  either (error . msg) id (decodeUtf p)
-  where
-    msg err = "Decoding path " <> show p <> " failed: " <> show err
+data PathDecodingException = PathDecodingException OsPath SomeException
+  deriving stock (Show)
 
-osPath :: String -> OsPath
-osPath = unsafeEncodeUtf
+instance Exception PathDecodingException where
+
+data PathEncodingException = PathEncodingException FilePath SomeException
+  deriving stock (Show)
+
+instance Exception PathEncodingException where
+
+fromOsPath :: OsPath -> FilePath
+fromOsPath p = either (throw . PathDecodingException p) id (decodeUtf p)
+
+toOsPath :: String -> OsPath
+toOsPath p = either (throw . PathEncodingException p) id (encodeUtf p)
 
 -- | Directory names under the project root for server artifacts.
 outputDirName, tmpDirName, socketDirName :: OsPath
-outputDirName = osPath "output"
-tmpDirName = osPath "tmp"
-socketDirName = osPath "socket"
+outputDirName = toOsPath "output"
+tmpDirName = toOsPath "tmp"
+socketDirName = toOsPath "socket"
 
 -- | The Unix socket path for the server, placed under the project root.
-socketPath :: OsPath -> Either String FilePath
+socketPath :: OsPath -> FilePath
 socketPath projectRoot = do
-  socketFile <- onLeft "socket file" (encodeUtf "server.sock")
-  onLeft "socket path" (decodeUtf (projectRoot </> socketDirName </> socketFile))
-  where
-    onLeft desc = \case
-      Right p -> Right p
-      Left e -> Left ("Failed to decode " ++ desc ++ ": " ++ show e)
+  let socketFile = toOsPath "server.sock"
+   in fromOsPath (projectRoot </> socketDirName </> socketFile)

@@ -9,7 +9,7 @@ import GHC.Data.Graph.Directed (Graph)
 import GHC.Unit (UnitId, stringToUnit)
 import GHC.Unit.Types (toUnitId, unitIdString)
 import GHC.Utils.Outputable (Outputable (..), text)
-import GhcServer.Path (fp, osPath)
+import GhcServer.Path (fromOsPath, toOsPath)
 import System.OsPath (OsPath, (</>))
 
 -- | A unit name used as the identity of a build unit.
@@ -48,7 +48,7 @@ data UnitCache =
 -- The path is @outputDir/unitId/ModuleName.dyn_hi@.
 moduleHiPath :: OsPath -> UnitName -> ModuleName -> FilePath
 moduleHiPath outputDir name modName =
-  fp (outputDir </> osPath (unitIdString (unitId name)) </> osPath (moduleNameString modName ++ ".dyn_hi"))
+  fromOsPath (outputDir </> toOsPath (unitIdString (unitId name)) </> toOsPath (moduleNameString modName ++ ".dyn_hi"))
 
 -- | A unit discovered in the project, identified by its directory name.
 data Unit =
@@ -106,9 +106,9 @@ mkUnitCache :: OsPath -> UnitName -> UnitCache
 mkUnitCache projectRoot name =
   UnitCache {
     dir = cDir,
-    cachedUnitPath = fp (cDir </> osPath "cached_unit.json"),
-    unitArgsPath = fp (cDir </> osPath "unit_args"),
-    depUnitsPath = fp (cDir </> osPath "dep_units.json")
+    cachedUnitPath = fromOsPath (cDir </> toOsPath "cached_unit.json"),
+    unitArgsPath = fromOsPath (cDir </> toOsPath "unit_args"),
+    depUnitsPath = fromOsPath (cDir </> toOsPath "dep_units.json")
   }
   where
-    cDir = projectRoot </> osPath "cache" </> osPath name.string
+    cDir = projectRoot </> toOsPath "cache" </> toOsPath name.string

@@ -26,7 +26,7 @@ import GHC.Unit (stringToUnit)
 import GHC.Unit.Types (toUnitId)
 import GhcServer.Data.BuildCache (BuildCache (..))
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitCache (..), UnitDepNode, UnitName (..), moduleHiPath)
-import GhcServer.Path (fp, osPath)
+import GhcServer.Path (fromOsPath, toOsPath)
 import System.Directory (doesFileExist)
 import System.Directory.OsPath (createDirectoryIfMissing)
 import qualified System.File.OsPath as OsFile
@@ -48,7 +48,7 @@ writeCachedUnit unitCache depsFile buildPlanFp =
     Left err ->
       pure (Left ("Failed to decode build plan for cache (" ++ buildPlanFp ++ "): " ++ err))
     Right cachedUnit -> do
-      OsFile.writeFile (unitCache.dir </> osPath "cached_unit.json") (Aeson.encode cachedUnit {
+      OsFile.writeFile (unitCache.dir </> toOsPath "cached_unit.json") (Aeson.encode cachedUnit {
         unit_args = Just unitCache.unitArgsPath,
         dep_units = depsFile
       })
@@ -71,7 +71,7 @@ writeUnitCache _logger unitCache depPlans buildPlanPath ghcOptions =
     False -> pure (Right ())
     True -> writeAll
   where
-    buildPlanFp = fp buildPlanPath
+    buildPlanFp = fromOsPath buildPlanPath
 
     writeAll = do
       createDirectoryIfMissing True unitCache.dir
