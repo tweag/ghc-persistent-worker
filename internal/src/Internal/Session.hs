@@ -46,9 +46,10 @@ import Types.Log (Logger (..))
 import Types.State (Options (..), WorkerState (..))
 import Types.State.Make (MakeState (..))
 import Types.Target (ModuleTarget (..), Target (Target), TargetSpec (..))
+import System.OsPath.Extra (OsPath, fromOsPath, toOsPath)
 
-setTempDir :: String -> HscEnv -> HscEnv
-setTempDir dir = hscUpdateFlags \ dflags -> dflags {tmpDir = TempDir dir}
+setTempDir :: OsPath -> HscEnv -> HscEnv
+setTempDir dir = hscUpdateFlags \ dflags -> dflags {tmpDir = TempDir (fromOsPath dir)}
 
 -- | Run a program with fresh 'DynFlags' constructed from command line args.
 -- Passes the flags and the unprocessed args to the callback, which usually consist of the file or module names intended
@@ -137,7 +138,7 @@ simpleSessionWithDebugLog state args ma =
 -- Wrap it in 'Target' or terminate.
 ensureSingleTarget :: [(String, Maybe Phase)] -> Ghc Target
 ensureSingleTarget = \case
-  [(src, Nothing)] -> pure (Target src)
+  [(src, Nothing)] -> pure (Target $ toOsPath src)
   [(_, phase)] -> panic ("Called worker with unexpected start phase: " ++ show phase)
   args -> panic ("Called worker with multiple source targets: " ++ show args)
 

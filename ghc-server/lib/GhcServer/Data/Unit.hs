@@ -9,7 +9,7 @@ import GHC.Data.Graph.Directed (Graph)
 import GHC.Unit (UnitId, stringToUnit)
 import GHC.Unit.Types (toUnitId, unitIdString)
 import GHC.Utils.Outputable (Outputable (..), text)
-import GhcServer.Path (fromOsPath, toOsPath)
+import GhcServer.Path (toOsPath)
 import System.OsPath.Extra (OsPath, (</>))
 
 -- | A unit name used as the identity of a build unit.
@@ -37,9 +37,9 @@ data UnitCache =
     -- | Path to @cached_unit.json@.
     cachedUnitPath :: OsPath,
     -- | Path to @unit_args@.
-    unitArgsPath :: FilePath,
+    unitArgsPath :: OsPath,
     -- | Path to @dep_units.json@.
-    depUnitsPath :: FilePath
+    depUnitsPath :: OsPath
   }
   deriving stock (Show)
 
@@ -107,8 +107,8 @@ mkUnitCache projectRoot name =
   UnitCache {
     dir = cDir,
     cachedUnitPath = cDir </> toOsPath "cached_unit.json",
-    unitArgsPath = fromOsPath (cDir </> toOsPath "unit_args"),
-    depUnitsPath = fromOsPath (cDir </> toOsPath "dep_units.json")
+    unitArgsPath = cDir </> toOsPath "unit_args",
+    depUnitsPath = cDir </> toOsPath "dep_units.json"
   }
   where
     cDir = projectRoot </> toOsPath "cache" </> toOsPath name.string

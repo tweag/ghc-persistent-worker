@@ -27,27 +27,25 @@ import GHC.Unit.Types (toUnitId)
 import GhcServer.Data.BuildCache (BuildCache (..))
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitCache (..), UnitDepNode, UnitName (..), moduleHiPath)
 import GhcServer.Path (fromOsPath, toOsPath)
-import System.Directory (doesFileExist)
-import System.Directory.OsPath (createDirectoryIfMissing)
-import qualified System.Directory.OsPath as OsPath (doesFileExist)
+import System.Directory.OsPath (createDirectoryIfMissing, doesFileExist)
 import qualified System.File.OsPath as OsFile
 import System.OsPath.Extra (OsPath, (</>))
 import Types.CachedDeps (CachedBuildPlan (..), CachedBuildPlans (..), CachedUnit (..), JsonFs (..))
 import Types.Log (Logger (..))
 
 -- | Write the @dep_units.json@ file and return its path, if there are dep plans to write.
-writeDepUnits :: UnitCache -> Maybe CachedBuildPlans -> IO (Maybe FilePath)
+writeDepUnits :: UnitCache -> Maybe CachedBuildPlans -> IO (Maybe OsPath)
 writeDepUnits unitCache =
   traverse \ plans -> do
-    Aeson.encodeFile unitCache.depUnitsPath plans
+    Aeson.encodeFile (fromOsPath unitCache.depUnitsPath) plans
     pure unitCache.depUnitsPath
 
 -- | Decode the build plan JSON and write @cached_unit.json@ with injected @unit_args@ and @dep_units@ paths.
-writeCachedUnit :: UnitCache -> Maybe FilePath -> FilePath -> IO (Either String ())
+writeCachedUnit :: UnitCache -> Maybe OsPath -> OsPath -> IO (Either String ())
 writeCachedUnit unitCache depsFile buildPlanFp =
-  eitherDecodeFileStrict' buildPlanFp >>= \case
+  eitherDecodeFileStrict' (fromOsPath buildPlanFp) >>= \case
     Left err ->
-      pure (Left ("Failed to decode build plan for cache (" ++ buildPlanFp ++ "): " ++ err))
+      pure (Left ("Failed to decode build plan for cache (" ++ fromOsPath buildPlanFp ++ "): " ++ err))
     Right cachedUnit -> do
       OsFile.writeFile (unitCache.dir </> toOsPath "cached_unit.json") (Aeson.encode cachedUnit {
         unit_args = Just unitCache.unitArgsPath,
@@ -72,18 +70,18 @@ writeUnitCache _logger unitCache depPlans buildPlanPath ghcOptions =
     False -> pure (Right ())
     True -> writeAll
   where
-    buildPlanFp = fromOsPath buildPlanPath
+    buildPlanFp = buildPlanPath
 
     writeAll = do
       createDirectoryIfMissing True unitCache.dir
-      writeFile unitCache.unitArgsPath (unlines ghcOptions)
+      writeFile (fromOsPath unitCache.unitArgsPath) (unlines ghcOptions)
       depsFile <- writeDepUnits unitCache depPlans
       writeCachedUnit unitCache depsFile buildPlanFp
 
 -- | Check whether a cache exists for a unit.
 cacheExists :: UnitCache -> IO Bool
 cacheExists unitCache =
-  OsPath.doesFileExist unitCache.cachedUnitPath
+  doesFileExist unitCache.cachedUnitPath
 
 -- | Order the transitive dependencies of a unit for loading by 'loadCachedUnits'.
 --
@@ -123,12 +121,12 @@ depLoadOrder depGraph root =
 -- @cached_unit.json@ files.
 buildDepPlans :: Graph UnitDepNode -> Unit -> IO CachedBuildPlans
 buildDepPlans depGraph unit =
-  CachedBuildPlans . fmap plan <$> filterM (OsPath.doesFileExist . (.node_payload)) (depLoadOrder depGraph selfNode)
+  CachedBuildPlans . fmap plan <$> filterM (doesFileExist . (.node_payload)) (depLoadOrder depGraph selfNode)
   where
     plan node =
       CachedBuildPlan {
         name = JsonFs (toUnitId (stringToUnit node.node_key.string)),
-        build_plan = fromOsPath node.node_payload
+        build_plan = node.node_payload
       }
 
     selfNode = Graph.DigraphNode {
@@ -143,14 +141,14 @@ buildDepPlans depGraph unit =
 -- This is used before compilation to let 'withGhcMakeModule' restore the home unit via 'loadHomeUnit'.
 loadHomeUnitCache :: UnitCache -> IO (Maybe OsPath)
 loadHomeUnitCache unitCache =
-  whenMaybeM (OsPath.doesFileExist unitCache.cachedUnitPath) (pure unitCache.cachedUnitPath)
+  whenMaybeM (doesFileExist unitCache.cachedUnitPath) (pure unitCache.cachedUnitPath)
 
 -- | Check whether a module's interface file (@.dyn_hi@) exists.
 --
 -- The interface file is the reliable indicator that a module was compiled in a prior build.
 interfaceExists :: OsPath -> UnitName -> ModuleName -> IO Bool
 interfaceExists outputDir name modName =
-  OsPath.doesFileExist (moduleHiPath outputDir name modName)
+  doesFileExist (moduleHiPath outputDir name modName)
 
 -- | Compute the set of all units with cache from a prior build.
 cachedUnitsForProject :: Project -> IO (Set UnitName)
@@ -180,7 +178,7 @@ mkBuildCache outputDir project =
 -- @Left err@ on decode failure.
 loadCachedUnit :: UnitCache -> IO (Either String (Maybe CachedUnit))
 loadCachedUnit unitCache =
-  OsPath.doesFileExist unitCache.cachedUnitPath >>= \case
+  doesFileExist unitCache.cachedUnitPath >>= \case
     False -> pure (Right Nothing)
     True ->
       eitherDecodeFileStrict' (fromOsPath unitCache.cachedUnitPath) >>= \case

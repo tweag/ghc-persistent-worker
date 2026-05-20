@@ -214,7 +214,7 @@ defaultResolveSpec =
 mkPriorModule :: String -> String -> String -> (ModuleKey, ModuleInfo)
 mkPriorModule unitName modName src =
   ( ModuleKey {unit = UnitName unitName, name = mkModuleName modName}
-  , ModuleInfo {task = pk unitName src, deps = Set.empty, hiPath = ""}
+  , ModuleInfo {task = pk unitName src, deps = Set.empty, hiPath = toOsPath ""}
   )
 
 -- | Look up a resolved task in the resolutions map by pending key.

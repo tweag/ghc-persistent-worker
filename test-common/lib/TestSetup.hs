@@ -12,8 +12,11 @@ import GHC.Unit (UnitId, stringToUnitId, unitIdString)
 import Internal.State (newStateWith)
 import Prelude hiding (log)
 import System.Directory (createDirectoryIfMissing)
+import qualified System.Directory.OsPath as OsPath (createDirectoryIfMissing)
 import System.FilePath ((<.>), (</>))
 import System.IO.Temp (withSystemTempDirectory)
+import System.OsPath.Extra (OsPath, fromOsPath, toOsPath)
+import qualified System.OsPath.Extra as OsPath ((</>))
 import System.Process.Typed (proc, runProcess_)
 import Types.Args (Args (..), TargetId (..), emptyArgs)
 import Types.State (WorkerState (..))
@@ -23,7 +26,7 @@ import Types.State.Oneshot (OneshotCacheFeatures (..))
 data Conf =
   Conf {
     -- | Root directory of the test in @/tmp@.
-    tmp :: FilePath,
+    tmp :: OsPath,
 
     -- | The worker state.
     state :: MVar WorkerState,
@@ -75,7 +78,7 @@ data Module =
     name :: String,
 
     -- | Path to the source file.
-    src :: FilePath,
+    src :: OsPath,
 
     -- | Home unit to which this module belongs.
     unit :: String
@@ -92,13 +95,13 @@ data Unit =
     name :: String,
 
     -- | Root source directory of this unit.
-    dir :: FilePath,
+    dir :: OsPath,
 
     -- | Names of home units on which this unit depends.
     deps :: [String],
 
     -- | Path to the dummy package DB created for the metadata step, analogous to what's created by Buck.
-    db :: FilePath,
+    db :: OsPath,
 
     -- | The modules belonging to this unit.
     modules :: NonEmpty Module
@@ -132,7 +135,7 @@ instance Show Unit where
     )
 
 -- | General CLI args used by each module job.
-baseArgs :: FilePath -> Args
+baseArgs :: OsPath -> Args
 baseArgs tmp =
   (emptyArgs []) {
     workerTargetId = Just (TargetId "test"),
@@ -157,11 +160,11 @@ baseArgs tmp =
     ]
   }
   where
-    artifactDir a = ["-" ++ a ++ "dir", tmp </> "out"]
+    artifactDir a = ["-" ++ a ++ "dir", fromOsPath tmp </> "out"]
 
 -- | A package DB config file for the given unit.
 dbConf ::
-  FilePath ->
+  OsPath ->
   String ->
   NonEmpty Module ->
   [Reexport] ->
@@ -173,7 +176,7 @@ dbConf srcDir unit modules reexports extra =
     "version: 1.0",
     "id: " ++ unit,
     "key: " ++ unit,
-    "import-dirs: " ++ srcDir,
+    "import-dirs: " ++ fromOsPath srcDir,
     "exposed: True",
     "exposed-modules: " ++ mconcat (intersperse ", " (exposed ++ (formatReexport <$> reexports)))
   ] ++ extra
@@ -185,39 +188,39 @@ dbConf srcDir unit modules reexports extra =
 
 -- | Write a fresh package DB without a library to the specified directory, using @ghc-pkg@ from the directory in
 -- 'Conf'.
-createDb :: String -> String -> IO String
+createDb :: OsPath -> String -> IO OsPath
 createDb dir confFile = do
-  createDirectoryIfMissing False db
-  runProcess_ (proc ghc_pkg ["-v0", "--package-db", db, "recache"])
-  runProcess_ (proc ghc_pkg ["-v0", "--package-db", db, "register", "--force", confFile])
+  OsPath.createDirectoryIfMissing False db
+  runProcess_ (proc ghc_pkg ["-v0", "--package-db", fromOsPath db, "recache"])
+  runProcess_ (proc ghc_pkg ["-v0", "--package-db", fromOsPath db, "register", "--force", confFile])
   pure db
   where
-    db = dir </> "package.conf.d"
+    db = dir OsPath.</> toOsPath "package.conf.d"
 
-writeDb :: UnitSpec -> FilePath -> String -> IO FilePath
+writeDb :: UnitSpec -> OsPath -> String -> IO OsPath
 writeDb unit dir db = do
   writeFile confFile db
   createDb dir confFile
   where
-    confFile = dir </> unit.name <.> "conf"
+    confFile = fromOsPath dir </> unit.name <.> "conf"
 
 -- | Create a package DB for a set of 'ModuleSpec' and assemble everything into a 'Unit'.
 -- This is used for home units that are part of the build – like Buck, we create a package DB without any interfaces so
 -- downsweep can see dependencies.
 -- This is gonna be legacy soon, since we've changed metadata to use the actual home units instead, pending some
 -- performance optimizations.
-createEmptyHomeUnitDb :: UnitSpec -> FilePath -> NonEmpty Module -> IO FilePath
+createEmptyHomeUnitDb :: UnitSpec -> OsPath -> NonEmpty Module -> IO OsPath
 createEmptyHomeUnitDb unit dir modules =
   writeDb unit dir (dbConf dir unit.name modules unit.reexports unit.extraDbConf)
 
 withTmp ::
-  (FilePath -> IO a) ->
+  (OsPath -> IO a) ->
   IO a
 withTmp use =
   withSystemTempDirectory "buck-worker-test" \ tmp -> do
     for_ @[] ["src", "tmp", "out"] \ dir ->
       createDirectoryIfMissing False (tmp </> dir)
-    use tmp
+    use (toOsPath tmp)
 
 -- | Set up an environment with dummy package DBs for the set of modules returned by the first argument, then run the
 -- second argument with the resulting unit configurations.
@@ -237,12 +240,12 @@ withProject mkTargets use =
     let conf = Conf {tmp, state, args0 = baseArgs tmp, ..}
     targets <- mkTargets conf
     units <- for targets \ unit -> do
-      let dir = tmp </> "src" </> unit.name
-      createDirectoryIfMissing False dir
+      let dir = tmp OsPath.</> toOsPath ("src" </> unit.name)
+      OsPath.createDirectoryIfMissing False dir
       modules <- for unit.modules \ ModuleSpec {name, content} -> do
-        let src = dir </> name <.> "hs"
+        let src = fromOsPath dir </> name <.> "hs"
         writeFile src content
-        pure Module {unit = unit.name, ..}
+        pure Module {unit = unit.name,src = toOsPath src,..}
       db <- createEmptyHomeUnitDb unit dir modules
       pure Unit {
         uid = stringToUnitId unit.name,
