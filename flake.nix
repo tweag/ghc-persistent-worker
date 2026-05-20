@@ -16,8 +16,7 @@
   };
 
   outputs = inputs@{hix, ...}: hix [({config, lib, util, ...}: {
-    compiler = "ghc910";
-    ghcVersions = ["ghc910" "ghc914"];
+    ghcVersions = ["ghc914"];
     main = "ghc-worker";
     ghci.args = ["-package ghc" "-DMWB" "-DDOWNSWEEP_CACHE" "-DUNIT_INDEX"];
     hls.genCabal = false;

@@ -198,7 +198,6 @@ in {
   };
 
   package-sets.ghc914 = {
-    compiler = "ghc914";
     overrides = api@{hackage, force, notest, ...}: let
 
       github = mkGithub api;
@@ -221,21 +220,6 @@ in {
       };
 
     };
-  };
-
-  package-sets.ghc910 = {
-    compiler = "ghc910";
-
-    overrides = {force, hackage, ...}: {
-      crypton-asn1-encoding = hackage "0.10.0" "0h4cxk9yz2xgmx0kl3gg9lixhnhvxqk85gvkwldp0mlfm3mgccvm";
-      crypton-asn1-parse = hackage "0.10.0" "0dsyslbb9a3f6wj0na52qc7iimjs9xljhi6wjfch61nb9m33l1kb";
-      crypton-asn1-types = hackage "0.4.1" "01zvf9vn5a0jyaq5l6mmzv7ya35sxjrk10k06rmi31x128sfqs7s";
-      # crypton-pem = hackage "0.3.0" "1bvcl2brlgqbb1kmjzlfspmm47n1g441qgsmyhz9ql3zlcz1s524";
-      # ech-config = hackage "0.0.1" "0sxxxd9rlc3x14mgh92ic8s9hjncf38f9s7p3ic284mvnzj0l3s2";
-      grapesy = force (hackage "1.1.1" "01n14bcrwshm2vkgrzg10s6rvxsw9sm75ws26py0k3f03bj94jcv");
-      grpc-spec = hackage "1.0.0" "0pgq63k6p65c5ffzxwihp8j1p731qrnda5rxrzqsylanmdmnvjb8";
-    };
-
   };
 
   envs.tools = {
