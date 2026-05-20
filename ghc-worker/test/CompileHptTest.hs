@@ -29,6 +29,7 @@ import Internal.State.Stats (logMemStats)
 import Prelude hiding (log)
 import System.Directory (createDirectoryIfMissing, listDirectory, removeDirectoryRecursive)
 import System.FilePath (dropExtension, takeBaseName, takeExtension, takeFileName, (</>))
+import System.OsPath.Extra (fromOsPath)
 import Test.Tasty (TestTree)
 import Test.Run (unitTest)
 import TestSetup (Conf (..), Module (..), ModuleSpec (..), Unit (..), UnitSpec (..), withProject)
@@ -83,7 +84,7 @@ stepCompile Conf {state, tmp, args0} Module {unit, src} = do
   liftIO $ createDirectoryIfMissing False sessionTmpDir
   result <- liftIO $ withGhcMakeSource env \ target -> do
     dbg ""
-    dbg (">>> compiling " ++ takeFileName target.path)
+    dbg (">>> compiling " ++ takeFileName (fromOsPath target.path))
     modifySession $ hscUpdateFlags \ d -> d {ghcMode = CompManager}
     compileModuleWithDepsInHpt env.log (TargetSource target)
   when (isNothing result) do
