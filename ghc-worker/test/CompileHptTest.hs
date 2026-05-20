@@ -27,8 +27,7 @@ import Internal.Metadata (computeMetadata)
 import Internal.Session (withGhcMakeSource)
 import Internal.State.Stats (logMemStats)
 import Prelude hiding (log)
-import System.Directory (createDirectoryIfMissing)
-import System.Directory.OsPath (listDirectory, removeDirectoryRecursive)
+import System.Directory.OsPath (createDirectoryIfMissing, listDirectory, removeDirectoryRecursive)
 import System.FilePath ((</>))
 import System.OsPath.Extra (fromOsPath, dropExtension, takeBaseName, takeExtension, takeFileName, toOsPath)
 import qualified System.OsPath as OsPath ((</>))
@@ -75,13 +74,13 @@ stepMetadata Conf {state, tmp, args0} unit deps = do
       "-hide-all-packages",
       "-this-unit-id",
       showPprUnsafe unit.uid,
-      "-dep-json=" ++ (sessionTmpDir </> "dep.json"),
-      "-dep-makefile=" ++ (sessionTmpDir </> "dep.make"),
+      "-dep-json=" ++ (fromOsPath sessionTmpDir </> "dep.json"),
+      "-dep-makefile=" ++ (fromOsPath sessionTmpDir </> "dep.make"),
       "-include-pkg-deps",
       "-package", "template-haskell"
       ]
 
-    sessionTmpDir = fromOsPath tmp </> "tmp" </> unit.name
+    sessionTmpDir = tmp OsPath.</> toOsPath ("tmp" </> unit.name)
 
 stepCompile :: Conf -> Module -> IO ()
 stepCompile Conf {state, tmp, args0} Module {unit, src} = do
@@ -104,7 +103,7 @@ stepCompile Conf {state, tmp, args0} Module {unit, src} = do
         tempDir = Just sessionTmpDir
       }
 
-    sessionTmpDir = fromOsPath $ tmp OsPath.</> toOsPath "tmp" OsPath.</> takeBaseName src
+    sessionTmpDir = tmp OsPath.</> toOsPath "tmp" OsPath.</> takeBaseName src
 
     fileOptions =
       [
