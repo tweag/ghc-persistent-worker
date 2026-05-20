@@ -20,7 +20,7 @@ import GHC (ModuleName, mkModuleName, moduleNameString)
 import GHC.Unit.Module.Graph (ModuleGraphNode (..), nodeDependencies, nodeKeyModName, nodeKeyUnitId)
 import GHC.Unit.Types (UnitId, unitIdString)
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..), unitId)
-import GhcServer.Path (fromOsPath, toOsPath)
+import GhcServer.Path (toOsPath)
 import GhcServer.Scheduler (Phase (..), Task (..))
 import System.OsPath.Extra (OsPath, (</>))
 import Types.CachedDeps (
@@ -187,7 +187,7 @@ data ModuleInfo =
   ModuleInfo {
     task :: TaskKey 'Pending,
     deps :: Set ModuleKey,
-    hiPath :: FilePath
+    hiPath :: OsPath
   }
 
 -- | Build a module map from a 'CachedUnit'.
@@ -228,7 +228,7 @@ resolveFromCachedUnit name outputDir cu =
           ]
 
     modHiPath modName =
-      fromOsPath (outputDir </> toOsPath (unitIdString (unitId name)) </> toOsPath (moduleNameString modName ++ ".dyn_hi"))
+      outputDir </> toOsPath (unitIdString (unitId name)) </> toOsPath (moduleNameString modName ++ ".dyn_hi")
 
     jsonFsVal :: JsonFs a -> a
     jsonFsVal (JsonFs a) = a
@@ -264,6 +264,7 @@ buildModuleCachedDeps allModules target =
       where
         visited' = Set.insert k visited
 
+    mkDep :: ModuleKey -> ModuleInfo -> CachedDep
     mkDep key info =
       CachedDep {
         name = JsonFs key.name,
