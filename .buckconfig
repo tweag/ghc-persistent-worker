@@ -20,7 +20,7 @@ buck2-haskell = git
 
 [external_cell_buck2-haskell]
 git_origin = https://github.com/tek/buck2-haskell.git
-commit_hash = d3be96deba41ad8216cfc41a64a7b708a49e7e89
+commit_hash = 2f1f9683246c105f17b764d6e485f03171bbe46b
 
 [parser]
 target_platform_detector_spec = \
