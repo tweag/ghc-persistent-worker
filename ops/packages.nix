@@ -110,6 +110,7 @@
           "containers"
           "directory"
           "grapesy"
+          "optparse-applicative"
           "process"
           "text"
         ];
@@ -117,6 +118,7 @@
       executables.buck-proxy = {
         dependencies = [
           "buck-worker-types"
+          "optparse-applicative"
           "unix"
         ];
         ghc-options-exe = [
@@ -217,6 +219,7 @@
           "filepath"
           "ghc"
           "ghc-paths"
+          "optparse-applicative"
           "split"
           "text"
         ];
