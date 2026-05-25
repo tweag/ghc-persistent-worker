@@ -120,5 +120,6 @@ test-suite worker-test
     tasty,
     tasty-hedgehog,
     temporary,
+    text,
     transformers,
     typed-process
