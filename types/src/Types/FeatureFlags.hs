@@ -13,7 +13,7 @@ data FeatureFlag =
   |
   FeatureInstrument
   |
-  FeatureIncrementalMetadata
+  FeatureIncrementalBuildPlan
   |
   FeatureLazyByteCode
   deriving stock (Eq, Show)
