@@ -32,11 +32,14 @@ type Edge = NodeKey
 
 #endif
 
+support_FixedNodes :: Bool
+support_FixedNodes = True
+
 pattern CompileNode :: [Edge] -> ModSummary -> ModuleGraphNode
-pattern CompileNode {deps, summary} <- ModuleNode !deps (ModuleNodeCompile !summary)
+pattern CompileNode {depsCompile, summary} <- ModuleNode !depsCompile (ModuleNodeCompile !summary)
 
 pattern FixedNode :: [Edge] -> ModNodeKeyWithUid -> ModLocation -> ModuleGraphNode
-pattern FixedNode {deps, key, location} <- ModuleNode !deps (ModuleNodeFixed !key !location)
+pattern FixedNode {depsFixed, key, location} <- ModuleNode !depsFixed (ModuleNodeFixed !key !location)
 
 downsweepCompat ::
   HscEnv ->
