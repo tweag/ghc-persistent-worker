@@ -6,6 +6,11 @@ license: MIT
 license-file: LICENSE
 build-type: Simple
 
+flag ghc-debug-stub
+  description: Build with support for ghc-debug-stub
+  default: False
+  manual: True
+
 common all
   ghc-options: -Wall -Widentities -Wincomplete-uni-patterns -Wmissing-deriving-strategies -Wredundant-constraints -Wunused-type-patterns -Wunused-packages
   default-language: GHC2021
@@ -52,12 +57,15 @@ library
     directory,
     filepath,
     ghc,
-    ghc-debug-stub,
     grapesy ^>=1.0.1,
     file-io,
     os-string,
     process,
     text
+  if (flag(ghc-debug-stub))
+    build-depends:
+       ghc-debug-stub
+    ghc-options: -DGHCI_DEBUG_STUB
 
 executable ghc-worker
   import: all
