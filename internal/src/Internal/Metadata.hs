@@ -2,15 +2,15 @@
 
 module Internal.Metadata where
 
-import Control.Concurrent (readMVar, modifyMVar)
+import Control.Concurrent (modifyMVar, readMVar)
 import Control.Monad (unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (for_)
 import Data.List.NonEmpty (toList)
 import Data.Maybe (fromMaybe, isJust)
-import Data.Set (Set)
 import qualified Data.Set as Set
+import Data.Set (Set)
 import GHC (
   DynFlags (..),
   Ghc,
@@ -23,6 +23,7 @@ import GHC (
   )
 import GHC.Driver.Env (HscEnv (..), hscSetActiveUnitId, hscUpdateLoggerFlags)
 import GHC.Driver.Monad (modifySession, withSession, withTempSession)
+import GHC.Runtime.Loader (initializeSessionPlugins)
 import GHC.Unit (UnitId)
 import GHC.Utils.Panic (throwGhcExceptionIO)
 import Internal.BuildPlan (buildPlanForSources)
@@ -38,9 +39,10 @@ import Internal.State.Stats (logMemStats)
 import Internal.State.UnitIndex (restoreUnitIndex)
 import System.Directory (createDirectoryIfMissing)
 import qualified System.File.OsPath as OsPath
-import System.OsPath.Extra (OsPath, toOsPath)
+import System.OsPath.Extra (toOsPath)
 import Types.Args (Args (..), buildPlanAll)
 import Types.BuildPlan (BuildPlan (..))
+import Types.BuildPlan.Incremental (BuildPlanPath (..))
 import Types.CachedDeps (CachedBuildPlans)
 import Types.Env (Env (..))
 import Types.Log (Logger (..))
@@ -49,13 +51,8 @@ import Types.Target (TargetSpec (..), UnitTarget (..))
 
 #if !defined(MWB)
 
-import GHC (ModSummary)
-
 depJSON :: DynFlags -> Maybe FilePath
 depJSON _ = Nothing
-
-ms_opts :: ModSummary -> [String]
-ms_opts _ = []
 
 #endif
 
@@ -119,13 +116,13 @@ prepareStaticMetadataSession env plans dflags = do
 transientUnit :: Env -> Bool
 transientUnit env = env.args.isBinary || isJust env.args.staticBuildPlans
 
-resolveDepJson :: HscEnv -> Maybe OsPath -> Ghc OsPath
-resolveDepJson hsc_env path =
-  case (path, toOsPath <$> depJSON hsc_env.hsc_dflags) of
+resolveBuildPlanPath :: HscEnv -> Maybe BuildPlanPath -> Ghc BuildPlanPath
+resolveBuildPlanPath hsc_env path =
+  case (path, BuildPlanPath . toOsPath <$> depJSON hsc_env.hsc_dflags) of
     (Just new, Just old)
       | new == old -> pure new
       | otherwise -> do
-        liftIO $ OsPath.writeFile old mempty
+        liftIO $ OsPath.writeFile old.path mempty
         pure new
     (Just new, Nothing) -> pure new
     (Nothing, Just old) -> pure old
@@ -146,16 +143,18 @@ resolveDepJson hsc_env path =
 -- though it's not been thoroughly tested what precisely the impact is.
 writeMetadata ::
   Args ->
+  Logger ->
   Set UnitId ->
   [String] ->
   Ghc ModuleGraph
-writeMetadata args staticUnits srcs = do
+writeMetadata args@Args {buildPlan = path, features, sourceHashes, incrementalState, perModuleFlags} logger staticUnits srcs = do
+  initializeSessionPlugins
   withTempSession metadataTempSession do
     hsc_env <- getSession
     writeLegacyMakefile hsc_env
-    depJson <- resolveDepJson hsc_env args.buildPlan
-    plan <- buildPlanForSources fields args.perModuleFlags staticUnits srcs
-    liftIO $ writeBuildPlanWith args depJson plan
+    buildPlanPath <- resolveBuildPlanPath hsc_env path
+    plan <- buildPlanForSources features logger fields perModuleFlags staticUnits buildPlanPath incrementalState sourceHashes (toOsPath <$> srcs)
+    liftIO $ writeBuildPlanWith args buildPlanPath.path plan
     pure plan.graph
   where
     fields = Set.fromList (toList (fromMaybe buildPlanAll args.fields))
@@ -185,7 +184,7 @@ computeMetadata env = do
         (unit, staticUnits) <- prepareSession dflags
         let target = TargetUnit (UnitTarget unit)
         liftIO $ env.log.setTarget target
-        module_graph <- writeMetadata env.args staticUnits (fst <$> srcs)
+        module_graph <- writeMetadata env.args env.log staticUnits (fst <$> srcs)
         liftIO do
           unless (transientUnit env) $
             updateMakeStateVar env.state (storeModuleGraph module_graph)
@@ -208,4 +207,4 @@ computeMetadata env = do
 proxyMetadata :: Env -> IO Bool
 proxyMetadata env =
   fmap isJust $ runSession env $ withGhcInSession env \ srcs ->
-    Just () <$ writeMetadata env.args mempty (fst <$> srcs)
+    Just () <$ writeMetadata env.args env.log mempty (fst <$> srcs)

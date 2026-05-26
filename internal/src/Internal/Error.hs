@@ -152,3 +152,10 @@ workerErrorIO ::
   IO a
 workerErrorIO hsc_env reason = do
   throwErrors (GhcDriverMessage <$> unknownErrors (Just "worker") hsc_env.hsc_dflags reason)
+
+eitherWorkerError ::
+  GhcMonad m =>
+  Either SDoc a ->
+  m a
+eitherWorkerError =
+  either workerError pure
