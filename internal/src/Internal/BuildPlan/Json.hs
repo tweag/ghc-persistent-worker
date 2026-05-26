@@ -24,6 +24,7 @@ import Types.BuildPlan (
   PackageKey (..),
   unionPackageDepsDeep,
   )
+import Types.BuildPlan.Incremental (BuildPlanPath (..))
 import Types.CachedDeps (CachedModule (..), CachedPackageDep (..), JsonFs (..))
 
 --- | Modules available for import downstream.
@@ -114,8 +115,8 @@ assembleFields fields toolchainDeps modules =
     fieldIf key value = if Set.member key fields then Just value else Nothing
 
 -- | Write a JSON file for the given build plan.
-writeBuildPlan :: OsPath -> BuildPlan -> IO ()
-writeBuildPlan path BuildPlan {json} =
+writeBuildPlan :: BuildPlanPath -> BuildPlan -> IO ()
+writeBuildPlan (BuildPlanPath path) BuildPlan {json} =
   OsPath.writeFile path (Aeson.encode json)
 
 -- | Write the build plan JSON, passing through additional paths required by the Buck rules.

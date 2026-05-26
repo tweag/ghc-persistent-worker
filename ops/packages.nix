@@ -114,6 +114,7 @@
           "optparse-applicative"
           "process"
           "text"
+          "unix"
         ];
       };
       executables.buck-proxy = {
@@ -266,6 +267,7 @@
           "bytestring"
           "containers"
           "directory"
+          "exceptions"
           "extra"
           "exceptions"
           "file-io"
