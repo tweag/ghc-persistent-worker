@@ -32,13 +32,13 @@ import Options.Applicative (
   strOption,
   (<**>),
   )
+import System.OsPath.Extra (toOsPath)
 import Types.FeatureFlags (FeatureFlag (..), FeatureFlags (..), defaultFeatureFlags, parseByteSize)
 import Types.Grpc (CommandEnv, RequestArgs)
 import Types.Instrument (Event)
 import Types.Log (TraceId (..))
 import Types.Orchestration (ServerSocketPath (..), serverSocketFromPath)
 import Types.State (WorkerState (..))
-import System.OsPath.Extra (toOsPath)
 
 -- | Global options for the worker, passed when the process is started, in contrast to request options stored in
 -- 'BuckArgs'.
@@ -67,7 +67,7 @@ featureFlagsParser =
         (flagParser, FeatureFlagParser) -> flags {flagParser}
         (concurrentInitUnits, FeatureConcurrentInitUnits) -> flags {concurrentInitUnits}
         (instrument, FeatureInstrument) -> flags {instrument}
-        (incrementalBuildPlan, FeatureIncrementalMetadata) -> flags {incrementalBuildPlan}
+        (incrementalBuildPlan, FeatureIncrementalBuildPlan) -> flags {incrementalBuildPlan}
         (lazyByteCode, FeatureLazyByteCode) -> flags {lazyByteCode}
 
     flagOption value = do
@@ -76,6 +76,7 @@ featureFlagsParser =
         "flag-parser" -> Right FeatureFlagParser
         "concurrent-init-units" -> Right FeatureConcurrentInitUnits
         "instrument" -> Right FeatureInstrument
+        "incremental-build-plan" -> Right FeatureIncrementalBuildPlan
         "lazy-byte-code" -> Right FeatureLazyByteCode
         flag -> Left ("Invalid feature flag: " ++ flag)
       pure (value, flag)
