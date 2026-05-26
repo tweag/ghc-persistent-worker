@@ -7,7 +7,7 @@ import Control.Monad (unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (for_)
-import Data.List.NonEmpty (NonEmpty, toList)
+import Data.List.NonEmpty (toList)
 import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Set as Set
 import GHC (
@@ -36,9 +36,10 @@ import Internal.State.Make (insertUnitEnv, loadState, storeModuleGraph)
 import Internal.State.Stats (logMemStats)
 import System.Directory (createDirectoryIfMissing)
 import qualified System.File.OsPath as OsPath
-import System.OsPath.Extra (OsPath, toOsPath)
-import Types.Args (Args (..), BuildPlanField, buildPlanAll)
+import System.OsPath.Extra (toOsPath)
+import Types.Args (Args (..), buildPlanAll)
 import Types.BuildPlan (BuildPlan (..))
+import Types.BuildPlan.Incremental (BuildPlanPath (..))
 import Types.Env (Env (..))
 import Types.Log (Logger (..))
 import Types.State (WorkerState (..))
@@ -46,13 +47,8 @@ import Types.Target (TargetSpec (..), UnitTarget (..))
 
 #if !defined(MWB)
 
-import GHC (ModSummary)
-
 depJSON :: DynFlags -> Maybe FilePath
 depJSON _ = Nothing
-
-ms_opts :: ModSummary -> [String]
-ms_opts _ = []
 
 #endif
 
@@ -94,13 +90,13 @@ prepareMetadataSession env dflags = do
 
     storeNewUnit = withSession \ hsc_env -> liftIO $ updateMakeStateVar env.state (insertUnitEnv hsc_env)
 
-resolveDepJson :: HscEnv -> Maybe OsPath -> Ghc OsPath
-resolveDepJson hsc_env path =
-  case (path, toOsPath <$> depJSON hsc_env.hsc_dflags) of
+resolveBuildPlanPath :: HscEnv -> Maybe BuildPlanPath -> Ghc BuildPlanPath
+resolveBuildPlanPath hsc_env path =
+  case (path, BuildPlanPath . toOsPath <$> depJSON hsc_env.hsc_dflags) of
     (Just new, Just old)
       | new == old -> pure new
       | otherwise -> do
-        liftIO $ OsPath.writeFile old mempty
+        liftIO $ OsPath.writeFile old.path mempty
         pure new
     (Just new, Nothing) -> pure new
     (Nothing, Just old) -> pure old
@@ -120,18 +116,18 @@ resolveDepJson hsc_env path =
 -- We need to use a temporary session because 'doMkDependHS' uses some custom settings that we don't want to leak,
 -- though it's not been thoroughly tested what precisely the impact is.
 writeMetadata ::
-  Maybe OsPath ->
-  Maybe (NonEmpty BuildPlanField) ->
+  Args ->
+  Logger ->
   [String] ->
   Ghc ModuleGraph
-writeMetadata path fieldSelection srcs = do
+writeMetadata Args {buildPlan = path, features, sourceHashes, incrementalState, fields = fieldSelection} logger srcs = do
   initializeSessionPlugins
   withTempSession metadataTempSession do
     hsc_env <- getSession
     writeLegacyMakefile hsc_env
-    depJson <- resolveDepJson hsc_env path
-    plan <- buildPlanForSources fields srcs
-    liftIO $ writeBuildPlan depJson plan
+    buildPlanPath <- resolveBuildPlanPath hsc_env path
+    plan <- buildPlanForSources features logger fields buildPlanPath incrementalState sourceHashes (toOsPath <$> srcs)
+    liftIO $ writeBuildPlan buildPlanPath plan
     pure plan.graph
   where
     fields = Set.fromList (toList (fromMaybe buildPlanAll fieldSelection))
@@ -159,9 +155,10 @@ computeMetadata env = do
     logTimed env.log "Computing module graph" do
       MaybeT $ runSession env $ withDynFlags env \ dflags srcs -> do
         unit <- prepareMetadataSession env dflags
-        let target = TargetUnit (UnitTarget unit)
+        let
+          target = TargetUnit (UnitTarget unit)
         liftIO $ env.log.setTarget target
-        module_graph <- writeMetadata env.args.buildPlan env.args.fields (fst <$> srcs)
+        module_graph <- writeMetadata env.args env.log (fst <$> srcs)
         liftIO do
           unless env.args.isBinary $
             updateMakeStateVar env.state (storeModuleGraph module_graph)
@@ -177,4 +174,4 @@ computeMetadata env = do
 proxyMetadata :: Env -> IO Bool
 proxyMetadata env =
   fmap isJust $ runSession env $ withGhcInSession env \ srcs ->
-    Just () <$ writeMetadata env.args.buildPlan env.args.fields (fst <$> srcs)
+    Just () <$ writeMetadata env.args env.log (fst <$> srcs)

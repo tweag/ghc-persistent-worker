@@ -11,14 +11,14 @@ import Control.Monad (foldM, (>=>))
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.State.Strict (StateT (..), modify, modifyM)
 import Data.Aeson (eitherDecodeFileStrict')
-import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
+import Data.ByteString (ByteString)
 import Data.Coerce (coerce)
 import Data.Foldable (fold, traverse_)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes)
-import Data.Set (Set)
 import qualified Data.Set as Set
+import Data.Set (Set)
 import qualified Data.Text as Text
 import Data.Text.Encoding (decodeUtf8)
 import Data.Traversable (for)
@@ -44,6 +44,7 @@ import Internal.Log (logDebugD, logTimed, logTimedD)
 import Internal.State (updateMakeState)
 import qualified Internal.State.Make as Make
 import Internal.State.Make (insertUnitEnv, storeModuleGraph)
+import System.Directory.OsPath (doesFileExist)
 import System.OsPath.Extra (OsPath, fromOsPath)
 import Types.BuckArgs (CachedBuckArgs (..), parseCachedBuckArgs)
 import Types.CachedDeps (
@@ -143,10 +144,15 @@ decodeJsonBuildPlan =
 --
 -- If GHC has fixed module graph nodes, those are constructed; otherwise we have to call 'summariseFile' to create a
 -- full node, which parses the module.
-loadCachedModule :: Bool -> HscEnv -> UnitId -> JsonFs ModuleName -> CachedModule -> IO ModuleGraphNode
+--
+-- If GHC doesn't have fixed nodes, this checks whether the file exist before loading it.
+-- When incremental build plans are restored, this is a valid use case, representing file deletion.
+-- While this could be handled by removing the missing entries from 'CachedBuildPlan' beforehand, fixed nodes support
+-- will be guaranteed soon, so there's no reason to put the effort in.
+loadCachedModule :: Bool -> HscEnv -> UnitId -> JsonFs ModuleName -> CachedModule -> IO (Maybe ModuleGraphNode)
 loadCachedModule useFixedNodes hsc_env unit (JsonFs modName) CachedModule {source, modules, packages} = do
   node <- createNode source modName
-  pure (ModuleNode (moduleNodeEdge <$> (homeDeps ++ packageDeps)) node)
+  pure (ModuleNode (moduleNodeEdge <$> (homeDeps ++ packageDeps)) <$> node)
   where
     homeDeps =
       [
@@ -173,13 +179,13 @@ loadCachedModule useFixedNodes hsc_env unit (JsonFs modName) CachedModule {sourc
 
     createNodeFixed src name = do
       _ <- addHomeModuleToFinder hsc_env.hsc_FC (DefiniteHomeUnit unit Nothing) name location HsSrcFile
-      pure $ ModuleNodeFixed (ModNodeKeyWithUid (GWIB name NotBoot) unit) location
+      pure $ Just $ ModuleNodeFixed (ModNodeKeyWithUid (GWIB name NotBoot) unit) location
       where
         fopts = initFinderOpts (hsc_dflags hsc_env)
         (basename, extension) = splitExtension src
         location = mkHomeModLocation fopts name (toOsPath basename) (toOsPath extension) HsSrcFile
 
-    createNodeCompile src = ModuleNodeCompile <$> createNodeLegacy src
+    createNodeCompile src = fmap ModuleNodeCompile <$> createNodeLegacy src
 
 #else
 
@@ -190,8 +196,11 @@ loadCachedModule useFixedNodes hsc_env unit (JsonFs modName) CachedModule {sourc
 #endif
 
     createNodeLegacy src = do
-      summResult <- summariseFile hsc_env (DefiniteHomeUnit unit Nothing) mempty (fromOsPath src) Nothing Nothing
-      eitherMessages GhcDriverMessage summResult
+      doesFileExist src >>= \case
+        False -> pure Nothing
+        True -> do
+          summResult <- summariseFile hsc_env (DefiniteHomeUnit unit Nothing) mempty (fromOsPath src) Nothing Nothing
+          Just <$> eitherMessages GhcDriverMessage summResult
 
 -- | Restore non-GHC state from the Buck cache.
 -- Command line arguments interpreted directly by the worker aren't part of the unit args, but they can yet influence
@@ -247,7 +256,7 @@ loadCachedModules ::
   CachedUnit ->
   IO ModuleGraph
 loadCachedModules useFixedNodes hsc_env unit CachedUnit {build_plan, cache} =
-  mkModuleGraph <$> traverse (uncurry (loadCachedModule useFixedNodes hsc_env unit)) modules
+  mkModuleGraph . catMaybes <$> traverse (uncurry (loadCachedModule useFixedNodes hsc_env unit)) modules
   where
     modules = Map.toList (fold (cache <|> build_plan))
 
@@ -295,7 +304,7 @@ insertPreparedUnit logger features hsc_env pu = do
     pure (hscSetActiveUnitId pu.unitId hsc_env1)
   modify (updateMakeState (insertUnitEnv hsc_env2))
   nodes <- liftIO $ traverse (uncurry (loadCachedModule features.fixedNodesCache hsc_env2 pu.unitId)) pu.moduleEntries
-  modify (updateMakeState (storeModuleGraph (mkModuleGraph nodes)))
+  modify (updateMakeState (storeModuleGraph (mkModuleGraph (catMaybes nodes))))
   pure hsc_env2
 
 loadCachedBuildPlan ::
