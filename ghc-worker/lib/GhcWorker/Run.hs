@@ -33,13 +33,13 @@ import Options.Applicative (
   switch,
   (<**>),
   )
+import System.OsPath.Extra (toOsPath)
 import Types.FeatureFlags (FeatureFlag (..), FeatureFlags (..), defaultFeatureFlags)
 import Types.Grpc (CommandEnv, RequestArgs)
 import Types.Instrument (Event)
 import Types.Log (TraceId (..))
 import Types.Orchestration (ServerSocketPath (..), serverSocketFromPath)
 import Types.State (WorkerState (..))
-import System.OsPath.Extra (toOsPath)
 
 -- | Global options for the worker, passed when the process is started, in contrast to request options stored in
 -- 'BuckArgs'.
@@ -69,14 +69,14 @@ featureFlagsParser =
         (fixedNodesCache, FeatureFixedNodesCache) -> flags {fixedNodesCache}
         (flagParser, FeatureFlagParser) -> flags {flagParser}
         (concurrentInitUnits, FeatureConcurrentInitUnits) -> flags {concurrentInitUnits}
-        (incrementalBuildPlan, FeatureIncrementalMetadata) -> flags {incrementalBuildPlan}
+        (incrementalBuildPlan, FeatureIncrementalBuildPlan) -> flags {incrementalBuildPlan}
 
     flagOption value = do
       flag <- eitherReader \case
         "fixed-nodes-cache" -> Right FeatureFixedNodesCache
         "flag-parser" -> Right FeatureFlagParser
         "concurrent-init-units" -> Right FeatureConcurrentInitUnits
-        "incremental-metadata" -> Right FeatureIncrementalMetadata
+        "incremental-build-plan" -> Right FeatureIncrementalBuildPlan
         flag -> Left ("Invalid feature flag: " ++ flag)
       pure (value, flag)
 

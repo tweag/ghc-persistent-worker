@@ -7,7 +7,7 @@ data FeatureFlag =
   |
   FeatureConcurrentInitUnits
   |
-  FeatureIncrementalMetadata
+  FeatureIncrementalBuildPlan
   deriving stock (Eq, Show)
 
 -- | Runtime feature flags that control alternative implementations.
