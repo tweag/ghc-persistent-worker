@@ -22,7 +22,6 @@ import GHC (
   )
 import GHC.Driver.Env (HscEnv (..), hscSetActiveUnitId, hscUpdateLoggerFlags)
 import GHC.Driver.Monad (modifySession, withSession, withTempSession)
-import GHC.Runtime.Loader (initializeSessionPlugins)
 import GHC.Unit (UnitId)
 import GHC.Utils.Panic (throwGhcExceptionIO)
 import Internal.BuildPlan (buildPlanForSources)
@@ -125,7 +124,9 @@ writeMetadata ::
   [String] ->
   Ghc ModuleGraph
 writeMetadata path fieldSelection srcs = do
-  initializeSessionPlugins
+  -- Plugins (e.g. Core-to-Core passes) are not needed for dependency
+  -- computation and the interpreter may not be available in the buildplan
+  -- step, so defer plugin initialisation to the compile step.
   withTempSession metadataTempSession do
     hsc_env <- getSession
     writeLegacyMakefile hsc_env
