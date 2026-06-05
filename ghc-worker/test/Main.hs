@@ -1,7 +1,7 @@
 {-# LANGUAGE CPP #-}
 
 module Main where
- 
+
 import qualified BuildPlanTest.Test1 (test_buildPlan)
 import qualified BuildPlanTest.Test2 (test_buildPlan)
 import BuildThTest (test_buildTh)
@@ -10,6 +10,8 @@ import ByteCodeCacheTest (test_evictBySize, test_touchNoEviction)
 #endif
 import DepFilesTest (test_depFiles)
 import FlagParserTest (test_parseBuckArgs)
+import Incremental.BuildTest (test_incrementalBuild)
+import Incremental.FlowTest (test_incrementalFlow)
 import InterfacePathTest (test_interfacePath)
 import ProjectBuildTest (test_projectBuild)
 import Resource.BasicTest (test_resources)
@@ -24,6 +26,7 @@ import Test.Tasty (
   defaultMainWithIngredients,
   dependentTestGroup,
   includingOptions,
+  testGroup,
   )
 
 -- | Some tests require our GHC patches.
@@ -60,7 +63,11 @@ testsGeneral =
     test_interfacePath,
     test_sortScheduleOrder,
     test_projectBuild,
-    test_buildTh
+    test_buildTh,
+    testGroup "incremental metadata" [
+      test_incrementalBuild,
+      test_incrementalFlow
+    ]
   ]
   <>
   byteCodeCacheTests
