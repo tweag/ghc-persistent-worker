@@ -76,6 +76,9 @@ buildPlanKey = \case
 buildPlanAll :: NonEmpty BuildPlanField
 buildPlanAll = [minBound .. maxBound]
 
+buildPlanNoLegacy :: NonEmpty BuildPlanField
+buildPlanNoLegacy = [minBound .. FieldCache]
+
 -- | Avoid having to maintain a second mapping by pattern match in @parseBuildPlanKey@.
 fieldsByKey :: Map String BuildPlanField
 fieldsByKey =

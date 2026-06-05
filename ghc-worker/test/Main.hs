@@ -1,9 +1,11 @@
 {-# LANGUAGE CPP #-}
 
 module Main where
- 
+
 import qualified BuildPlanTest.Test1 (test_buildPlan)
 import qualified BuildPlanTest.Test2 (test_buildPlan)
+import Incremental.BuildTest (test_incrementalBuild)
+import Incremental.FlowTest (test_incrementalFlow)
 import ProjectBuildTest (test_projectBuild)
 import ResourceTest (test_resources)
 import ScheduleTest (test_sortScheduleOrder)
@@ -36,7 +38,11 @@ testsGeneral :: [TestTree]
 testsGeneral =
   [
     test_sortScheduleOrder,
-    test_projectBuild
+    test_projectBuild,
+    testGroup "incremental metadata" [
+      test_incrementalBuild,
+      test_incrementalFlow
+    ]
   ] <> if fullTest then [
     BuildPlanTest.Test1.test_buildPlan,
     BuildPlanTest.Test2.test_buildPlan
