@@ -11,6 +11,7 @@ import GHC.Paths (libdir)
 import GHC.Unit (UnitId)
 import GHC.Utils.Outputable (showPprUnsafe)
 import System.OsPath.Extra (OsPath, toOsPath)
+import Types.BuildPlan.Incremental (BuckHashesPath)
 import Types.CachedDeps (CachedBuildPlans, CachedDeps)
 import Types.FeatureFlags (FeatureFlags, defaultFeatureFlags)
 import Types.Target (ModuleTarget)
@@ -92,6 +93,8 @@ data Args =
     tempDir :: Maybe OsPath,
     unit :: Maybe UnitName,
     buildPlan :: Maybe OsPath,
+    -- | The file containing the current source hashes tracked by the external build tool.
+    sourceHashes :: Maybe BuckHashesPath,
     -- | The build plan fields included in the JSON.
     fields :: Maybe (NonEmpty BuildPlanField),
     moduleTarget :: Maybe ModuleTarget,
@@ -113,6 +116,7 @@ emptyArgs env =
     tempDir = toOsPath <$> (env !? "TMPDIR"),
     unit = Nothing,
     buildPlan = Nothing,
+    sourceHashes = Nothing,
     fields = Nothing,
     moduleTarget = Nothing,
     ghcOptions = [],
