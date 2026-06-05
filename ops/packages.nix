@@ -47,21 +47,26 @@
       tests.ghc-worker-test = {
         enable = true;
         dependencies = [
+          "aeson"
           "buck-worker-internal"
           "buck-worker-types"
           "bytestring"
           "containers"
+          "directory"
           "exceptions"
           "extra"
+          "file-io"
           "filepath"
           "ghc"
           "ghc-boot"
           "ghc-paths"
           "ghc-worker-test-common"
           "hedgehog"
+          "monad-control"
           "tasty"
           "tasty-hedgehog"
           "text"
+          "transformers"
         ];
         source-dirs = "test";
         component = {
@@ -275,6 +280,7 @@
           "generic-lens"
           "ghc"
           "ghc-paths"
+          "hashable"
           "hedgehog"
           "lens"
           "monad-control"

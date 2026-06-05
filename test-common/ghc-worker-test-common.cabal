@@ -37,6 +37,7 @@ library
   exposed-modules:
     Test.Build
     Test.BuildSystem
+    Test.BuckHashes
     Test.Bytecode
     Test.Cache
     Test.Data.BuildSystem
@@ -87,6 +88,7 @@ library
     generic-lens,
     ghc,
     ghc-paths,
+    hashable,
     hedgehog,
     lens,
     monad-control,
