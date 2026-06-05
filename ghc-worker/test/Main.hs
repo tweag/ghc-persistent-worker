@@ -1,12 +1,14 @@
 {-# LANGUAGE CPP #-}
 
 module Main where
- 
+
 import qualified BuildPlanTest.Test1 (test_buildPlan)
 import qualified BuildPlanTest.Test2 (test_buildPlan)
 import BuildThTest (test_buildTh)
 import ByteCodeCacheTest (test_evictBySize, test_touchNoEviction)
 import FlagParserTest (test_parseBuckArgs)
+import Incremental.BuildTest (test_incrementalBuild)
+import Incremental.FlowTest (test_incrementalFlow)
 import InterfacePathTest (test_interfacePath)
 import ProjectBuildTest (test_projectBuild)
 import Resource.BasicTest (test_resources)
@@ -46,7 +48,10 @@ testsGeneral =
     test_buildTh,
     test_touchNoEviction,
     test_evictBySize,
-    test_evictIgnoresInUseRecency
+    testGroup "incremental metadata" [
+      test_incrementalBuild,
+      test_incrementalFlow
+    ]
   ] <> if fullTest then [
     BuildPlanTest.Test1.test_buildPlan,
     BuildPlanTest.Test2.test_buildPlan

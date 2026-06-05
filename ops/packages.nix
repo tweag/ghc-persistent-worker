@@ -56,6 +56,7 @@
           "directory"
           "exceptions"
           "extra"
+          "file-io"
           "filepath"
           "ghc"
           "ghc-boot"
@@ -63,10 +64,12 @@
           "ghc-worker-test-common"
           "hedgehog"
           "lens"
+          "monad-control"
           "mtl"
           "tasty"
           "tasty-hedgehog"
           "text"
+          "transformers"
         ];
         source-dirs = "test";
         component = {
@@ -278,6 +281,7 @@
           "generic-lens"
           "ghc"
           "ghc-paths"
+          "hashable"
           "hedgehog"
           "monad-control"
           "stm"
