@@ -146,7 +146,8 @@ build =
       }
     },
     resumeSchedule = schedule,
-    allKeys = scheduleKeys schedule
+    allKeys = scheduleKeys schedule,
+    incrementalBuildPlan = False
   }
   where
     rebuildKeys = Map.keysSet rebuild
@@ -203,11 +204,11 @@ targetBcos =
 testMemoryBytecode :: TestEnv -> TestT IO ([PhaseResult], [PhaseResult], [PhaseResult])
 testMemoryBytecode testEnv = do
   sessionEnv <- liftIO (newSessionEnv (enableLazyByteCode testEnv))
-  let buildSys = mkBuildSystem 6 sessionEnv
+  let buildSys = mkBuildSystem 6 False sessionEnv
 
   (initialResult, measureInitial) <- liftIO do
     writeProjectSources sessionEnv.sourceDir build.initial.modules
-    withMeasuredBuild (initialStrategy sessionEnv) phaseName [] build.schedule
+    withMeasuredBuild (initialStrategy sessionEnv False) phaseName [] build.schedule
   assertNoFailures "initial" initialResult
   entriesAfterInit <- liftIO $ hptEntries sessionEnv.env.state
   targetEntriesAll === entriesAfterInit
@@ -216,7 +217,7 @@ testMemoryBytecode testEnv = do
   resumeEnv <- liftIO $ newResumeSessionEnv sessionEnv
 
   let (resumeTasks, unmodified) = trimResumeSchedule initialResult build.resumePlan.rebuild cachedSchedule.tasks
-      strat = resumeStrategy resumeEnv False
+      strat = resumeStrategy resumeEnv False False
       resumeBuild tasks =
         withMeasuredBuild strat (phaseName . weakenResumeComponent) unmodified (Schedule tasks)
 

@@ -54,6 +54,6 @@ runResourceBuild units env = do
   extDepDbs <- createExtDepPackageDbs env.tempDir allExtDeps
   let envWithExtDeps = env {extDepDbs, extDeps = allExtDeps}
   writeProjectSources envWithExtDeps.sourceDir (allModuleSources units)
-  withMeasuredBuild (initialStrategy envWithExtDeps) phaseName [] (schedule units)
+  withMeasuredBuild (initialStrategy envWithExtDeps False) phaseName [] (schedule units)
   where
     allExtDeps = fold [bm.extDeps | u <- units, bm <- u.modules]
