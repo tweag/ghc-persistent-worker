@@ -50,9 +50,9 @@ moduleFor key = (compileTarget key).module_
 buildUpToB :: SessionEnv -> IO ()
 buildUpToB sessionEnv = do
   writeProjectSources sessionEnv.sourceDir allModules
-  _ <- runMetadata sessionEnv (metadataArgs sessionEnv) unit0
+  _ <- runMetadata sessionEnv (metadataArgs sessionEnv False) unit0
   _ <- runCompile sessionEnv plainArgs keyA
-  _ <- runMetadata sessionEnv (metadataArgs sessionEnv) unit1
+  _ <- runMetadata sessionEnv (metadataArgs sessionEnv False) unit1
   _ <- runCompile sessionEnv plainArgs keyB
   pure ()
   where
