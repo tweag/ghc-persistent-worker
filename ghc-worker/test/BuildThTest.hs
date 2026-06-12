@@ -106,7 +106,8 @@ build =
       rebuild = RebuildSet {moduleKeys = mempty, allAffectedKeys = mempty, hasChanges = True}
     },
     resumeSchedule = resumeSchedule',
-    allKeys = scheduleKeys resumeSchedule'
+    allKeys = scheduleKeys resumeSchedule',
+    incrementalBuildPlan = False
   }
   where
     resumeSchedule' = fst (sortSchedule thResumeTasks)
@@ -131,7 +132,7 @@ targetBcos =
 testBuildTh :: TestEnv -> TestT IO ()
 testBuildTh testEnv = do
   sessionEnv <- liftIO (newSessionEnv (enableLazyByteCode testEnv))
-  let buildSys = mkBuildSystem 6 sessionEnv
+  let buildSys = mkBuildSystem 6 False sessionEnv
 
   initialResult <- liftIO do
     writeProjectSources sessionEnv.sourceDir build.initial.modules
