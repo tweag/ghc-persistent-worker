@@ -62,6 +62,7 @@ library
     GhcServer.Data.Unit
     GhcServer.Data.UnitConfig
     GhcServer.Cache
+    GhcServer.CompareFeatures
     GhcServer.GenProject
     GhcServer.GenProject.Run
     GhcServer.Handler
@@ -89,6 +90,7 @@ library
     ghc-worker-test-common,
     grapesy ^>=1.0.1,
     optparse-applicative,
+    process,
     stm,
     text,
     transformers
@@ -114,6 +116,14 @@ executable gen-project
   main-is: Main.hs
   hs-source-dirs: app/gen-project
   ghc-options: -O2
+  build-depends:
+    ghc-server
+
+executable compare-features
+  import: all
+  main-is: Main.hs
+  hs-source-dirs: app/compare-features
+  ghc-options: -O2 -threaded "-with-rtsopts=-N"
   build-depends:
     ghc-server
 
