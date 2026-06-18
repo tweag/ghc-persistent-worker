@@ -23,7 +23,8 @@ import GhcServer.Data.Unit (UnitName (..))
 import GhcServer.Path (osPath)
 import GhcServer.Scheduler (Phase (..))
 import Hedgehog (TestT, property, test, withTests, (===))
-import Test.Tasty (DependencyType (..), TestName, TestTree, dependentTestGroup, testGroup)
+import System.OsPath.Extra (toOsPath)
+import Test.Tasty (DependencyType (..), TestName, TestTree, dependentTestGroup)
 import Test.Tasty.Hedgehog (testProperty)
 import Types.CachedDeps (CachedModule (..), CachedPackageDep (..), CachedUnit (..), JsonFs (..))
 
@@ -45,7 +46,7 @@ jfsUid = JsonFs . stringToUnitId
 mkCachedModule :: String -> [String] -> [CachedPackageDep] -> CachedModule
 mkCachedModule source mods pkgs =
   CachedModule {
-    source,
+    source = toOsPath source,
     modules = map jfs mods,
     packages = pkgs
   }
@@ -221,7 +222,7 @@ defaultResolveSpec =
 mkPriorModule :: String -> String -> String -> (ModuleKey, ModuleInfo)
 mkPriorModule unitName modName src =
   ( ModuleKey {unit = UnitName unitName, name = mkModuleName modName}
-  , ModuleInfo {task = pk unitName src, deps = Set.empty, hiPath = ""}
+  , ModuleInfo {task = pk unitName src, deps = Set.empty, hiPath = mempty}
   )
 
 -- | Look up a resolved task in the resolutions map by pending key.
