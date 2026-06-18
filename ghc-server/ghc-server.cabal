@@ -88,6 +88,7 @@ library
     GhcServer.Data.UnitConfig
     GhcServer.GbcTransport
     GhcServer.Cache
+    GhcServer.CompareFeatures
     GhcServer.GenProject
     GhcServer.GenProject.Run
     GhcServer.Grpc
@@ -154,6 +155,14 @@ executable gen-project
   main-is: Main.hs
   hs-source-dirs: app/gen-project
   ghc-options: -O2
+  build-depends:
+    ghc-server
+
+executable compare-features
+  import: all
+  main-is: Main.hs
+  hs-source-dirs: app/compare-features
+  ghc-options: -O2 -threaded "-with-rtsopts=-N"
   build-depends:
     ghc-server
 
