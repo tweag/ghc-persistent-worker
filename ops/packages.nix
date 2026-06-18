@@ -330,6 +330,7 @@
           "ghc-worker-test-common"
           "grapesy"
           "optparse-applicative"
+          "process"
           "stm"
           "text"
           "transformers"
@@ -349,6 +350,10 @@
         dependencies = [
           "directory"
         ];
+      };
+
+      executables.compare-features = {
+        source-dirs = "app/compare-features";
       };
 
       tests.ghc-server-test = {
