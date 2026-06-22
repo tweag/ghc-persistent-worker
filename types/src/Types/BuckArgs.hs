@@ -78,6 +78,7 @@ data BuckArgs =
     ghcDirFile :: Maybe String,
     ghcDbFile :: Maybe String,
     ghcArgsFile :: Maybe String,
+    ghcPerModulePluginsArgsFile :: Maybe OsPath,
     ghcOptions :: [String],
     multiplexerCustom :: Bool,
     mode :: Maybe Mode,
@@ -112,6 +113,7 @@ emptyBuckArgs env =
     ghcDirFile = Nothing,
     ghcDbFile = Nothing,
     ghcArgsFile = Nothing,
+    ghcPerModulePluginsArgsFile = Nothing,
     ghcOptions = [],
     multiplexerCustom = False,
     mode = Nothing,
@@ -143,6 +145,7 @@ options =
     withArg "--fields" \ z a -> z {fields = nonEmpty (splitOn "," a)},
     withArg "--module" \ z a -> z {moduleName = Just a},
     withArg "--ghc-args" \ z a -> z {ghcArgsFile = Just a},
+    withOsPathArg "--ghc-per-module-plugins-args-file" \ z a -> z {ghcPerModulePluginsArgsFile = Just a},
     withArg "--extra-pkg-db" \ z a -> z {ghcDbFile = Just a},
     withOsPathArg "--bin-path" \ z a -> z {binPath = a : z.binPath},
     withOsPathArg "--bin-exe" \ z a -> z {binPath = takeDirectory a : z.binPath},
@@ -252,6 +255,8 @@ toGhcArgs args features = do
     if isJust args.moduleName
     then pure []
     else maybe args.ghcOptions lines <$> traverse readFile args.ghcArgsFile
+  ghcPerModulePluginsOptions <-
+    maybe (pure Map.empty) (decodeJsonArg "--ghc-per-module-plugins-args-file") args.ghcPerModulePluginsArgsFile
   moduleTarget <- checkModuleTarget args
   pure Args {
     topdir,
@@ -263,6 +268,7 @@ toGhcArgs args features = do
     fields,
     moduleTarget,
     ghcOptions = sanitizeGhcArgs ghcArgs ++ foldMap packageDbArg packageDb ++ foldMap packageDbArg args.buck2PackageDb,
+    ghcPerModulePluginsOptions,
     cachedBuildPlans,
     cachedDeps,
     homeUnit = args.homeUnit,
