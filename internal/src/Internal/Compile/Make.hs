@@ -145,21 +145,11 @@ compileModuleWithDepsInHpt logger target =
     hsc_env <- getSession
     hmi <- liftIO do
       summary <- ensureSummary logger hsc_env target
-      -- GHC's compile pipeline (Execute.hs) calls initializePlugins with ms_hspp_opts,
-      -- which overrides the session-level plugin flags we set in withGhcMakeModule.
-      -- Copying pluginModNames/Opts from hsc_dflags ensures per-module plugins survive.
-      let dflags = hsc_env.hsc_dflags
-      let summary' = summary {
-            ms_hspp_opts = summary.ms_hspp_opts
-              { pluginModNames    = dflags.pluginModNames
-              , pluginModNameOpts = dflags.pluginModNameOpts
-              }
-          }
       let hsc_env'
-            | TargetModuleInterp _ <- target = mkTargetAsInterpreted hsc_env (ms_mod summary')
+            | TargetModuleInterp _ <- target = mkTargetAsInterpreted hsc_env (ms_mod summary)
             | otherwise = hsc_env
-      result <- compileOne hsc_env' (forceRecomp summary') 1 100000 Nothing (HomeModLinkable Nothing Nothing)
-      cleanCurrentModuleTempFilesMaybe (hsc_logger hsc_env') (hsc_tmpfs hsc_env') summary'.ms_hspp_opts
+      result <- compileOne hsc_env' (forceRecomp summary) 1 100000 Nothing (HomeModLinkable Nothing Nothing)
+      cleanCurrentModuleTempFilesMaybe (hsc_logger hsc_env') (hsc_tmpfs hsc_env') summary.ms_hspp_opts
       pure result
     liftIO $ hscInsertHPT hmi hsc_env
     pure (Just hmi.hm_iface)

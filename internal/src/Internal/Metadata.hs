@@ -7,6 +7,7 @@ import Control.Monad (unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (for_)
+import qualified Data.Map.Strict as Map
 import Data.List.NonEmpty (NonEmpty, toList)
 import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Set as Set
@@ -16,13 +17,18 @@ import GHC (
   GhcException (..),
   GhcMode (..),
   ModuleGraph,
+  ModSummary (..),
   getSession,
   getSessionDynFlags,
+  mkModuleName,
+  moduleNameString,
   setSession,
   )
 import GHC.Driver.Env (HscEnv (..), hscSetActiveUnitId, hscUpdateLoggerFlags)
 import GHC.Driver.Monad (modifySession, withSession, withTempSession)
 import GHC.Unit (UnitId)
+import GHC.Unit.Module (moduleName)
+import GHC.Unit.Module.Graph (mapMG)
 import GHC.Utils.Panic (throwGhcExceptionIO)
 import Internal.BuildPlan (buildPlanForSources)
 import Internal.BuildPlan.Json (writeBuildPlan)
@@ -44,8 +50,6 @@ import Types.State (WorkerState (..))
 import Types.Target (TargetSpec (..), UnitTarget (..))
 
 #if !defined(MWB)
-
-import GHC (ModSummary)
 
 depJSON :: DynFlags -> Maybe FilePath
 depJSON _ = Nothing
@@ -86,7 +90,10 @@ prepareMetadataSession env dflags = do
   modifySession \ hsc_env -> loadState hsc_env state.make
   unit <- addHomeUnit dflags
   setActiveUnit unit
-  unless env.args.isBinary storeNewUnit
+  -- Do not store the unit for binary targets without per-module plugins. If
+  -- there are per-module plugins, we need to store the unit so the compile step
+  -- can skip loadCachedUnit and use the patched module graph.
+  unless (env.args.isBinary && Map.null env.args.ghcPerModulePluginsOptions) storeNewUnit
   pure unit
   where
     setActiveUnit unit = modifySession (hscUpdateLoggerFlags . hscSetActiveUnitId unit)
@@ -141,6 +148,29 @@ writeMetadata path fieldSelection srcs = do
       when (not (null hsc_env.hsc_dflags.depMakefile)) do
         liftIO $ writeFile hsc_env.hsc_dflags.depMakefile ""
 
+-- | Patch each module's 'ms_hspp_opts' in the module graph to include the
+-- per-module plugin flags from @--ghc-per-module-plugins-args-file@.
+--
+-- GHC's @Execute.hs@ calls @initializePlugins@ with @ms_hspp_opts@, so the
+-- plugin flags must already be present there when the compile step runs.
+--
+-- GHC's @loadPlugins@ applies @reverse@ to both @pluginModNames@ and to the
+-- per-plugin option list (to match how command-line flags are accumulated via
+-- cons). We therefore store them in reversed order so they come out correct
+-- after @loadPlugins@ applies its own reverse.
+patchModuleGraphPlugins :: Map.Map String [[String]] -> ModuleGraph -> ModuleGraph
+patchModuleGraphPlugins perModuleOpts =
+  mapMG \ ms ->
+    let modName = moduleNameString (moduleName (ms_mod ms))
+    in case Map.lookup modName perModuleOpts of
+      Nothing    -> ms
+      Just flags -> ms { ms_hspp_opts = ms.ms_hspp_opts
+        { pluginModNames    = ms.ms_hspp_opts.pluginModNames
+            ++ reverse [mkModuleName n | (n : _) <- flags]
+        , pluginModNameOpts = ms.ms_hspp_opts.pluginModNameOpts
+            ++ [(mkModuleName n, o) | (n : os) <- flags, o <- reverse os]
+        }}
+
 -- | Run downsweep and merge the resulting module graph into the cached graph.
 -- This is executed for the metadata step, which natively only calls 'doMkDependHS'.
 -- Since that function doesn't give us access to the module graph in its original shape, we inline it into this project
@@ -162,9 +192,14 @@ computeMetadata env = do
         let target = TargetUnit (UnitTarget unit)
         liftIO $ env.log.setTarget target
         module_graph <- writeMetadata env.args.buildPlan env.args.fields (fst <$> srcs)
+        let patched_graph = patchModuleGraphPlugins env.args.ghcPerModulePluginsOptions module_graph
         liftIO do
-          unless env.args.isBinary $
-            updateMakeStateVar env.state (storeModuleGraph module_graph)
+          -- For binary targets without per-module plugins, skip storeModuleGraph
+          -- (performance optimisation: binaries are "terminal" and don't need to be
+          -- visible to other units). For binary targets WITH per-module plugins,
+          -- we must store the patched graph so the compile step can retrieve it.
+          unless (env.args.isBinary && Map.null env.args.ghcPerModulePluginsOptions) $
+            updateMakeStateVar env.state (storeModuleGraph patched_graph)
           for_ dflags.stubDir \ stubdir -> do
             env.log.debug ("Creating stubdir: " ++ stubdir)
             createDirectoryIfMissing False stubdir
