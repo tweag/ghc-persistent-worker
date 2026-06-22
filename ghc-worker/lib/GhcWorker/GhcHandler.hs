@@ -102,7 +102,7 @@ dispatch hooks env args targetCallback =
       Nothing ->
         withGhcMakeSource env (withTarget compileHpt . TargetSource)
 
-    compileHpt = compileAndReadAbiHash CompManager (compileModuleWithDepsInHpt env.log) hooks args
+    compileHpt = compileAndReadAbiHash CompManager (compileModuleWithDepsInHpt env) hooks args
 
     withTarget f (target :: TargetSpec) =
       reifyGhc $ \session -> do

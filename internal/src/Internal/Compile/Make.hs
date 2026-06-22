@@ -2,6 +2,7 @@
 
 module Internal.Compile.Make where
 
+import qualified Data.Map.Strict as Map
 import qualified GHC
 import GHC (
   DynFlags (..),
@@ -24,6 +25,8 @@ import GHC.Driver.Errors.Types (GhcMessage (..))
 import GHC.Driver.Make (summariseFile)
 import GHC.Driver.Pipeline (compileOne)
 import GHC.Runtime.Loader (initializeSessionPlugins)
+import Types.Env (Env (..))
+import Types.Args (Args (..))
 import GHC.Unit.Env (ue_unsafeHomeUnit)
 import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..))
 import GHC.Utils.Monad (MonadIO (..))
@@ -136,20 +139,42 @@ ensureSummary logger hsc_env = \case
 -- - Call the module compilation function @compileOne@
 -- - Store the resulting @HomeModInfo@ in the current unit's home package table.
 compileModuleWithDepsInHpt ::
-  Logger ->
+  Env ->
   TargetSpec ->
   Ghc (Maybe ModIface)
-compileModuleWithDepsInHpt logger target =
+compileModuleWithDepsInHpt env target = do
+  let logger = env.log
   logTimedD logger "Compiling" do
     initializeSessionPlugins
     hsc_env <- getSession
     hmi <- liftIO do
       summary <- ensureSummary logger hsc_env target
+      -- Apply per-module plugin flags from --ghc-per-module-plugins-args-file.
+      -- Each entry in ghcPerModulePluginsOptions is [pluginModName, opt1, ...].
+      -- We append them to ms_hspp_opts.
+      --
+      -- GHC's loadPlugins reverses both pluginModNames and per-plugin options
+      -- (to match how command-line flags are accumulated via cons).  We must
+      -- therefore store them in reversed order so they come out correct after
+      -- loadPlugins applies its own reverse.
+      let Args{ghcPerModulePluginsOptions = perModuleOptsMap} = env.args
+          modName = GHC.moduleNameString (GHC.moduleName (ms_mod summary))
+          summary' = case Map.lookup modName perModuleOptsMap of
+            Nothing -> summary
+            Just perModuleFlags ->
+              let dflags = ms_hspp_opts summary
+               in summary {
+                    ms_hspp_opts = dflags
+                      { pluginModNames    = dflags.pluginModNames    ++ reverse [GHC.mkModuleName n | (n : _)  <- perModuleFlags]
+                      , pluginModNameOpts = dflags.pluginModNameOpts ++ [(GHC.mkModuleName n, o) | (n : os) <- perModuleFlags, o <- reverse os]
+                      }
+                  }
+
       let hsc_env'
-            | TargetModuleInterp _ <- target = mkTargetAsInterpreted hsc_env (ms_mod summary)
+            | TargetModuleInterp _ <- target = mkTargetAsInterpreted hsc_env (ms_mod summary')
             | otherwise = hsc_env
-      result <- compileOne hsc_env' (forceRecomp summary) 1 100000 Nothing (HomeModLinkable Nothing Nothing)
-      cleanCurrentModuleTempFilesMaybe (hsc_logger hsc_env') (hsc_tmpfs hsc_env') summary.ms_hspp_opts
+      result <- compileOne hsc_env' (forceRecomp summary') 1 100000 Nothing (HomeModLinkable Nothing Nothing)
+      cleanCurrentModuleTempFilesMaybe (hsc_logger hsc_env') (hsc_tmpfs hsc_env') summary'.ms_hspp_opts
       pure result
     liftIO $ hscInsertHPT hmi hsc_env
     pure (Just hmi.hm_iface)
