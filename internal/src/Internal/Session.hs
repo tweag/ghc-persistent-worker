@@ -8,6 +8,7 @@ import Control.Monad (unless)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (traverse_)
 import Data.IORef (newIORef)
+import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import GHC (
   DynFlags (..),
@@ -17,6 +18,9 @@ import GHC (
   getSession,
   getSessionDynFlags,
   gopt,
+  mkModuleName,
+  moduleName,
+  moduleNameString,
   popLogHookM,
   prettyPrintGhcErrors,
   pushLogHookM,
@@ -40,6 +44,7 @@ import Internal.DynFlags (
   initDynFlags,
   instrumentLocation,
   mkTargetAsInterpreted,
+  modifyGlobalFlags,
   parseFlags,
   setupPath,
   updateGlobalFlags,
@@ -218,6 +223,25 @@ withGhcMakeModule interp target = do
         hsc_env3 <- liftIO $ withMVar env.state \ state -> pure (hscSetModuleGraph state.make.moduleGraph hsc_env2)
         let hsc_env4 = hscSetActiveUnitId (moduleUnitId target.mod) (hsc_env3)
         processArg hsc_env4 (loadCachedDeps env.log interp) env.args.cachedDeps
+      -- Apply per-module plugin flags from --ghc-per-module-plugins-args-file.
+      -- This is a fallback for when the build-plan action was served from the remote
+      -- cache (not executed locally), so the patched module graph is not in state.
+      -- When the build-plan ran locally, the module graph already has the plugin flags
+      -- in ms_hspp_opts, and copying hsc_dflags.pluginModNames/Opts (which also include
+      -- them) into ms_hspp_opts in Make.hs is a no-op.
+      --
+      -- GHC's loadPlugins reverses both pluginModNames and per-plugin options
+      -- (to match how command-line flags are accumulated via cons).  We must
+      -- therefore store them in reversed order so they come out correct after
+      -- loadPlugins applies its own reverse.
+      let modName = moduleNameString (moduleName target.mod)
+      let perModuleFlags = Map.findWithDefault [] modName env.args.ghcPerModulePluginsOptions
+      unless (null perModuleFlags) $
+        modifyGlobalFlags \ dflags ->
+          dflags
+            { pluginModNames    = dflags.pluginModNames    ++ reverse [mkModuleName n | (n : _)  <- perModuleFlags]
+            , pluginModNameOpts = dflags.pluginModNameOpts ++ [(mkModuleName n, o) | (n : os) <- perModuleFlags, o <- reverse os]
+            }
       initializeSessionPlugins
       let targetSpec
             | interp == Interpreted = TargetModuleInterp target
