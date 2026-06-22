@@ -8,6 +8,7 @@ import Control.Monad (unless)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (traverse_)
 import Data.IORef (newIORef)
+import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import GHC (
   DynFlags (..),
@@ -17,6 +18,9 @@ import GHC (
   getSession,
   getSessionDynFlags,
   gopt,
+  mkModuleName,
+  moduleName,
+  moduleNameString,
   popLogHookM,
   prettyPrintGhcErrors,
   pushLogHookM,
@@ -40,6 +44,7 @@ import Internal.DynFlags (
   initDynFlags,
   instrumentLocation,
   mkTargetAsInterpreted,
+  modifyGlobalFlags,
   parseFlags,
   setupPath,
   updateGlobalFlags,
@@ -218,6 +223,22 @@ withGhcMakeModule interp target = do
         hsc_env3 <- liftIO $ withMVar env.state \ state -> pure (hscSetModuleGraph state.make.moduleGraph hsc_env2)
         let hsc_env4 = hscSetActiveUnitId (moduleUnitId target.mod) (hsc_env3)
         processArg hsc_env4 (loadCachedDeps env.log interp) env.args.cachedDeps
+      -- Apply per-module plugin flags from --ghc-per-module-plugins-args-file.
+      -- Each entry in ghcPerModulePluginsOptions is [pluginModName, opt1, ...].
+      -- We append them to the session DynFlags before loading plugins.
+      --
+      -- GHC's loadPlugins reverses both pluginModNames and per-plugin options
+      -- (to match how command-line flags are accumulated via cons).  We must
+      -- therefore store them in reversed order so they come out correct after
+      -- loadPlugins applies its own reverse.
+      let modName = moduleNameString (moduleName target.mod)
+      let perModuleFlags = Map.findWithDefault [] modName env.args.ghcPerModulePluginsOptions
+      unless (null perModuleFlags) $
+        modifyGlobalFlags \ dflags ->
+          dflags
+            { pluginModNames    = dflags.pluginModNames    ++ reverse [mkModuleName n | (n : _)  <- perModuleFlags]
+            , pluginModNameOpts = dflags.pluginModNameOpts ++ [(mkModuleName n, o) | (n : os) <- perModuleFlags, o <- reverse os]
+            }
       initializeSessionPlugins
       let targetSpec
             | interp == Interpreted = TargetModuleInterp target
