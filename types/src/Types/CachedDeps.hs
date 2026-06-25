@@ -116,7 +116,8 @@ data CachedModule =
   CachedModule {
     source :: OsPath,
     modules :: [JsonFs ModuleName],
-    packages :: [CachedPackageDep]
+    packages :: [CachedPackageDep],
+    flags :: [String]
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON)
@@ -129,6 +130,7 @@ instance FromJSON CachedModule where
       mb_sources <- o .:? "sources"
       modules <- o .: "modules"
       packages <- o .: "packages"
+      flags <- o .: "flags"
       case (mb_source, mb_sources) of
         (Just source, _) -> pure CachedModule {source=toOsPath source,..}
         (Nothing, Just (source : _)) -> pure CachedModule {source=toOsPath source,..}

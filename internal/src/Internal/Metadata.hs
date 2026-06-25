@@ -8,6 +8,7 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Foldable (for_)
 import Data.List.NonEmpty (NonEmpty, toList)
+import Data.Map (Map)
 import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Set as Set
 import GHC (
@@ -37,7 +38,7 @@ import System.Directory (createDirectoryIfMissing)
 import qualified System.File.OsPath as OsPath
 import System.OsPath.Extra (OsPath, toOsPath)
 import Types.Args (Args (..), BuildPlanField, buildPlanAll)
-import Types.BuildPlan (BuildPlan (..))
+import Types.BuildPlan (BuildPlan (..), ModuleKey)
 import Types.Env (Env (..))
 import Types.Log (Logger (..))
 import Types.State (WorkerState (..))
@@ -121,9 +122,10 @@ resolveDepJson hsc_env path =
 writeMetadata ::
   Maybe OsPath ->
   Maybe (NonEmpty BuildPlanField) ->
+  Map ModuleKey [String] ->
   [String] ->
   Ghc ModuleGraph
-writeMetadata path fieldSelection srcs = do
+writeMetadata path fieldSelection perModuleFlags srcs = do
   -- Plugins (e.g. Core-to-Core passes) are not needed for dependency
   -- computation and the interpreter may not be available in the buildplan
   -- step, so defer plugin initialisation to the compile step.
@@ -131,7 +133,7 @@ writeMetadata path fieldSelection srcs = do
     hsc_env <- getSession
     writeLegacyMakefile hsc_env
     depJson <- resolveDepJson hsc_env path
-    plan <- buildPlanForSources fields srcs
+    plan <- buildPlanForSources fields perModuleFlags srcs
     liftIO $ writeBuildPlan depJson plan
     pure plan.graph
   where
@@ -162,7 +164,7 @@ computeMetadata env = do
         unit <- prepareMetadataSession env dflags
         let target = TargetUnit (UnitTarget unit)
         liftIO $ env.log.setTarget target
-        module_graph <- writeMetadata env.args.buildPlan env.args.fields (fst <$> srcs)
+        module_graph <- writeMetadata env.args.buildPlan env.args.fields env.args.perModuleFlags (fst <$> srcs)
         liftIO do
           unless env.args.isBinary $
             updateMakeStateVar env.state (storeModuleGraph module_graph)
@@ -178,4 +180,4 @@ computeMetadata env = do
 proxyMetadata :: Env -> IO Bool
 proxyMetadata env =
   fmap isJust $ runSession env $ withGhcInSession env \ srcs ->
-    Just () <$ writeMetadata env.args.buildPlan env.args.fields (fst <$> srcs)
+    Just () <$ writeMetadata env.args.buildPlan env.args.fields env.args.perModuleFlags (fst <$> srcs)
