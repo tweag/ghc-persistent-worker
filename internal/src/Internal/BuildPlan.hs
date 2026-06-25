@@ -2,6 +2,7 @@
 
 module Internal.BuildPlan where
 
+import Control.Exception (evaluate)
 import Control.Monad (unless)
 import Data.Either (partitionEithers)
 import Data.Foldable (toList)
@@ -46,6 +47,7 @@ import Internal.Compat.FixedNodes (pattern CompileNode, pattern FixedNode, deps,
 import Internal.Compat.GHC914 (edgeTarget)
 import Internal.Error (eitherMessages)
 import System.FilePath (splitExtension)
+import System.IO.Unsafe (unsafePerformIO)
 import System.OsPath.Extra (toOsPath)
 import Types.Args (BuildPlanField (..))
 import Types.BuildPlan (
@@ -313,6 +315,30 @@ useNoBackend hsc_env =
   let dflags = hsc_dflags hsc_env
    in hsc_env { hsc_dflags = dflags {backend = noBackend}}
 
+-- | Add the per-module flags to each module's 'ms_hspp_opts' in the module graph.
+addPerModuleFlagsToModuleGraph
+  :: GhcMonad m => Map.Map ModuleKey [String] -> ModuleGraph -> m ModuleGraph
+addPerModuleFlagsToModuleGraph perModuleFlags mg0 = do
+  hsc_env <- getSession
+  forceMG $ flip GHC.mapMG mg0 $ \summary ->
+    case Map.lookup (summaryModuleKey summary) perModuleFlags of
+      -- unsafePerformIO does not float because it uses summary and flags.
+      -- It is evaluated in the order of the nodes in the graph as the result of
+      -- mapMG is forced.
+      --
+      -- Replace mapMG with mgMapM when support for earlier GHC's is dropped.
+      Just flags -> unsafePerformIO $ do
+        (dflags, _, _) <- GHC.parseDynamicFlags
+           hsc_env.hsc_logger
+           (GHC.ms_hspp_opts summary)
+           (map GHC.noLoc flags)
+        pure summary {GHC.ms_hspp_opts = dflags}
+      _ -> summary
+  where
+    forceMG mg = do
+      liftIO $ evaluate $ foldl' (flip seq) () (mgModSummaries mg)
+      pure mg
+
 buildPlanForTargets ::
   GhcMonad m =>
   Set BuildPlanField ->
@@ -321,7 +347,8 @@ buildPlanForTargets ::
   m BuildPlan
 buildPlanForTargets fields perModuleFlags targets = do
   GHC.setTargets targets
-  (errs, graph) <- withSession (liftIO . downsweepWithCache . useNoBackend)
+  (errs, graph0) <- withSession (liftIO . downsweepWithCache . useNoBackend)
+  graph <- addPerModuleFlagsToModuleGraph perModuleFlags graph0
   let msgs = unionManyMessages errs
   unless (isEmptyMessages msgs) $ throwErrors (fmap GhcDriverMessage msgs)
   hsc_env <- getSession
