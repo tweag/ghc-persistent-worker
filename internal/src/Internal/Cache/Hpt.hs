@@ -17,7 +17,21 @@ import Data.Set qualified as Set (insert, member, singleton)
 import Data.Time (getCurrentTime)
 import Data.Traversable (for)
 import Data.Tuple (swap)
-import GHC (DynFlags, GhcException (..), IsBootInterface (..), ModIface, ModIface_ (..), ModLocation (..), Module, ModuleGraph, ModuleName, mkModule, mkModuleName, moduleName, moduleNameString)
+import GHC (
+  DynFlags,
+  GhcException (..),
+  IsBootInterface (..),
+  ModIface,
+  ModIface_ (..),
+  ModLocation (..),
+  Module,
+  ModuleGraph,
+  ModuleName,
+  mkModule,
+  mkModuleName,
+  moduleName,
+  moduleNameString,
+  )
 import GHC.Data.Bag (emptyBag)
 import GHC.Data.Maybe (MaybeErr (..))
 import GHC.Driver.Env (HscEnv (..), hscActiveUnitId, hscSetActiveUnitId, hsc_HPT)
@@ -39,7 +53,7 @@ import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..), homeModInf
 import GHC.Unit.Home.PackageTable (HomePackageTable, addHomeModInfoToHpt, lookupHpt)
 import GHC.Unit.Module (moduleNameSlashes)
 import GHC.Unit.Module.Graph (NodeKey (..), mgModSummaries', mkNodeKey)
-import GHC.Unit.Module.Location (addBootSuffix, pattern ModLocation)
+import GHC.Unit.Module.Location (pattern ModLocation, addBootSuffix)
 import GHC.Unit.Module.ModDetails (ModDetails (..))
 import GHC.Unit.Module.ModIface (IfaceTopEnv (..), set_mi_top_env)
 import GHC.Unit.Module.WholeCoreBindings (WholeCoreBindings (..))
@@ -47,7 +61,8 @@ import GHC.Utils.Misc (modificationTimeIfExists)
 import GHC.Utils.Outputable (ppr, ($+$))
 import GHC.Utils.Panic (throwGhcExceptionIO, tryMost)
 import Internal.Cache.Metadata (loadCachedUnit, loadCachedUnits, readParseGHCArgs)
-import Internal.Compat.FixedNodes (pattern CompileNode, pattern FixedNode, deps)
+import qualified Internal.Compat.FixedNodes as FixedNodes
+import Internal.Compat.FixedNodes (pattern CompileNode, pattern FixedNode)
 import Internal.Compat.GHC914 (edgeTarget, setExtraDecls)
 import Internal.Log (logTimed)
 import Prelude hiding (log)
@@ -109,6 +124,33 @@ loadWholeCoreBindings = initWholeCoreBindings
 
 #endif
 
+coreBindings :: ModIface -> ModLocation -> Maybe WholeCoreBindings
+
+#if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
+
+coreBindings iface wcb_mod_location =
+  mi_simplified_core iface <&> \ sc ->
+    WholeCoreBindings {wcb_mod_location, wcb_bindings = mi_sc_extra_decls sc, wcb_foreign = mi_sc_foreign sc, wcb_module = mi_module iface, ..}
+
+#elif defined(MWB)
+
+coreBindings iface wcb_mod_location =
+  mi_extra_decls iface <&> \ wcb_bindings ->
+    WholeCoreBindings {wcb_mod_location, wcb_foreign = mi_foreign iface, wcb_module = mi_module iface, ..}
+
+#endif
+
+loadCachedByteCodeFrom :: HscEnv -> ModLocation -> ModIface -> ModDetails -> IO (Maybe Linkable)
+loadCachedByteCodeFrom hsc_env location iface details =
+  for (coreBindings iface location) \ wcb -> do
+    linkable <- bcoLinkable [CoreBindings wcb]
+    loadWholeCoreBindings hsc_env iface details linkable
+   where
+    bcoLinkable parts = do
+      if_time <- modificationTimeIfExists (ml_hi_file location)
+      time <- maybe getCurrentTime pure if_time
+      return $! Linkable time (mi_module iface) parts
+
 -- | Load bytecode from an interface.
 -- Used only for modules missing from the current target's HPT when restoring the Buck cache after restarting a build.
 --
@@ -117,11 +159,9 @@ loadWholeCoreBindings = initWholeCoreBindings
 -- For example, the source file is used to add debug info and find foreign export stubs.
 loadCachedByteCode :: HscEnv -> FilePath -> ModIface -> ModDetails -> IO (Maybe Linkable)
 loadCachedByteCode hsc_env ifaceFile iface details =
-  for core_bindings \ wcb -> do
-    linkable <- bcoLinkable [CoreBindings wcb]
-    loadWholeCoreBindings hsc_env iface details linkable
+  loadCachedByteCodeFrom hsc_env location iface details
    where
-    wcb_mod_location =
+    location =
       ModLocation {
         ml_hs_file = Nothing,
         ml_hi_file = ifaceFile,
@@ -130,25 +170,6 @@ loadCachedByteCode hsc_env ifaceFile iface details =
         ml_dyn_obj_file = error "loadCachedByteCode",
         ml_hie_file = error "loadCachedByteCode"
       }
-
-#if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
-
-    core_bindings =
-      mi_simplified_core iface <&> \ sc ->
-        WholeCoreBindings {wcb_mod_location, wcb_bindings = mi_sc_extra_decls sc, wcb_foreign = mi_sc_foreign sc, wcb_module = mi_module iface, ..}
-
-#elif defined(MWB)
-
-    core_bindings =
-      mi_extra_decls iface <&> \ wcb_bindings ->
-        WholeCoreBindings {wcb_mod_location, wcb_foreign = mi_foreign iface, wcb_module = mi_module iface, ..}
-
-#endif
-
-    bcoLinkable parts = do
-      if_time <- modificationTimeIfExists (ml_hi_file wcb_mod_location)
-      time <- maybe getCurrentTime pure if_time
-      return $! Linkable time (mi_module iface) parts
 
 -- | module loading state
 data ModuleLoadState =
@@ -196,13 +217,14 @@ prepareHmiLoader hpt name = do
 -- Maybe this could reuse some stuff in @hscRecompStatus@?
 loadCachedDep ::
   Logger ->
+  FeatureFlags ->
   IsInterpreted ->
   HscEnv ->
   ModuleName ->
   OsPath ->
   ModuleLoadState ->
   IO ModuleLoadState
-loadCachedDep log interp hsc_env name ifaceFile mod_load_state =
+loadCachedDep log features interp hsc_env name ifaceFile mod_load_state =
   case mod_load_state of
     Loaded -> pure Loaded
     Waiting lock -> readMVar lock >> pure Loaded
@@ -223,8 +245,11 @@ loadCachedDep log interp hsc_env name ifaceFile mod_load_state =
 
     loadHmiFull HomeModInfo {hm_iface, hm_details} = do
       logTimed log ("Loading HPT module from cache (BCO): " ++ fromOsPath ifaceFile) do
-        homeMod_bytecode <- loadCachedByteCode hsc_env (fromOsPath ifaceFile) hm_iface hm_details
-        let hm_iface' = setExtraDecls Nothing hm_iface
+        homeMod_bytecode <-
+          if features.lazyByteCode
+          then pure Nothing
+          else loadCachedByteCode hsc_env (fromOsPath ifaceFile) hm_iface hm_details
+        let hm_iface' = (if features.lazyByteCode then id else setExtraDecls Nothing) hm_iface
         let hmi' = HomeModInfo {
           hm_iface = hm_iface',
           hm_linkable = HomeModLinkable {homeMod_object = Nothing, homeMod_bytecode},
@@ -321,8 +346,8 @@ depsFromModuleGraph graph target =
   where
     children acc key =
       case M.lookup key nodes of
-        Just CompileNode {deps} -> foldl' visit acc (edgeTarget <$> deps)
-        Just FixedNode {deps} -> foldl' visit acc (edgeTarget <$> deps)
+        Just CompileNode {depsCompile} -> foldl' visit acc (edgeTarget <$> depsCompile)
+        Just FixedNode {depsFixed} -> foldl' visit acc (edgeTarget <$> depsFixed)
         _ -> acc
 
     visit (seen, deps) key
@@ -351,11 +376,12 @@ depsFromModuleGraph graph target =
 -- module, assuming its deps to be available to the compiler.
 loadCachedDeps ::
   Logger ->
+  FeatureFlags ->
   IsInterpreted ->
   (WorkerState, HscEnv) ->
   CachedDeps ->
   IO (WorkerState, HscEnv)
-loadCachedDeps log interp (state0, hsc_env0) (CachedDeps deps) =
+loadCachedDeps log features interp (state0, hsc_env0) (CachedDeps deps) =
   logTimed log "Loading cached deps" do
     (state1, hsc_env1) <- foldM loadDepUnit (state0, hsc_env0) byUnit
     pure (state1, hscSetActiveUnitId (hscActiveUnitId hsc_env0) hsc_env1)
@@ -374,8 +400,8 @@ loadCachedDeps log interp (state0, hsc_env0) (CachedDeps deps) =
       flip execStateT state do
         mod_plans <- traverse (prepareDep hsc_env) mods
         liftIO $ for_ mod_plans \ (name, iface, mod_load_state) -> do
-          mod_load_state' <- loadCachedDep log interp hsc_env name iface mod_load_state
-          loadCachedDep log interp hsc_env name iface mod_load_state'
+          mod_load_state' <- loadCachedDep log features interp hsc_env name iface mod_load_state
+          loadCachedDep log features interp hsc_env name iface mod_load_state'
 
     prepareDep hsc_env CachedDep {name = JsonFs name, package = JsonFs uid} = do
       mod_load_state <- prepareHmiLoader (hsc_HPT hsc_env) name

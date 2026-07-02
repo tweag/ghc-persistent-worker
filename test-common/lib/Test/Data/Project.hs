@@ -39,6 +39,19 @@ data ModuleKey =
   }
   deriving stock (Eq, Ord, Show)
 
+-- | The data needed to write a module's source file.
+data ModuleSource =
+  ModuleSource {
+    deps :: [ModuleKey],
+    -- | Whether to generate a Template Haskell splice expression.
+    th :: Bool,
+    -- | Number of top-level value bindings to generate.
+    bindings :: Int,
+    -- | Indexes of external dependency packages imported by this module.
+    extDeps :: Set Int
+  }
+  deriving stock (Eq, Show)
+
 -- | Data representing the project before the initial build is started, and that isn't related to scheduling or
 -- resuming.
 --
@@ -46,14 +59,14 @@ data ModuleKey =
 -- reconstruction or duplicate lookups of the individual fields in classifiers, source generation, and others.
 data InitialProject =
   InitialProject {
-    -- | Map from each module to its dependency modules, aggregated across units.
-    modules :: Map ModuleKey [ModuleKey],
+    -- | Map from each module to its source metadata, aggregated across units.
+    modules :: Map ModuleKey ModuleSource,
 
-    -- | Module and their deps that are expected to compile successfully.
-    modulesSuccess :: Map ModuleKey [ModuleKey],
+    -- | Modules that are expected to compile successfully.
+    modulesSuccess :: Map ModuleKey ModuleSource,
 
-    -- | Module and their deps that are expected to fail.
-    modulesError :: Map ModuleKey [ModuleKey],
+    -- | Modules that are expected to fail.
+    modulesError :: Map ModuleKey ModuleSource,
 
     -- | Total number of units.
     -- For output.

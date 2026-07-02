@@ -18,6 +18,7 @@ import Test.Data.Project (
   GenUnit (..),
   InitialProject (..),
   ModuleKey (..),
+  ModuleSource (..),
   UnitKey (..),
   )
 
@@ -58,9 +59,10 @@ genModule :: Set ModuleKey -> ModuleKey -> Gen (Set ModuleKey, GenModule)
 genModule pool key = do
   deps <- Gen.subset pool
   extraDeps <- small $ Gen.subset pool
+  th <- Gen.frequency [(6, pure False), (1, pure True)]
   let extra = extraDeps \\ deps
       resumeDeps = if null extra then Nothing else Just extra
-  pure (Set.insert key pool, GenModule {key, deps, resumeDeps, th = False, bindings = 1, extDeps = mempty})
+  pure (Set.insert key pool, GenModule {key, deps, resumeDeps, th, bindings = 1, extDeps = mempty})
 
 -- | Generate all home modules for a unit.
 genUnitModules ::
@@ -108,7 +110,15 @@ initialProject genUnits =
     (modulesSuccess, modulesError) =
       Map.partitionWithKey (\ ModuleKey {errorVariant} _ -> isNothing errorVariant) modules
 
-    modules = Map.fromList [(gm.key, Set.toList gm.deps) | u <- genUnits, gm <- u.modules]
+    modules = Map.fromList [
+      (gm.key, ModuleSource {
+        deps = Set.toList gm.deps,
+        th = gm.th,
+        bindings = gm.bindings,
+        extDeps = gm.extDeps
+      })
+      | u <- genUnits, gm <- u.modules
+      ]
 
 -- | Generate all data for the project.
 --

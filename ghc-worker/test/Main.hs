@@ -43,6 +43,7 @@ testsGeneral =
     test_interfacePath,
     test_sortScheduleOrder,
     test_projectBuild,
+    test_thDepBytecode,
     testGroup "incremental metadata" [
       test_incrementalBuild,
       test_incrementalFlow
