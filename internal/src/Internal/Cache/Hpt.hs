@@ -102,6 +102,33 @@ loadWholeCoreBindings = initWholeCoreBindings
 
 #endif
 
+coreBindings :: ModIface -> ModLocation -> Maybe WholeCoreBindings
+
+#if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
+
+coreBindings iface wcb_mod_location =
+  mi_simplified_core iface <&> \ sc ->
+    WholeCoreBindings {wcb_mod_location, wcb_bindings = mi_sc_extra_decls sc, wcb_foreign = mi_sc_foreign sc, wcb_module = mi_module iface, ..}
+
+#elif defined(MWB)
+
+coreBindings iface wcb_mod_location =
+  mi_extra_decls iface <&> \ wcb_bindings ->
+    WholeCoreBindings {wcb_mod_location, wcb_foreign = mi_foreign iface, wcb_module = mi_module iface, ..}
+
+#endif
+
+loadCachedByteCodeFrom :: HscEnv -> ModLocation -> ModIface -> ModDetails -> IO (Maybe Linkable)
+loadCachedByteCodeFrom hsc_env location iface details =
+  for (coreBindings iface location) \ wcb -> do
+    linkable <- bcoLinkable [CoreBindings wcb]
+    loadWholeCoreBindings hsc_env iface details linkable
+   where
+    bcoLinkable parts = do
+      if_time <- modificationTimeIfExists (ml_hi_file location)
+      time <- maybe getCurrentTime pure if_time
+      return $! Linkable time (mi_module iface) parts
+
 -- | Load bytecode from an interface.
 -- Used only for modules missing from the current target's HPT when restoring the Buck cache after restarting a build.
 --
@@ -110,11 +137,9 @@ loadWholeCoreBindings = initWholeCoreBindings
 -- For example, the source file is used to add debug info and find foreign export stubs.
 loadCachedByteCode :: HscEnv -> FilePath -> ModIface -> ModDetails -> IO (Maybe Linkable)
 loadCachedByteCode hsc_env ifaceFile iface details =
-  for core_bindings \ wcb -> do
-    linkable <- bcoLinkable [CoreBindings wcb]
-    loadWholeCoreBindings hsc_env iface details linkable
+  loadCachedByteCodeFrom hsc_env location iface details
    where
-    wcb_mod_location =
+    location =
       ModLocation {
         ml_hs_file = Nothing,
         ml_hi_file = ifaceFile,
@@ -123,25 +148,6 @@ loadCachedByteCode hsc_env ifaceFile iface details =
         ml_dyn_obj_file = error "loadCachedByteCode",
         ml_hie_file = error "loadCachedByteCode"
       }
-
-#if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
-
-    core_bindings =
-      mi_simplified_core iface <&> \ sc ->
-        WholeCoreBindings {wcb_mod_location, wcb_bindings = mi_sc_extra_decls sc, wcb_foreign = mi_sc_foreign sc, wcb_module = mi_module iface, ..}
-
-#elif defined(MWB)
-
-    core_bindings =
-      mi_extra_decls iface <&> \ wcb_bindings ->
-        WholeCoreBindings {wcb_mod_location, wcb_foreign = mi_foreign iface, wcb_module = mi_module iface, ..}
-
-#endif
-
-    bcoLinkable parts = do
-      if_time <- modificationTimeIfExists (ml_hi_file wcb_mod_location)
-      time <- maybe getCurrentTime pure if_time
-      return $! Linkable time (mi_module iface) parts
 
 -- | If the given module name is missing from the HPT, load the given interface from disk and store it in the module's
 -- 'HomeModInfo'.
@@ -152,12 +158,13 @@ loadCachedByteCode hsc_env ifaceFile iface details =
 -- Maybe this could reuse some stuff in @hscRecompStatus@?
 loadCachedDep ::
   Logger ->
+  FeatureFlags ->
   IsInterpreted ->
   ModuleName ->
   (WorkerState, HscEnv) ->
   OsPath ->
   IO (WorkerState, HscEnv)
-loadCachedDep log interp name (state0, hsc_env0) ifaceFile = do
+loadCachedDep log features interp name (state0, hsc_env0) ifaceFile = do
   existing <- lookupHpt hpt name
   case existing of
     Just hmi ->
@@ -189,8 +196,11 @@ loadCachedDep log interp name (state0, hsc_env0) ifaceFile = do
       logTimed log ("Loading HPT module from cache: " ++ fromOsPath ifaceFile) do
         hm_iface0 <- loadIface
         !hm_details <- initModDetails hsc_env0 hm_iface0
-        homeMod_bytecode <- loadCachedByteCode hsc_env0 (fromOsPath ifaceFile) hm_iface0 hm_details
-        let hm_iface = setExtraDecls Nothing hm_iface0
+        homeMod_bytecode <-
+          if features.lazyByteCode
+          then pure Nothing
+          else loadCachedByteCode hsc_env0 (fromOsPath ifaceFile) hm_iface0 hm_details
+        let hm_iface = (if features.lazyByteCode then id else setExtraDecls Nothing) hm_iface0
         let new = HomeModInfo {
           hm_iface,
           hm_linkable = HomeModLinkable {homeMod_object = Nothing, homeMod_bytecode},
@@ -263,11 +273,12 @@ hasUnit uid hsc_env =
 -- restore into the HPT here.
 loadCachedDeps ::
   Logger ->
+  FeatureFlags ->
   IsInterpreted ->
   (WorkerState, HscEnv) ->
   CachedDeps ->
   IO (WorkerState, HscEnv)
-loadCachedDeps log interp (state0, hsc_env0) (CachedDeps deps) =
+loadCachedDeps log features interp (state0, hsc_env0) (CachedDeps deps) =
   logTimed log "Loading cached deps" do
     (state1, hsc_env1) <- foldM loadDepUnit (state0, hsc_env0) byUnit
     pure (state1, hscSetActiveUnitId (hscActiveUnitId hsc_env0) hsc_env1)
@@ -282,7 +293,7 @@ loadCachedDeps log interp (state0, hsc_env0) (CachedDeps deps) =
     loadActiveUnit = foldM loadDep
 
     loadDep (state, hsc_env) CachedDep {name = JsonFs name, interfaces = iface :| _} =
-      liftIO (loadCachedDep log interp name (state, hsc_env) iface)
+      liftIO (loadCachedDep log features interp name (state, hsc_env) iface)
 
     byUnit = groupBy (on (==) (.package)) deps
 

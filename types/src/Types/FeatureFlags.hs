@@ -24,7 +24,8 @@ data FeatureFlags =
     -- | Integrated with accompanying monitoring instrument app
     instrument :: Bool,
     -- | Use incremental metadata (only re-downsweep changed modules).
-    incrementalBuildPlan :: Bool
+    incrementalBuildPlan :: Bool,
+    lazyByteCode :: Bool
   }
   deriving stock (Eq, Show)
 
@@ -35,5 +36,6 @@ defaultFeatureFlags =
     flagParser = False,
     concurrentInitUnits = True,
     instrument = False,
-    incrementalBuildPlan = True
+    incrementalBuildPlan = True,
+    lazyByteCode = False
   }

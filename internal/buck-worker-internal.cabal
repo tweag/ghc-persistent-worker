@@ -75,6 +75,7 @@ library
                       Internal.Cache.Metadata
                       Internal.Compat.FixedNodes
                       Internal.Compat.GHC914
+                      Internal.Compat.LinkDeps
                       Internal.Compat.UnitIndex
                       Internal.Compile.Make
                       Internal.Debug
@@ -89,6 +90,7 @@ library
                       Internal.Metadata
                       Internal.Session
                       Internal.State
+                      Internal.State.Linkables
                       Internal.State.Make
                       Internal.State.Stats
                       Internal.State.UnitIndex

@@ -7,6 +7,7 @@ import Control.Exception (finally)
 import Control.Monad (foldM, unless)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (traverse_)
+import Data.Function ((&))
 import Data.IORef (newIORef)
 import Data.Maybe (fromMaybe)
 import GHC (
@@ -48,6 +49,7 @@ import Internal.Env (withDebugLog)
 import Internal.Error (handleExceptions)
 import Internal.Log (logDebugD)
 import Internal.State (withState)
+import Internal.State.Linkables (installLinkables)
 import Prelude hiding (log)
 import System.OsPath.Extra (OsPath, fromOsPath, toOsPath)
 import Types.Args (Args (..))
@@ -57,7 +59,6 @@ import Types.Log (Logger (..))
 import Types.State (Options (..), WorkerState (..))
 import Types.State.Make (MakeState (..))
 import Types.Target (ModuleTarget (..), Target (Target), TargetSpec (..))
-import Data.Function ((&))
 
 setTempDir :: OsPath -> HscEnv -> HscEnv
 setTempDir dir = updateGlobalFlags \ dflags -> dflags {tmpDir = TempDir (fromOsPath dir)}
@@ -97,9 +98,13 @@ withGhcInSession env prog =
 ensureSession :: MVar WorkerState -> Args -> IO HscEnv
 ensureSession stateVar args =
   modifyMVar stateVar \ state -> do
-    newEnv <- maybe (initHscEnv args.topdir) prepReused state.baseSession
+    newEnv <- maybe new prepReused state.baseSession
     pure (state {baseSession = Just newEnv}, newEnv)
   where
+    new = do
+      hsc_env <- initHscEnv args.topdir
+      pure (installLinkables stateVar hsc_env)
+
     prepReused hsc_env = do
       hsc_tmpfs <- initTmpFs
       pure hsc_env {hsc_tmpfs}
@@ -250,7 +255,7 @@ withGhcMakeModule interp target =
     setActiveUnit (state, hsc_env) = pure (state, hscSetActiveUnitId (moduleUnitId target.mod) hsc_env)
 
     restoreCachedModules env =
-      maybeArg env.args.cachedDeps (loadCachedDeps env.log interp)
+      maybeArg env.args.cachedDeps (loadCachedDeps env.log env.args.features interp)
 
     maybeArg :: Maybe a -> (b -> a -> IO b) -> b -> IO b
     maybeArg arg f z = fromMaybe z <$> traverse (liftIO . f z) arg

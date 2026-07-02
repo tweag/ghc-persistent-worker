@@ -7,7 +7,7 @@ import qualified BuildPlanTest.Test2 (test_buildPlan)
 import FlagParserTest (test_parseBuckArgs)
 import Incremental.BuildTest (test_incrementalBuild)
 import Incremental.FlowTest (test_incrementalFlow)
-import ProjectBuildTest (test_projectBuild)
+import ProjectBuildTest (test_projectBuild, test_thDepBytecode)
 import ResourceTest (test_resources)
 import ScheduleTest (test_sortScheduleOrder)
 import System.IO (hSetEncoding, stderr, stdout, utf8)
@@ -41,6 +41,7 @@ testsGeneral =
     test_parseBuckArgs,
     test_sortScheduleOrder,
     test_projectBuild,
+    test_thDepBytecode,
     testGroup "incremental metadata" [
       test_incrementalBuild,
       test_incrementalFlow
