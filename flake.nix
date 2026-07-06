@@ -37,8 +37,8 @@
         url = "https://gitlab.haskell.org/ghc/ghc";
         version = "9.10.1";
         flavour = "release+split_sections+ipe";
-        rev = "5f161598778815aa7bfdc48ce2490ed4f6085e30";
-        hash = "sha256-iu1TqCFD4FK44ZL44HltLj6f6x/tQ6AbMMmrVbFU6mA=";
+        rev = "91fac8f283f82d4d9b1958c20ef4d14bbe643627";
+        hash = "sha256-z8Ej/kKRkhHDfSQccKeHkD3vHd6meGtXMtCzaQaW5Ro=";
       };
 
       ghc914.nixpkgs = "ghc914";
