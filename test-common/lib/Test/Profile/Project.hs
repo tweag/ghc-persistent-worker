@@ -9,9 +9,8 @@ import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
-import Test.Data.Project (BuildModule (..), Component (..), GenUnit (..), ModuleKey (..), TaskKey (..), UnitKey (..))
+import Test.Data.Project (BuildModule (..), Component (..), GenUnit (..), ModuleKey (..), ModuleSource (..), TaskKey (..), UnitKey (..))
 import Test.Data.Scheduler (Schedule (..), Task (..))
-import Test.Data.SourceMode (ModuleSource (..))
 
 -- | All module keys for a unit with the given number of modules.
 unitModuleKeys :: Int -> UnitKey -> [ModuleKey]
