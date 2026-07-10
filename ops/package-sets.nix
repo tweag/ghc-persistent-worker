@@ -100,6 +100,7 @@ in {
   envs.dev = defaultEnv [] // {
     package-set.extends = "mwb-26-04-fixed";
     buildInputs = pkgs: [pkgs.zlib pkgs.snappy pkgs.protobuf build.envs.dev.toolchain.packages.proto-lens-protoc];
+    overrides = commonOverrides ["mwb" "unit-index" "downsweep-cache" "fixed-nodes"] ++ [buckBinOverrides ipeOverrides];
     ghci.args = ["-DMWB" "-DDOWNSWEEP_CACHE" "-DUNIT_INDEX" "-DFIXED_NODES" "-DLINKABLES"];
   };
 
@@ -110,7 +111,7 @@ in {
     ghci.args = ["-DMWB" "-DDOWNSWEEP_CACHE" "-DUNIT_INDEX"];
   };
 
-  envs.mwb-26-04-fixed = defaultEnv [buckBinOverrides] // {
+  envs.mwb-26-04-fixed = defaultEnv [] // {
     expose.scoped = true;
     package-set.extends = "mwb-26-04-fixed";
     overrides = commonOverrides ["mwb" "unit-index" "downsweep-cache" "fixed-nodes"] ++ [buckBinOverrides ipeOverrides];

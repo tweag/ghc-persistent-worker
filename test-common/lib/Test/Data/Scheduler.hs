@@ -1,5 +1,6 @@
 module Test.Data.Scheduler where
 
+import Data.Coerce (coerce)
 import Data.Map.Strict (Map)
 import Data.Set (Set)
 import GHC.Generics (Generic)
@@ -23,10 +24,16 @@ data RequestResult =
   RequestFailure RequestFailure
   deriving stock (Eq, Show)
 
+newtype Dispatch task =
+  Dispatch { run :: task -> IO RequestResult }
+
+runDispatch :: Dispatch task -> task -> IO RequestResult
+runDispatch = coerce
+
 data SchedulerEnv key task =
   SchedulerEnv {
     maxJobs :: MaxJobs,
-    dispatch :: task -> IO RequestResult
+    dispatch :: Dispatch task
   }
   deriving stock (Generic)
 
