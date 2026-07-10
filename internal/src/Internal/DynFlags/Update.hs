@@ -142,17 +142,10 @@ resolveExtension name disable =
 setExtensionFlag', unSetExtensionFlag' :: Extension -> DynFlags -> DynFlags
 setExtensionFlag' f dflags = foldr ($) (xopt_set dflags f) deps
   where
-#if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
-    deps = [ case onoff of
-               On d -> setExtensionFlag' d
-               Off d -> unSetExtensionFlag' d
-           | (f', onoff) <- impliedXFlags, f' == f ]
-#else
     deps = [ if turn_on
              then setExtensionFlag'   d
              else unSetExtensionFlag' d
            | (f', turn_on, d) <- impliedXFlags, f' == f ]
-#endif
 
 unSetExtensionFlag' f dflags = xopt_unset dflags f
 
