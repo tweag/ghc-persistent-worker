@@ -54,7 +54,7 @@ import Internal.BuildPlan.Incremental (
 import Internal.BuildPlan.Json (assembleFields)
 import qualified Internal.Compat.FixedNodes as FixedNodes
 import Internal.Compat.FixedNodes (pattern CompileNode, pattern FixedNode, downsweepCompat)
-import Internal.Compat.GHC914 (edgeTarget)
+import Internal.Compat.GHC914 (edgeTarget, hscModuleGraph)
 import Internal.Error (eitherMessages, eitherWorkerError)
 import Internal.Log (logTimed)
 import System.FilePath (splitExtension)
@@ -366,7 +366,7 @@ buildPlanForTargets ::
   m BuildPlan
 buildPlanForTargets logger fields targets = do
   graph <- timedWithSession logger "Downsweep" \ hsc_env ->
-    downsweepTargets hsc_env.hsc_mod_graph targets
+    downsweepTargets (hscModuleGraph hsc_env) targets
   json <- timedWithSession logger "Build plan modules" $ buildPlanModules fields graph
   pure BuildPlan {graph, json}
 
