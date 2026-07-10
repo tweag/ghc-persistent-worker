@@ -4,12 +4,15 @@ module Internal.Compat.GHC914 where
 
 import GHC (Located, ModIface, ModuleGraph, ModuleName, PkgQual)
 import GHC.Driver.Env (HscEnv (..))
+import qualified GHC.Driver.Session as GHC
 import GHC.Iface.Syntax (IfaceBindingX, IfaceMaybeRhs, IfaceTopBndrInfo)
+import GHC.LanguageExtensions (Extension)
 import GHC.Unit.Module.Graph (NodeKey)
 
 #if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
 
 import Data.Functor ((<&>))
+import GHC.Driver.Flags (OnOff (..))
 import GHC.Unit.Env (UnitEnv (..))
 import GHC.Unit.Module.Graph (ModuleNodeEdge, edgeTargetKey, mkNormalEdge)
 import GHC.Unit.Module.ModIface (IfaceSimplifiedCore (..), set_mi_simplified_core)
@@ -34,6 +37,14 @@ setExtraDecls :: Maybe [IfaceBindingX IfaceMaybeRhs IfaceTopBndrInfo] -> ModIfac
 setExtraDecls new =
   set_mi_simplified_core $ new <&> \ mi_sc_extra_decls ->
     IfaceSimplifiedCore {mi_sc_foreign = emptyIfaceForeign, ..}
+
+impliedXFlags :: [(Extension, Bool, Extension)]
+impliedXFlags =
+  [compat ext dep | (ext, dep) <- GHC.impliedXFlags]
+  where
+    compat ext = \case
+      On dep -> (ext, True, dep)
+      Off dep -> (ext, False, dep)
 
 #else
 
@@ -67,5 +78,8 @@ edgeTarget = id
 
 textualImports :: (PkgQual, Located ModuleName) -> (PkgQual, Located ModuleName)
 textualImports = id
+
+impliedXFlags :: [(Extension, Bool, Extension)]
+impliedXFlags = GHC.impliedXFlags
 
 #endif
