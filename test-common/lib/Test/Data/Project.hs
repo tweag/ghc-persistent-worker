@@ -4,9 +4,9 @@ import Data.Foldable (toList)
 import Data.Map.Strict (Map)
 import Data.Set (Set)
 import Numeric.Natural (Natural)
+import System.OsPath.Extra (OsPath)
 import Test.Data.Scheduler (Task (..))
 import Types.CachedDeps (CachedBuildPlans, CachedDeps)
-import System.OsPath.Extra (OsPath)
 
 -- | Error variant for modules that should fail compilation.
 -- The variant determines both the generated source expression and the expected GHC diagnostic code.
@@ -172,3 +172,8 @@ data ResumeComponent =
 type BuildTask = Task TaskKey Component
 
 type ResumeBuildTask = Task TaskKey ResumeComponent
+
+weakenResumeComponent :: ResumeComponent -> Component
+weakenResumeComponent = \case
+  ResumeUnit m _ -> ComponentUnit m
+  ResumeModule m _ -> ComponentModule m

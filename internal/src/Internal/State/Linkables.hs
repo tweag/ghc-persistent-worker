@@ -25,7 +25,6 @@ import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..))
 import GHC.Unit.Home.PackageTable (addHomeModInfoToHpt)
 import GHC.Unit.Module.ModIface (mi_module)
 import Internal.Cache.Hpt (loadCachedByteCode)
-import Internal.Compat.GHC914 (setExtraDecls)
 import Internal.Compat.LinkDeps (getLinkDeps)
 import Types.State (WorkerState (..))
 import Types.State.Make (MakeState (..))
@@ -40,7 +39,7 @@ lazyLoadByteCode stateVar hsc_env hmi =
     loadCachedByteCode hsc_env "" (hm_iface hmi) (hm_details hmi) >>= \case
       Just bytecode -> do
         let iface = hm_iface hmi
-            new = hmi {hm_iface = setExtraDecls Nothing iface, hm_linkable = hmi.hm_linkable {homeMod_bytecode = Just bytecode}}
+            new = hmi {hm_iface = iface, hm_linkable = hmi.hm_linkable {homeMod_bytecode = Just bytecode}}
         traverse_ (insertIntoHpt new) (unitEnv_lookup_maybe (moduleUnitId (mi_module iface)) state.make.hug)
         pure (state, Just bytecode)
       Nothing -> pure (state, Nothing)

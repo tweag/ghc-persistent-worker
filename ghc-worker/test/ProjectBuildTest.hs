@@ -16,6 +16,7 @@ import GHC.ByteCode.Types (bc_bcos, unlinkedBCOName)
 import GHC.Data.FastString (FastString)
 import GHC.Data.FlatBag (elemsFlatBag)
 import GHC.Linker.Types (linkableBCOs, linkableModule)
+import GHC.Stack (HasCallStack, withFrozenCallStack)
 import GHC.Types.Name (Name)
 import GHC.Unit.Home.Graph (HomeUnitGraph, UnitEnvGraph (..), homeUnitEnv_hpt)
 import GHC.Unit.Home.ModInfo (homeModInfoByteCode)
@@ -194,14 +195,16 @@ enumerateBytecode (UnitEnvGraph graph) =
       [unlinkedBCOName bco | cbc <- linkableBCOs lnk, bco <- elemsFlatBag (bc_bcos cbc)]
 
 assertNoFailures ::
+  HasCallStack =>
   MonadTest m =>
   String ->
   BuildResult ->
   m ()
-assertNoFailures label result = do
-  unless (Map.null result.failures) do
-    annotate (label ++ " failures: " ++ show (Map.keys result.failures))
-  assert (Map.null result.failures)
+assertNoFailures label result =
+  withFrozenCallStack do
+    unless (Map.null result.failures) do
+      annotate (label ++ " failures: " ++ show (Map.keys result.failures))
+    assert (Map.null result.failures)
 
 targetBcos :: [(FastString, FastString, [String])]
 targetBcos =

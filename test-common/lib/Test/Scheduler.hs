@@ -17,12 +17,14 @@ import qualified Data.Set as Set
 import Data.Set (Set)
 import Test.Data.Env (MaxJobs (..))
 import Test.Data.Scheduler (
+  Dispatch,
   RequestFailure (..),
   RequestResult (..),
   Schedule (..),
   SchedulerEnv (..),
   SchedulerState (..),
   Task (..),
+  runDispatch,
   )
 import qualified Test.Scheduler.Concurrent as C
 
@@ -45,7 +47,7 @@ convertTask Task {key, deps, value} =
 -- | Set up a scheduler environment and initial state.
 initScheduler ::
   MaxJobs ->
-  (task -> IO RequestResult) ->
+  Dispatch task ->
   Schedule key task ->
   Set key ->
   (SchedulerEnv key task, SchedulerState key task)
@@ -79,7 +81,7 @@ runScheduler env initialState = do
     s {C.completed = Set.map SK initialState.completed}
   let
     wrapDispatch _ext task = do
-      result <- env.dispatch task.value
+      result <- runDispatch env.dispatch task.value
       pure $ case result of
         RequestSuccess -> C.TaskSuccess
         RequestFailure f -> C.TaskFailed f

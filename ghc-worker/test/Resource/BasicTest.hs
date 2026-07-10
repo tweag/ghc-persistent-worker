@@ -2,24 +2,25 @@
 --
 -- Compiles a static 3-unit × 3-module project and measures allocations per build phase, comparing against reference
 -- values.
-module ResourceTest where
+module Resource.BasicTest where
 
 import Control.Monad (unless)
 import Control.Monad.IO.Class (liftIO)
 import Data.Functor ((<&>))
 import Data.List (intercalate)
 import qualified Data.Set as Set
-import Hedgehog.Internal.Property (failWith)
+import Hedgehog.Internal.Property (TestT, failWith)
+import Resource.LazyByteCodeTest (test_memory_lazyByteCode)
+import Resource.Measure (assertMeasurements, checkEnvironment)
 import System.Environment (lookupEnv)
 import System.IO (hPutStrLn, stderr)
-import Test.Data.Env (TestEnv)
-import Test.Data.Project (BuildModule, GenUnit)
+import Test.Data.Project (BuildModule (..), GenUnit (..), ModuleKey (..))
 import Test.Env (newSessionEnv, withTestEnv)
 import Test.Resource.Build (runResourceBuild)
 import Test.Resource.Project (mkUnit)
 import Test.Resource.Stats (PhaseReference (..), PhaseResult (..), phaseSummary, rtsStatsAvailable)
 import Test.Run (unitTest)
-import Test.Tasty (TestTree, testGroup)
+import Test.Tasty (DependencyType (..), TestTree, dependentTestGroup)
 
 -- | All units in dependency order for the resource test.
 -- Three units with TH enabled, 20 bindings per module, and 2 external dependency packages.
@@ -54,57 +55,29 @@ referenceData =
     ]
   ]
 
--- | Pair each measured result with its reference by name.
-pairResults :: [PhaseResult] -> [(PhaseReference, PhaseResult)]
-pairResults phases =
-  [(ref, result) | ref <- referenceData, Just result <- [lookup ref.name resultMap]]
+test_memory :: TestTree
+test_memory =
+  withTestEnv \ getEnv ->
+    unitTest "simple build allocations" do
+      maybe (run getEnv) skip =<< liftIO checkEnvironment
   where
-    resultMap = [(r.name, r) | r <- phases]
-
--- | Format the failure report with regression details and all phase deviations.
-formatReport :: [String] -> [String] -> String
-formatReport summaries regressions =
-  intercalate "\n" $
-  ["Allocation regressions detected:"]
-  ++
-  indent regressions
-  ++
-  ["", "All phases:"]
-  ++
-  indent summaries
-  where
-    indent = fmap ("  " ++)
-
--- | Check whether the environment supports running the resource test.
--- Requires both RTS stats (compiled with @-T@) and the @resource_test_ext_deps@ env var
--- (set by the @test-ext-deps@ devshell), which ensures controlled build conditions.
-checkEnvironment :: IO (Maybe String)
-checkEnvironment =
-  rtsStatsAvailable >>= \case
-    False -> pure (Just "RTS stats not available (compiled without -T?)")
-    True -> lookupEnv "resource_test_ext_deps" <&> \case
-      Just _ -> Nothing
-      Nothing -> Just "resource_test_ext_deps not set (use the test-ext-deps devshell)"
-
-test_memory :: IO TestEnv -> TestTree
-test_memory getEnv =
-  unitTest "allocations" do
-    maybe run skip =<< liftIO checkEnvironment
-  where
-    run = do
+    run getEnv = do
       env <- liftIO (newSessionEnv =<< getEnv)
       (_, phases) <- liftIO (runResourceBuild allUnits env)
-      let checks = uncurry phaseSummary <$> pairResults phases
-          regressions = [r | (_, Just r) <- checks]
-      unless (null regressions) do
-        failWith Nothing (formatReport (fst <$> checks) regressions)
+      assertMeasurements referenceData phases
 
     skip reason =
       liftIO $ hPutStrLn stderr $ "Skipping resource test: " ++ reason
 
+-- | Module keys for the deterministic TH-dependency scenario.
+keyA, keyB, keyC :: ModuleKey
+keyA = ModuleKey {unit = 0, number = 0, errorVariant = Nothing}
+keyB = ModuleKey {unit = 1, number = 0, errorVariant = Nothing}
+keyC = ModuleKey {unit = 1, number = 1, errorVariant = Nothing}
+
 test_resources :: TestTree
 test_resources =
-  withTestEnv \ getEnv ->
-    testGroup "resources" [
-      test_memory getEnv
+    dependentTestGroup "resources" AllFinish [
+      test_memory,
+      test_memory_lazyByteCode
     ]
