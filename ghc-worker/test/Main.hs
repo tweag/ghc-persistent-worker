@@ -5,6 +5,7 @@ module Main where
 import qualified BuildPlanTest.Test1 (test_buildPlan)
 import qualified BuildPlanTest.Test2 (test_buildPlan)
 import BuildThTest (test_buildTh)
+import ByteCodeCacheTest (test_evictBySize, test_touchNoEviction)
 import FlagParserTest (test_parseBuckArgs)
 import InterfacePathTest (test_interfacePath)
 import ProjectBuildTest (test_projectBuild)
@@ -42,7 +43,10 @@ testsGeneral =
     test_interfacePath,
     test_sortScheduleOrder,
     test_projectBuild,
-    test_buildTh
+    test_buildTh,
+    test_touchNoEviction,
+    test_evictBySize,
+    test_evictIgnoresInUseRecency
   ] <> if fullTest then [
     BuildPlanTest.Test1.test_buildPlan,
     BuildPlanTest.Test2.test_buildPlan
