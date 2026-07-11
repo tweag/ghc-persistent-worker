@@ -53,6 +53,7 @@ featureFlagsParser =
         (flagParser, FeatureFlagParser) -> flags {flagParser}
         (concurrentInitUnits, FeatureConcurrentInitUnits) -> flags {concurrentInitUnits}
         (incrementalBuildPlan, FeatureIncrementalBuildPlan) -> flags {incrementalBuildPlan}
+        (lazyByteCode, FeatureLazyByteCode) -> flags {lazyByteCode}
 
     flagOption v = do
       flag <- eitherReader \case
@@ -60,6 +61,7 @@ featureFlagsParser =
         "flag-parser" -> Right FeatureFlagParser
         "concurrent-init-units" -> Right FeatureConcurrentInitUnits
         "incremental-build-plan" -> Right FeatureIncrementalBuildPlan
+        "lazy-byte-code" -> Right FeatureLazyByteCode
         flag -> Left ("Invalid feature flag: " ++ flag)
       pure (v, flag)
 
