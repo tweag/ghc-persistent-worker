@@ -9,6 +9,7 @@ import Data.Map.Strict qualified as M
 import GHC (Ghc, emptyMG, HscEnv)
 import GHC.Driver.Monad (modifySessionM, withSession)
 import GHC.Unit.Home.Graph (unitEnv_new)
+import Internal.Cache.Bytecode (evictBcoCache)
 import Internal.Debug (showHugShort, showModGraph)
 import qualified Internal.State.Make as Make
 import Internal.State.UnitIndex (newUnitIndex)
@@ -17,6 +18,7 @@ import System.OsPath.Extra (toOsPath)
 import Types.Log (Logger (..))
 import Types.State (BinPath (..), WorkerState (..), defaultOptions)
 import Types.State.Make (MakeState (..))
+import Types.FeatureFlags (FeatureFlags (..))
 
 newState :: IO (MVar WorkerState)
 newState = do
@@ -35,7 +37,9 @@ newState = do
       hug = unitEnv_new mempty,
       interp = Nothing,
       unitIndex,
-      bcoLoadState
+      bcoLoadState,
+      bcoCache = M.empty,
+      bcoAccessCounter = 0
     },
     targetArgs = mempty
   }
@@ -55,13 +59,16 @@ updateMakeStateVar var f = modifyMakeState var (\ s -> pure (f s, ()))
 
 -- | Restore the HUG, module graph and interpreter state from the worker state, since those are the only two components
 -- modified by the worker that aren't already shared by the base session.
+-- After the program completes, if lazy bytecode unloading is enabled ('FeatureFlags.lazyByteCodeCacheLimit'), evicts
+-- least-recently-used lazily-loaded bytecode entries exceeding the configured size limit.
 withState ::
   Logger ->
+  FeatureFlags ->
   MVar WorkerState ->
   ((WorkerState, HscEnv) -> IO (WorkerState, HscEnv)) ->
   Ghc a ->
   Ghc a
-withState logger stateVar setup prog = do
+withState logger features stateVar setup prog = do
   modifySessionM restore
   prog <* withSession store
   where
@@ -72,8 +79,9 @@ withState logger stateVar setup prog = do
 
     store hsc_env =
       liftIO $ modifyMVar_ stateVar \ state -> do
-        make <- Make.storeState logger hsc_env state.make
-        pure state {make}
+        make0 <- Make.storeState logger hsc_env state.make
+        make1 <- maybe (pure make0) (\ limit -> evictBcoCache hsc_env limit make0) features.lazyByteCodeCacheLimit
+        pure state {make = make1}
 
 dumpState ::
   Logger ->

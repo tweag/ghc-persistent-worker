@@ -4,8 +4,10 @@ module Types.State.Make where
 
 import Control.Concurrent.MVar (MVar)
 import GHC (ModuleGraph, ModuleName)
+import GHC.Linker.Types (Linkable)
 import GHC.Runtime.Interpreter (Interp)
 import GHC.Unit.Env (HomeUnitGraph)
+import GHC.Unit.Types (Module)
 -- import Data.IORef (IORef)
 import Data.Map.Strict qualified as M
 
@@ -43,5 +45,24 @@ data MakeState =
 
     unitIndex :: UnitIndex,
 
-    bcoLoadState :: M.Map ModuleName (MVar ())
+    bcoLoadState :: M.Map ModuleName (MVar ()),
+
+    -- | Tracks lazily-loaded bytecode (see the @lazyByteCode@ feature flag) for LRU-based unloading: for each home
+    -- module currently holding reconstructed bytecode, the linkable itself (needed to tell GHC's 'GHC.Linker.Loader.unload'
+    -- which linkables to retain), a monotonic last-access counter, and an approximate size.
+    bcoCache :: M.Map Module BcoCacheEntry,
+
+    -- | Monotonic counter bumped every time a Template Haskell splice resolves its dependencies; used as the "time"
+    -- source for 'bcoCache' entries' 'lastAccess'.
+    bcoAccessCounter :: Int
+  }
+
+-- | Cache-tracking metadata for a single lazily-loaded bytecode linkable. See 'MakeState.bcoCache'.
+data BcoCacheEntry =
+  BcoCacheEntry {
+    linkable :: Linkable,
+    lastAccess :: Int,
+    -- | Approximate size, in number of BCOs (unlinked bindings) contained in the linkable. A coarse proxy for memory
+    -- footprint, used only to compare relative weight of cache entries for eviction purposes.
+    size :: Int
   }

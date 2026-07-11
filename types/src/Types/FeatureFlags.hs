@@ -27,7 +27,14 @@ data FeatureFlags =
     instrument :: Bool,
     -- | Use incremental metadata (only re-downsweep changed modules).
     incrementalBuildPlan :: Bool,
-    lazyByteCode :: Bool
+    lazyByteCode :: Bool,
+    -- | Upper bound on the total tracked size (in BCO count, see 'Internal.Cache.Bytecode') of lazily loaded bytecode
+    -- kept in the HPT. When set and 'lazyByteCode' is enabled, the least-recently-used entries are unloaded at the
+    -- end of each compile job once the tracked total exceeds this limit. 'Nothing' disables unloading entirely.
+    --
+    -- Not exposed via CLI (no numeric feature-flag parsing exists yet); set directly on 'FeatureFlags' by callers
+    -- (e.g. tests) that need it.
+    lazyByteCodeCacheLimit :: Maybe Int
   }
   deriving stock (Eq, Show)
 
@@ -39,5 +46,6 @@ defaultFeatureFlags =
     concurrentInitUnits = True,
     instrument = False,
     incrementalBuildPlan = True,
-    lazyByteCode = False
+    lazyByteCode = False,
+    lazyByteCodeCacheLimit = Nothing
   }
