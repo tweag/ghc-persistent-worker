@@ -12,7 +12,6 @@
 module Internal.Compat.LinkDeps where
 
 import Control.Applicative
-import Control.Monad ((<$!>))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Trans.Except (ExceptT, runExceptT, throwE)
 import Data.Foldable (traverse_)
@@ -177,16 +176,15 @@ get_link_deps opts pls lazyByteCode maybe_normal_osuf span mods = do
     unit_env  = ldUnitEnv     opts
     noninteractive = filterOut isInteractiveModule mods
 
-    -- Preprocess the dependencies in make mode to remove all home modules,
-    -- since the transitive dependency closure is already cached for those in
-    -- the HUG (see MultiLayerModulesTH_* tests for the performance impact).
+    -- Preprocess the dependencies to remove all home modules, since the
+    -- transitive dependency closure is already cached for those in the HUG
+    -- (see MultiLayerModulesTH_* tests for the performance impact).
     --
-    -- Returns the remaining, external, dependencies on the right, which is the
-    -- entire set for oneshot mode.
-    separate_home_deps =
-      if ldOneShotMode opts
-      then pure ([], LinkExternal LinkAllDeps <$!> noninteractive)
-      else make_deps
+    -- Returns the remaining, external, dependencies on the right.
+    -- This function only supports make mode; oneshot mode (in which the
+    -- entire dependency set would be treated as external) is not used by
+    -- this worker and is not supported here.
+    separate_home_deps = make_deps
 
     make_deps = do
       (dep_ext, mmods) <- unzip <$> mapM get_mod_info all_home_mods
@@ -351,7 +349,7 @@ external_deps_loop opts (job@LinkExternal {le_module = mod, ..} : mods) acc = do
     -- link an object file (which happens for home unit modules, since those
     -- have no libraries).
     process_module = \case
-      LinkAllDeps | is_home || package_bc -> try_iface
+      LinkAllDeps | is_home -> try_iface
                   | otherwise -> add_library
 
     -- @LinkOnlyPackages@ is used for make mode home modules, so all imports
@@ -388,7 +386,7 @@ external_deps_loop opts (job@LinkExternal {le_module = mod, ..} : mods) acc = do
       = throwE (LinkBootModule mod)
 
       | ldUseByteCode opts
-      , is_home || package_bc
+      , is_home
       , Just load_bc <- mb_load_bc
       = add_module iface (LinkByteCodeModule mod load_bc) "bytecode"
 
@@ -423,26 +421,21 @@ external_deps_loop opts (job@LinkExternal {le_module = mod, ..} : mods) acc = do
         | (_, GWIB m _) <- Set.toList (dep_direct_mods (mi_deps iface))
       ]
 
-    -- If bytecode linking of external dependencies is enabled, add them to the
-    -- jobs passed to the next iteration of 'external_deps_loop'.
-    -- Otherwise, link all package deps as libraries.
-    package_deps iface
-      | package_bc
-      = ([], [LinkExternal LinkAllDeps usg_mod | UsagePackageModule {usg_mod} <- mi_usages iface])
-      | otherwise
-      = ([(u, LinkLibrary u) | u <- Set.toList (dep_direct_pkgs (mi_deps iface))], [])
+    -- External package dependencies are always linked as libraries; this
+    -- worker does not support traversing external package modules for
+    -- bytecode ("-fpackage-db-byte-code").
+    package_deps iface =
+      ([(u, LinkLibrary u) | u <- Set.toList (dep_direct_pkgs (mi_deps iface))], [])
 
     load_reason =
       text "need to link module" <+> ppr mod <+>
       text "due to use of Template Haskell"
 
-    package_bc = ldPkgByteCode opts
-
-    -- In multiple home unit mode, this only considers modules from the same
-    -- unit as the splice's module to be eligible for linking bytecode when
-    -- @-fpackage-db-byte-code@ is off.
-    -- For make mode, this is irrelevant, since any bytecode from the HUG is
-    -- obtained directly, not going through 'external_deps'.
+    -- Considers only modules from the same unit as the splice's module to be
+    -- eligible for linking bytecode.
+    -- For make mode, this is irrelevant for home modules in general, since any
+    -- bytecode from the HUG is obtained directly, not going through
+    -- 'external_deps'.
     is_home
       | Just home <- ue_homeUnit (ldUnitEnv opts)
       = homeUnitAsUnit home == mod_unit
