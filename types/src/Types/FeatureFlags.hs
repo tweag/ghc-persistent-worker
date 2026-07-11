@@ -10,6 +10,8 @@ data FeatureFlag =
   FeatureInstrument
   |
   FeatureIncrementalBuildPlan
+  |
+  FeatureLazyByteCode
   deriving stock (Eq, Show)
 
 -- | Runtime feature flags that control alternative implementations.

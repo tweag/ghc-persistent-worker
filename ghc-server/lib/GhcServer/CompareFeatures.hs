@@ -114,7 +114,7 @@ data BenchResult =
 -- | All feature flag constructors.
 allFlags :: [FeatureFlag]
 allFlags =
-  [FeatureFixedNodesCache, FeatureFlagParser, FeatureConcurrentInitUnits, FeatureIncrementalBuildPlan]
+  [FeatureFixedNodesCache, FeatureFlagParser, FeatureIncrementalBuildPlan, FeatureLazyByteCode]
 
 -- | All 16 permutations (power set) of feature flags.
 allPermutations :: [FeatureFlags]
@@ -127,8 +127,11 @@ flagsFromList enabled =
   FeatureFlags {
     fixedNodesCache = FeatureFixedNodesCache `elem` enabled,
     flagParser = FeatureFlagParser `elem` enabled,
-    concurrentInitUnits = FeatureConcurrentInitUnits `elem` enabled,
-    incrementalBuildPlan = FeatureIncrementalBuildPlan `elem` enabled
+    -- CIU is always on; removed from the matrix to keep the number of permutations in check.
+    concurrentInitUnits = True,
+    instrument = False,
+    incrementalBuildPlan = FeatureIncrementalBuildPlan `elem` enabled,
+    lazyByteCode = FeatureLazyByteCode `elem` enabled
   }
 
 -- | Convert 'FeatureFlags' to CLI args for the server.
@@ -142,16 +145,20 @@ featureFlagsToArgs flags =
         enabled = case flag of
           FeatureFixedNodesCache -> flags.fixedNodesCache
           FeatureFlagParser -> flags.flagParser
-          FeatureConcurrentInitUnits -> flags.concurrentInitUnits
           FeatureIncrementalBuildPlan -> flags.incrementalBuildPlan
+          FeatureLazyByteCode -> flags.lazyByteCode
+          FeatureConcurrentInitUnits -> flags.concurrentInitUnits
+          FeatureInstrument -> flags.instrument
 
         prefix = if enabled then "--enable" else "--disable"
 
         name = case flag of
           FeatureFixedNodesCache -> "fixed-nodes-cache"
           FeatureFlagParser -> "flag-parser"
-          FeatureConcurrentInitUnits -> "concurrent-init-units"
           FeatureIncrementalBuildPlan -> "incremental-build-plan"
+          FeatureLazyByteCode -> "lazy-byte-code"
+          FeatureConcurrentInitUnits -> "concurrent-init-units"
+          FeatureInstrument -> "instrument"
 
 -- | Short label for a feature config.
 featureLabel :: FeatureFlags -> String
@@ -166,8 +173,8 @@ featureLabel flags
       [
         ("FNC", (.fixedNodesCache)),
         ("FP", (.flagParser)),
-        ("CIU", (.concurrentInitUnits)),
-        ("IBP", (.incrementalBuildPlan))
+        ("IBP", (.incrementalBuildPlan)),
+        ("LBC", (.lazyByteCode))
       ]
 
 -- ---------------------------------------------------------------------------
