@@ -24,6 +24,7 @@ import GHC.Unit.Home.Graph (HomeUnitEnv (..), unitEnv_lookup_maybe)
 import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..))
 import GHC.Unit.Home.PackageTable (addHomeModInfoToHpt)
 import GHC.Unit.Module.ModIface (mi_module)
+import Internal.Cache.Bytecode (touchBcoCache)
 import Internal.Cache.Hpt (loadCachedByteCode)
 import Internal.Compat.LinkDeps (getLinkDeps)
 import Types.State (WorkerState (..))
@@ -56,8 +57,11 @@ linkablesResolve ::
   SrcSpan ->
   [Module] ->
   IO LinkDeps
-linkablesResolve stateVar hsc_env o i l s m =
-  getLinkDeps o i l (lazyLoadByteCode stateVar hsc_env) s m
+linkablesResolve stateVar hsc_env o i l s m = do
+  deps <- getLinkDeps o i l (lazyLoadByteCode stateVar hsc_env) s m
+  modifyMVar stateVar \ state ->
+    pure (state {make = touchBcoCache deps.ldAllLinkables state.make}, ())
+  pure deps
 
 linkablesSelect :: LinkDeps -> IO LinkDeps
 linkablesSelect deps = do

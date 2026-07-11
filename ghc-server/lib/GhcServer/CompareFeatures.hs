@@ -131,7 +131,8 @@ flagsFromList enabled =
     concurrentInitUnits = True,
     instrument = False,
     incrementalBuildPlan = FeatureIncrementalBuildPlan `elem` enabled,
-    lazyByteCode = FeatureLazyByteCode `elem` enabled
+    lazyByteCode = FeatureLazyByteCode `elem` enabled,
+    lazyByteCodeCacheLimit = Nothing
   }
 
 -- | Convert 'FeatureFlags' to CLI args for the server.
