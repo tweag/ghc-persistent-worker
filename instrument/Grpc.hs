@@ -31,3 +31,19 @@ triggerRebuild conn target =
       defMessage
         & Fields.target
         .~ Text.pack (renderTargetSpec target)
+
+-- | Request a snapshot of the lazily-loaded bytecode cache state.
+getBytecodeState :: Connection -> IO (Proto Instr.BytecodeState)
+getBytecodeState conn =
+  nonStreaming conn (rpc @(Protobuf Instrument "getBytecodeState")) defMessage
+
+-- | Request eviction of a module (or, if empty, an entire unit) from the bytecode cache.
+evictBytecode :: Connection -> Text.Text -> Text.Text -> IO ()
+evictBytecode conn unitId modName =
+  void $ forkIO $ void $
+    nonStreaming conn (rpc @(Protobuf Instrument "evictBytecode")) $
+      defMessage
+        & Fields.unitId
+        .~ unitId
+        & Fields.moduleName
+        .~ modName

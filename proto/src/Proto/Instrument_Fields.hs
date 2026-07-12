@@ -32,14 +32,47 @@ encoded ::
   (Prelude.Functor f, Data.ProtoLens.Field.HasField s "encoded" a) =>
   Lens.Family2.LensLike' f s a
 encoded = Data.ProtoLens.Field.field @"encoded"
+entries ::
+  forall f s a.
+  (Prelude.Functor f, Data.ProtoLens.Field.HasField s "entries" a) =>
+  Lens.Family2.LensLike' f s a
+entries = Data.ProtoLens.Field.field @"entries"
 extraGhcOptions ::
   forall f s a.
   (Prelude.Functor f,
    Data.ProtoLens.Field.HasField s "extraGhcOptions" a) =>
   Lens.Family2.LensLike' f s a
 extraGhcOptions = Data.ProtoLens.Field.field @"extraGhcOptions"
+lastAccess ::
+  forall f s a.
+  (Prelude.Functor f,
+   Data.ProtoLens.Field.HasField s "lastAccess" a) =>
+  Lens.Family2.LensLike' f s a
+lastAccess = Data.ProtoLens.Field.field @"lastAccess"
+moduleName ::
+  forall f s a.
+  (Prelude.Functor f,
+   Data.ProtoLens.Field.HasField s "moduleName" a) =>
+  Lens.Family2.LensLike' f s a
+moduleName = Data.ProtoLens.Field.field @"moduleName"
+size ::
+  forall f s a.
+  (Prelude.Functor f, Data.ProtoLens.Field.HasField s "size" a) =>
+  Lens.Family2.LensLike' f s a
+size = Data.ProtoLens.Field.field @"size"
 target ::
   forall f s a.
   (Prelude.Functor f, Data.ProtoLens.Field.HasField s "target" a) =>
   Lens.Family2.LensLike' f s a
 target = Data.ProtoLens.Field.field @"target"
+unitId ::
+  forall f s a.
+  (Prelude.Functor f, Data.ProtoLens.Field.HasField s "unitId" a) =>
+  Lens.Family2.LensLike' f s a
+unitId = Data.ProtoLens.Field.field @"unitId"
+vec'entries ::
+  forall f s a.
+  (Prelude.Functor f,
+   Data.ProtoLens.Field.HasField s "vec'entries" a) =>
+  Lens.Family2.LensLike' f s a
+vec'entries = Data.ProtoLens.Field.field @"vec'entries"

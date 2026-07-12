@@ -21,12 +21,17 @@ import Data.Text qualified as Text
 import Data.Time (UTCTime (..), fromGregorian)
 import Graphics.Vty qualified as V
 import Graphics.Vty.Attributes.Color
-import Grpc (sendOptions, triggerRebuild)
+import Grpc (evictBytecode, getBytecodeState, sendOptions, triggerRebuild)
 import Internal.Debug (debugSocketPath)
-import Lens.Micro.Platform (Lens', Traversal', each, filtered, lens, makeLenses, packed, preuse, use, zoom, (.=), _2)
+import Network.GRPC.Client (Connection)
+import Lens.Micro.Platform (Lens', Traversal', each, filtered, lens, makeLenses, packed, preuse, use, zoom, (.=), (^.), _2)
+import Network.GRPC.Common.Protobuf (Proto)
+import Proto.Instrument qualified as Instr
+import Proto.Instrument_Fields qualified as InstrF
 import Types.State (Options (..), defaultOptions)
 import Types.Target (TargetSpec)
 import UI.ActiveTasks qualified as ActiveTasks
+import UI.BytecodeBrowser qualified as BytecodeBrowser
 import UI.GhcDebug (debug)
 import UI.ModuleSelector qualified as ModuleSelector
 import UI.Session qualified as Session
@@ -39,12 +44,16 @@ data Event
   | SetTime UTCTime
   | SessionSelectorEvent SessionSelector.Event
   | TriggerRebuild WorkerId TargetSpec
+  | BytecodeBrowserEvent BytecodeBrowser.Event
+  | FetchBytecodeState
+  | RequestEvict Text.Text (Maybe Text.Text)
 
 data State = State
   { _sessions :: SessionSelector.State
   , _options :: Form Options Event Name
   , _currentFocus :: Name
   , _currentTime :: UTCTime
+  , _bcoBrowser :: BytecodeBrowser.State
   }
 
 makeLenses ''State
@@ -63,6 +72,7 @@ initialState =
     , _options = newForm optionFields defaultOptions
     , _currentFocus = ModuleSelector
     , _currentTime = UTCTime (fromGregorian 1970 1 1) 0
+    , _bcoBrowser = BytecodeBrowser.initialState
     }
 
 optionFields :: [Options -> FormFieldState Options Event Name]
@@ -75,6 +85,7 @@ drawUI State{..} =
   ( case _currentFocus of
       SessionSelector -> [SessionSelector.draw _sessions]
       OptionsEditor -> [drawOptionsEditor _options]
+      BytecodeBrowser -> [BytecodeBrowser.draw _bcoBrowser]
       TaskDetails -> let task = session >>= listSelectedElement . Session._activeTasks in maybe [] (pure . ActiveTasks.drawTaskDetails . snd) task
       ModuleDetails -> let mdl = session >>= listSelectedElement . Session._modules in maybe [] (pure . ModuleSelector.drawModuleDetails . snd) mdl
       _ -> []
@@ -86,7 +97,7 @@ drawUI State{..} =
                   (borderWithLabel (str " GHC Persistent Worker ") $ center $ str "Waiting for first session")
                   (Session.draw _currentFocus _currentTime)
                   session
-          , modifyDefAttr (`V.withStyle` V.italic) $ str " q:quit   Enter:show details   r:trigger rebuild   d:debug   o:toggle options editor   s:toggle session selector"
+          , modifyDefAttr (`V.withStyle` V.italic) $ str " q:quit   Enter:show details   r:trigger rebuild   d:debug   o:toggle options editor   s:toggle session selector   b:bytecode cache"
           ]
        ]
  where
@@ -120,6 +131,20 @@ withTarget = withTarget' False
 withTargetForRebuild :: (WorkerId -> TargetSpec -> EventM Name State ()) -> EventM Name State ()
 withTargetForRebuild = withTarget' True
 
+toEntries :: Proto Instr.BytecodeState -> [BytecodeBrowser.Entry]
+toEntries resp =
+  [ BytecodeBrowser.Entry (e ^. InstrF.unitId) (e ^. InstrF.moduleName) (fromIntegral (e ^. InstrF.size)) (fromIntegral (e ^. InstrF.lastAccess))
+  | e <- resp ^. InstrF.entries
+  ]
+
+-- | The connection used to query/evict bytecode cache state: the first worker of the currently focused session.
+bcoConnection :: EventM Name State (Maybe Connection)
+bcoConnection = do
+  workers <- use (currentSession . Session.workers)
+  pure $ case workers of
+    (w : _) -> Just w._connection
+    [] -> Nothing
+
 handleEvent :: BrickEvent Name Event -> EventM Name State ()
 handleEvent (AppEvent (SetTime t)) = currentTime .= t
 handleEvent (AppEvent (SendOptions mwid)) = do
@@ -136,6 +161,19 @@ handleEvent (AppEvent (TriggerRebuild wid target)) = do
   mworker <- preuse (currentSession . Session.workers . each . filtered (\w -> Session._workerId w == wid))
   for_ mworker $ \worker -> do
     liftIO $ triggerRebuild (Session._connection worker) target
+handleEvent (AppEvent (BytecodeBrowserEvent evt)) =
+  zoom bcoBrowser (BytecodeBrowser.handleEvent evt)
+handleEvent (AppEvent FetchBytecodeState) = do
+  mconn <- bcoConnection
+  case mconn of
+    Nothing -> beep
+    Just conn -> do
+      resp <- liftIO $ getBytecodeState conn
+      zoom bcoBrowser (BytecodeBrowser.handleEvent (BytecodeBrowser.Load (toEntries resp)))
+handleEvent (AppEvent (RequestEvict unitId modName)) = do
+  mconn <- bcoConnection
+  for_ mconn $ \conn -> liftIO $ evictBytecode conn unitId (maybe Text.empty id modName)
+  zoom bcoBrowser (BytecodeBrowser.handleEvent (BytecodeBrowser.Evicted unitId modName))
 handleEvent (AppEvent (SessionSelectorEvent evt)) =
   zoom sessions (SessionSelector.handleEvent evt)
 handleEvent (VtyEvent evt) = do
@@ -156,6 +194,19 @@ handleEvent (VtyEvent evt) = do
         V.EvKey V.KEsc [] -> hide
         V.EvKey V.KEnter [] -> hide
         _ -> zoom options (handleFormEvent (VtyEvent evt))
+    BytecodeBrowser -> do
+      let hide = currentFocus .= ModuleSelector
+      case evt of
+        V.EvKey V.KEsc [] -> hide
+        V.EvKey V.KEnter [] -> hide
+        V.EvKey (V.KChar 'b') [] -> hide
+        V.EvKey (V.KChar 't') [] -> handleEvent (AppEvent (BytecodeBrowserEvent BytecodeBrowser.ToggleSort))
+        V.EvKey (V.KChar 'x') [] -> do
+          bco <- use bcoBrowser
+          case BytecodeBrowser.selectedTarget bco of
+            Nothing -> beep
+            Just (unitId, modName) -> handleEvent (AppEvent (RequestEvict unitId modName))
+        _ -> handleListEventOf (bcoBrowser . BytecodeBrowser.rowsLens) evt
     TaskDetails -> do
       let hide = currentFocus .= ActiveTasks
       case evt of
@@ -175,6 +226,9 @@ handleEvent (VtyEvent evt) = do
         currentFocus .= SessionSelector
       V.EvKey (V.KChar 'o') [] -> do
         currentFocus .= OptionsEditor
+      V.EvKey (V.KChar 'b') [] -> do
+        currentFocus .= BytecodeBrowser
+        handleEvent (AppEvent FetchBytecodeState)
       V.EvKey (V.KChar 'd') [] -> do
         withTarget $ \_wid target ->
           suspendAndResume' $

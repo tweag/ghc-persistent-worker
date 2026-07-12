@@ -9,7 +9,7 @@ import Data.Map.Strict qualified as M
 import GHC (Ghc, emptyMG, HscEnv)
 import GHC.Driver.Monad (modifySessionM, withSession)
 import GHC.Unit.Home.Graph (unitEnv_new)
-import Internal.Cache.Bytecode (evictBcoCache)
+import Internal.Cache.Bytecode (evictBcoCache, evictSpecific)
 import Internal.Debug (showHugShort, showModGraph)
 import qualified Internal.State.Make as Make
 import Internal.State.UnitIndex (newUnitIndex)
@@ -39,7 +39,8 @@ newState = do
       unitIndex,
       bcoLoadState,
       bcoCache = M.empty,
-      bcoAccessCounter = 0
+      bcoAccessCounter = 0,
+      pendingEvictions = mempty
     },
     targetArgs = mempty
   }
@@ -81,7 +82,8 @@ withState logger features stateVar setup prog = do
       liftIO $ modifyMVar_ stateVar \ state -> do
         make0 <- Make.storeState logger hsc_env state.make
         make1 <- maybe (pure make0) (\ limit -> evictBcoCache hsc_env limit make0) features.lazyByteCodeCacheLimit
-        pure state {make = make1}
+        make2 <- evictSpecific hsc_env make1.pendingEvictions make1
+        pure state {make = make2 {pendingEvictions = mempty}}
 
 dumpState ::
   Logger ->

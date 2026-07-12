@@ -8,6 +8,7 @@ import Data.Binary (encode)
 import Data.ByteString (toStrict)
 import Data.Foldable (for_)
 import Data.Map.Strict qualified as Map
+import Data.Set qualified as Set
 import Data.Text qualified as Text
 import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats)
 import Network.GRPC.Common (NextElem (..))
@@ -25,7 +26,10 @@ import Proto.Instrument_Fields qualified as Instr
 import Types.Grpc (CommandEnv (..), RequestArgs (..))
 import Types.Instrument (Event (..))
 import Types.State (WorkerState (..), Options (..))
+import Types.State.Make (BcoCacheEntry (..), MakeState (..))
 import Types.Target (TargetSpec (..))
+import GHC (moduleName, moduleNameString)
+import GHC.Unit.Types (moduleUnitId, unitIdString)
 
 -- | Fetch statistics about the current state of the RTS for instrumentation.
 mkStats :: WorkerState -> IO Event
@@ -86,6 +90,40 @@ triggerRebuild stateVar recompile target = do
   for_ margs (uncurry recompile)
   pure defMessage
 
+-- | Snapshot the current lazily-loaded bytecode cache for the instrumentation UI.
+getBytecodeState ::
+  MVar WorkerState ->
+  Proto Instr.Empty ->
+  IO (Proto Instr.BytecodeState)
+getBytecodeState stateVar _ = do
+  state <- readMVar stateVar
+  let entries =
+        [ defMessage
+            & Instr.unitId .~ Text.pack (unitIdString (moduleUnitId m))
+            & Instr.moduleName .~ Text.pack (moduleNameString (moduleName m))
+            & Instr.size .~ fromIntegral (entry.size :: Int)
+            & Instr.lastAccess .~ fromIntegral (entry.lastAccess :: Int)
+        | (m, entry) <- Map.toList state.make.bcoCache
+        ]
+  pure (defMessage & Instr.entries .~ entries)
+
+-- | Request eviction of a module (or, if 'moduleName' is empty, an entire unit) from the lazily-loaded bytecode
+-- cache. Deferred until the next compile job's session is stored, since eviction requires a live 'HscEnv'/'Interp'
+-- (see 'Types.State.Make.pendingEvictions').
+evictBytecode ::
+  MVar WorkerState ->
+  Proto Instr.EvictBytecodeRequest ->
+  IO (Proto Instr.Empty)
+evictBytecode stateVar req = do
+  modifyMVar_ stateVar \ state -> do
+    let
+      matches m =
+        unitIdString (moduleUnitId m) == Text.unpack req.unitId
+        && (Text.null req.moduleName || moduleNameString (moduleName m) == Text.unpack req.moduleName)
+      targets = Set.filter matches (Map.keysSet state.make.bcoCache)
+    pure state {make = state.make {pendingEvictions = state.make.pendingEvictions <> targets}}
+  pure defMessage
+
 -- | A grapesy server that streams instrumentation data from the provided channel.
 instrumentMethods ::
   Chan Event ->
@@ -94,6 +132,8 @@ instrumentMethods ::
   Methods IO (ProtobufMethodsOf Instrument)
 instrumentMethods chan stateVar recompile =
   simpleMethods
+    (mkNonStreaming (evictBytecode stateVar))
+    (mkNonStreaming (getBytecodeState stateVar))
     (mkServerStreaming (const (notifyMe stateVar chan)))
     (mkNonStreaming (setOptions stateVar))
     (mkNonStreaming (triggerRebuild stateVar recompile))

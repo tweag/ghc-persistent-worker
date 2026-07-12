@@ -16,8 +16,26 @@ message RebuildRequest {
   string target = 1;
 }
 
+message BcoCacheEntry {
+  string unit_id = 1;
+  string module_name = 2;
+  int64 size = 3;
+  int64 last_access = 4;
+}
+
+message BytecodeState {
+  repeated BcoCacheEntry entries = 1;
+}
+
+message EvictBytecodeRequest {
+  string unit_id = 1;
+  string module_name = 2;
+}
+
 service Instrument {
   rpc NotifyMe(Empty) returns (stream Event) {};
   rpc SetOptions(Options) returns (Empty) {};
   rpc TriggerRebuild(RebuildRequest) returns (Empty) {};
+  rpc GetBytecodeState(Empty) returns (BytecodeState) {};
+  rpc EvictBytecode(EvictBytecodeRequest) returns (Empty) {};
 }
