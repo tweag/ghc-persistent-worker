@@ -10,7 +10,6 @@ import qualified Data.Set as Set
 import GHC (moduleNameFS)
 import GHC.Unit.Types (GenModule (..), Module, unitFS)
 import Hedgehog ((===))
-import ProjectBuildTest (enableLazyByteCode, loadedBcos)
 import Test.Build (compileTarget, metadataArgs, runCompile, runMetadata)
 import Test.Data.Env (SessionEnv (..), TestEnv (..))
 import Test.Data.Project (BuildModule (..), GenUnit (..), ModuleKey (..), ModuleSource (..))
@@ -24,6 +23,7 @@ import Types.FeatureFlags (FeatureFlags (..))
 import Types.State (WorkerState (..))
 import Types.State.Make (BcoCacheEntry (..), MakeState (..))
 import Types.Target (ModuleTarget (..))
+import Test.Bytecode (enableLazyByteCode, loadedBcos)
 
 -- | Module keys for the deterministic cache scenario: two unrelated modules (A, B) with equal-sized bytecode, and
 -- two Template Haskell modules that each pull in only one of them as a splice dependency (C depends on A, D depends
@@ -115,7 +115,7 @@ test_evictBySize =
 
       (Map.keys cacheAfter <&> moduleKeyFs) === [moduleKeyFs (moduleFor keyB)]
 
-      bcos <- liftIO (loadedBcos env)
+      bcos <- loadedBcos env
       let modules = [modFs | (_, modFs, _) <- bcos]
       any (== "Unit0Module0") modules === False
       any (== "Unit1Module0") modules === True
@@ -195,7 +195,7 @@ test_evictIgnoresInUseRecency =
       -- entries.
       (Map.keys cacheAfter <&> moduleKeyFs) === ([] :: [(String, String)])
 
-      bcos <- liftIO (loadedBcos env)
+      bcos <- loadedBcos env
       let modules = [modFs | (_, modFs, _) <- bcos]
       any (== "Unit0Module0") modules === False
       any (== "Unit1Module0") modules === False

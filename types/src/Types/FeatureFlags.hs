@@ -33,9 +33,6 @@ data FeatureFlags =
     -- | Upper bound on the total tracked size (in BCO count, see 'Internal.Cache.Bytecode') of lazily loaded bytecode
     -- kept in the HPT. When set and 'lazyByteCode' is enabled, the least-recently-used entries are unloaded at the
     -- end of each compile job once the tracked total exceeds this limit. 'Nothing' disables unloading entirely.
-    --
-    -- Not exposed via CLI (no numeric feature-flag parsing exists yet); set directly on 'FeatureFlags' by callers
-    -- (e.g. tests) that need it.
     lazyByteCodeCacheLimit :: Maybe Int
   }
   deriving stock (Eq, Show)
