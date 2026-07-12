@@ -3,7 +3,7 @@
 module GhcServer.Run where
 
 import Common.Grpc (fromGrpcHandler, runGrpcServer)
-import Control.Applicative (many, (<|>))
+import Control.Applicative (many, optional, (<|>))
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (runExceptT)
 import GhcServer.Data.Config (ServerConfig (..))
@@ -36,17 +36,20 @@ import System.Exit (die)
 import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
 import System.OsPath (encodeUtf, (</>))
 import System.OsPath.Extra (fromOsPath)
-import Types.FeatureFlags (FeatureFlag (..), FeatureFlags (..), defaultFeatureFlags)
+import Types.FeatureFlags (FeatureFlag (..), FeatureFlags (..), defaultFeatureFlags, parseByteSize)
 
 -- | Parser for runtime feature flags.
 featureFlagsParser :: Parser FeatureFlags
 featureFlagsParser =
-  applyFlags <$> many (
-    (option (flagOption True) (long "enable" <> metavar "FEATURE" <> help "Enable an optional feature"))
-    <|>
-    (option (flagOption False) (long "disable" <> metavar "FEATURE" <> help "Disable an optional feature"))
-    )
+  (\ flags maxBytecode -> flags {lazyByteCodeCacheLimit = maxBytecode}) <$> flagsParser <*> maxBytecodeParser
   where
+    flagsParser =
+      applyFlags <$> many (
+        (option (flagOption True) (long "enable" <> metavar "FEATURE" <> help "Enable an optional feature"))
+        <|>
+        (option (flagOption False) (long "disable" <> metavar "FEATURE" <> help "Disable an optional feature"))
+        )
+
     applyFlags =
       flip foldl' defaultFeatureFlags \ flags -> \case
         (fixedNodesCache, FeatureFixedNodesCache) -> flags {fixedNodesCache}
@@ -64,6 +67,17 @@ featureFlagsParser =
         "lazy-byte-code" -> Right FeatureLazyByteCode
         flag -> Left ("Invalid feature flag: " ++ flag)
       pure (v, flag)
+
+-- | Parser for '--max-bytecode', bounding the lazily-loaded bytecode cache (see 'FeatureFlags.lazyByteCodeCacheLimit').
+maxBytecodeParser :: Parser (Maybe Int)
+maxBytecodeParser =
+  optional (
+    option (eitherReader parseByteSize) (
+      long "max-bytecode"
+      <> metavar "NUM[M|G]"
+      <> help "Upper bound on the tracked size of lazily-loaded bytecode kept in the HPT (enables eviction)"
+      )
+    )
 
 -- | CLI argument parser for the server.
 serverConfigParser :: Parser ServerConfig
