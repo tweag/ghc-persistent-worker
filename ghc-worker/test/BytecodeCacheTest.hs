@@ -8,7 +8,7 @@ import Data.Functor ((<&>))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import GHC (moduleNameFS)
-import GHC.Unit.Types (Module, unitFS, GenModule (..))
+import GHC.Unit.Types (GenModule (..), Module, unitFS)
 import Hedgehog ((===))
 import ProjectBuildTest (enableLazyByteCode, loadedBcos)
 import Test.Build (compileTarget, metadataArgs, runCompile, runMetadata)
@@ -151,3 +151,51 @@ test_touchNoEviction =
         pure make
 
       (Map.keys make.bcoCache <&> moduleKeyFs) === [moduleKeyFs (moduleFor keyA)]
+
+-- | Approximates the race described in the concurrency analysis of 'evictBcoCache': a splice execution in one
+-- compile job depends on bytecode that a /concurrently running/ compile job's eviction step unloads mid-flight,
+-- since 'Internal.State.withState' only holds the state lock for its own restore/store bookkeeping, not for the
+-- full duration of a job's compilation (including splice execution).
+--
+-- This test cannot force that real interleaving deterministically: there is no hook in the production code that
+-- pauses a job between resolving a splice's dependencies (which touches the cache) and actually executing the
+-- splice, and deliberately racing real concurrent 'GHC.Linker.Loader.unload' calls against live bytecode execution
+-- risks crashing the test process rather than failing an assertion (the whole point of the bug is that it corrupts
+-- interpreter state out from under a running computation). Reproducing the exact cross-thread interleaving would
+-- require adding such a synchronization hook to production code, which is more invasive than justified here.
+--
+-- Instead, this test demonstrates the underlying mechanism that makes the race possible: 'evictBcoCache' has no
+-- concept of "currently in use", only recency. Compiling 'D' touches module 'B' last (making it the most-recently-used
+-- entry, i.e. exactly the state a module would be in if some other job had just resolved a splice depending on it),
+-- yet a limit of @0@ evicts it anyway, alongside 'A'. In a concurrent scenario, this is precisely what would happen
+-- to a module another thread is actively executing a splice against: nothing in 'evictBcoCache' distinguishes
+-- "touched a while ago and safe to evict" from "touched moments ago by a splice that hasn't finished running yet".
+test_evictIgnoresInUseRecency :: TestTree
+test_evictIgnoresInUseRecency =
+  withTestEnv \ getTestEnv ->
+    unitTest "bytecode cache: eviction does not protect the most-recently-touched entry" do
+      testEnv <- liftIO getTestEnv
+      sessionEnv <- liftIO (newSessionEnv (enableLazyByteCode testEnv))
+      env <- liftIO (buildUpToC sessionEnv)
+
+      liftIO do
+        let args =
+              sessionEnv.shared.baseArgs {
+                features = sessionEnv.shared.baseArgs.features {lazyByteCodeCacheLimit = Just 0}
+              }
+        _ <- runCompile sessionEnv (\ _ -> (args, mempty)) keyD
+        pure ()
+
+      cacheAfter <- liftIO do
+        WorkerState {make} <- readMVar env.state
+        pure make.bcoCache
+
+      -- Even 'B', touched last (by this very compile job, moments before its own eviction step ran), is unloaded:
+      -- the cache limit alone decides what survives, with no protection for recently-touched-and-possibly-in-use
+      -- entries.
+      (Map.keys cacheAfter <&> moduleKeyFs) === ([] :: [(String, String)])
+
+      bcos <- liftIO (loadedBcos env)
+      let modules = [modFs | (_, modFs, _) <- bcos]
+      any (== "Unit0Module0") modules === False
+      any (== "Unit1Module0") modules === False
