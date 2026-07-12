@@ -10,6 +10,7 @@ import GHC.Unit.Env (HomeUnitGraph)
 import GHC.Unit.Types (Module)
 -- import Data.IORef (IORef)
 import Data.Map.Strict qualified as M
+import Data.Set (Set)
 
 #if defined(UNIT_INDEX)
 
@@ -54,7 +55,12 @@ data MakeState =
 
     -- | Monotonic counter bumped every time a Template Haskell splice resolves its dependencies; used as the "time"
     -- source for 'bcoCache' entries' 'lastAccess'.
-    bcoAccessCounter :: Int
+    bcoAccessCounter :: Int,
+
+    -- | Modules requested for eviction from 'bcoCache' via the instrumentation UI (see 'Internal.Cache.Bytecode.evictSpecific').
+    -- Applied and cleared the next time a compile job's session is stored (in 'Internal.State.withState'), since
+    -- eviction requires a live 'HscEnv'/'Interp' that isn't available outside of a running session.
+    pendingEvictions :: Set Module
   }
 
 -- | Cache-tracking metadata for a single lazily-loaded bytecode linkable. See 'MakeState.bcoCache'.

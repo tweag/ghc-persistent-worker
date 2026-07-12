@@ -157,6 +157,7 @@
           "fsnotify"
           "grapesy"
           "microlens-platform"
+          "mtl"
           "text"
           "time"
           "vty"

@@ -11,6 +11,7 @@ data Name
   | SessionSelector
   | OptionsEditor
   | OEExtraGhcOptions
+  | BytecodeBrowser
   deriving stock (Eq, Ord, Show)
 
 newtype WorkerId = WorkerId { unWorkerId :: Text }

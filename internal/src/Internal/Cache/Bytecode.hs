@@ -11,8 +11,11 @@ module Internal.Cache.Bytecode where
 import Control.Monad (unless)
 import Data.Foldable (traverse_)
 import qualified Data.List as List
+import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (isNothing)
+import Data.Set (Set)
+import qualified Data.Set as Set
 import GHC.ByteCode.Types (bc_bcos)
 import GHC.Data.FlatBag (sizeFlatBag)
 import GHC.Driver.Env (HscEnv, hscInterp)
@@ -57,16 +60,32 @@ touchBcoCache linkables make =
 evictBcoCache :: HscEnv -> Int -> MakeState -> IO MakeState
 evictBcoCache hsc_env limit make
   | totalSize <= limit = pure make
-  | otherwise = do
-      traverse_ (dropFromHpt make.hug) (Map.toList evicted)
-      unload (hscInterp hsc_env) hsc_env (linkable <$> Map.elems kept)
-      pure make {bcoCache = kept}
+  | otherwise = unloadEvicted hsc_env evicted make
   where
     totalSize = sum (size <$> Map.elems make.bcoCache)
     -- Oldest (least recently used) first.
     sorted = List.sortOn (lastAccess . snd) (Map.toList make.bcoCache)
     evictedList = fst (selectEvictions (totalSize - limit) sorted)
     evicted = Map.fromList evictedList
+
+-- | Unconditionally evict the given set of modules from 'MakeState.bcoCache', regardless of recency or size, e.g. in
+-- response to an explicit eviction request from the instrumentation UI (see 'Internal.State.withState').
+-- Modules not currently present in the cache are ignored.
+evictSpecific :: HscEnv -> Set Module -> MakeState -> IO MakeState
+evictSpecific hsc_env targets make
+  | Set.null targets = pure make
+  | otherwise = unloadEvicted hsc_env evicted make
+  where
+    evicted = Map.restrictKeys make.bcoCache targets
+
+-- | Shared implementation for 'evictBcoCache' and 'evictSpecific': reset the evicted modules' bytecode in the HPT and
+-- inform the interpreter's loader that only the kept linkables should remain live.
+unloadEvicted :: HscEnv -> Map Module BcoCacheEntry -> MakeState -> IO MakeState
+unloadEvicted hsc_env evicted make = do
+  traverse_ (dropFromHpt make.hug) (Map.toList evicted)
+  unload (hscInterp hsc_env) hsc_env (linkable <$> Map.elems kept)
+  pure make {bcoCache = kept}
+  where
     kept = Map.difference make.bcoCache evicted
 
 -- | Greedily select the oldest entries to evict until the running deficit (@need@) is covered.

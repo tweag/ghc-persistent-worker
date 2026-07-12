@@ -12,6 +12,7 @@ executable instrument
     Grpc
     UI
     UI.ActiveTasks
+    UI.BytecodeBrowser
     UI.GhcDebug
     UI.ModuleSelector
     UI.Session
@@ -51,6 +52,7 @@ executable instrument
     fsnotify,
     grapesy,
     microlens-platform,
+    mtl,
     text,
     time,
     vty
