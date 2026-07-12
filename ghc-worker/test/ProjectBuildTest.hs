@@ -2,30 +2,15 @@
 
 module ProjectBuildTest where
 
-import Control.Concurrent.MVar (readMVar)
-import Control.Monad (unless)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (traverse_)
-import Data.List (isPrefixOf)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
-import Data.Traversable (for)
-import GHC (isExternalName, moduleNameFS)
-import GHC.ByteCode.Types (bc_bcos, unlinkedBCOName)
 import GHC.Data.FastString (FastString)
-import GHC.Data.FlatBag (elemsFlatBag)
-import GHC.Linker.Types (linkableBCOs, linkableModule)
-import GHC.Stack (HasCallStack, withFrozenCallStack)
-import GHC.Types.Name (Name)
-import GHC.Unit.Home.Graph (HomeUnitGraph, UnitEnvGraph (..), homeUnitEnv_hpt)
-import GHC.Unit.Home.ModInfo (homeModInfoByteCode)
-import GHC.Unit.Home.PackageTable (concatHpt)
-import GHC.Unit.Types (GenModule (..), Module, UnitId, unitFS)
-import GHC.Utils.Outputable (showPprUnsafe)
-import Hedgehog (MonadTest, PropertyT, TestT, annotate, assert, forAllWith, property, withTests, (===))
+import Hedgehog (PropertyT, TestT, forAllWith, property, withTests, (===))
 import Test.BuckHashes (writeUnitHashes)
 import Test.BuildSystem (mkBuildSystem)
+import Test.Bytecode (enableLazyByteCode, loadedBcos)
 import Test.Data.BuildSystem (BuildResult (..), BuildSystem (..))
 import Test.Data.Env (SessionEnv (..), TestConfig (..), TestEnv (..), withTestConfig)
 import Test.Data.Project (
@@ -43,17 +28,12 @@ import Test.Data.Scheduler (Schedule (..), Task (..))
 import Test.Env (newResumeSessionEnv, newSessionEnv, withTestEnv)
 import Test.Gen.ProjectBuild (genProjectBuild, metaTask, moduleTask, sortSchedule)
 import Test.ProjectBuild.Classify (classifyFirstBuild, classifyProject, classifyResume)
-import Test.ProjectBuild.Property (annotateRebuildPlan, assertBuildResult, showProjectBuild)
+import Test.ProjectBuild.Property (annotateRebuildPlan, assertBuildResult, assertNoFailures, showProjectBuild)
 import Test.Resume (executeResumeBuild, setupResumeBuild)
 import Test.Run (unitTest)
 import Test.Source (writeProjectSources)
 import Test.Tasty (TestTree)
 import Test.Tasty.Hedgehog (testProperty)
-import Types.Args (Args (..))
-import Types.Env (Env (..))
-import Types.FeatureFlags (FeatureFlags (..))
-import Types.State (WorkerState (..))
-import Types.State.Make (MakeState (..))
 
 -- | Extract 'GenUnit' values from unit metadata tasks in the schedule.
 scheduleUnits :: Schedule TaskKey Component -> [GenUnit BuildModule]
@@ -179,33 +159,6 @@ thBuild =
   where
     resumeSchedule' = fst (sortSchedule thResumeTasks)
 
--- | Enumerate the loaded bytecode per unit by walking the Home Unit Graph's Home Package Tables.
-enumerateBytecode :: HomeUnitGraph -> IO [(UnitId, [(Module, [Name])])]
-enumerateBytecode (UnitEnvGraph graph) =
-  for (Map.toList graph) \ (uid, hue) -> do
-    entries <- concatHpt bytecodeEntry (homeUnitEnv_hpt hue)
-    pure (uid, entries)
-  where
-    bytecodeEntry hmi =
-      case homeModInfoByteCode hmi of
-        Nothing -> []
-        Just lnk -> [(linkableModule lnk, bcoNames lnk)]
-
-    bcoNames lnk =
-      [unlinkedBCOName bco | cbc <- linkableBCOs lnk, bco <- elemsFlatBag (bc_bcos cbc)]
-
-assertNoFailures ::
-  HasCallStack =>
-  MonadTest m =>
-  String ->
-  BuildResult ->
-  m ()
-assertNoFailures label result =
-  withFrozenCallStack do
-    unless (Map.null result.failures) do
-      annotate (label ++ " failures: " ++ show (Map.keys result.failures))
-    assert (Map.null result.failures)
-
 targetBcos :: [(FastString, FastString, [String])]
 targetBcos =
   [
@@ -226,31 +179,6 @@ targetBcos =
     )
   ]
 
-enableLazyByteCode :: TestEnv -> TestEnv
-enableLazyByteCode testEnv =
-  testEnv {
-    baseArgs = testEnv.baseArgs {
-      features = testEnv.baseArgs.features {lazyByteCode = True}
-    }
-  }
-
-loadedBcos :: Env -> IO [(FastString, FastString, [String])]
-loadedBcos env = do
-  loaded <- liftIO do
-    WorkerState {make} <- readMVar env.state
-    enumerateBytecode make.hug
-  pure [modBcos m ns | (_, mods) <- loaded, (m, ns) <- mods]
-  where
-    modBcos m ns =
-      (unitFS m.moduleUnit, moduleNameFS m.moduleName, mapMaybe interestingName ns)
-
-    interestingName name
-      | isExternalName name
-      , not (isPrefixOf "$" (showPprUnsafe name))
-      = Just (showPprUnsafe name)
-      | otherwise
-      = Nothing
-
 thDepBytecodeProperty :: TestEnv -> TestT IO ()
 thDepBytecodeProperty testEnv = do
   sessionEnv <- liftIO (newSessionEnv (enableLazyByteCode testEnv))
@@ -265,13 +193,13 @@ thDepBytecodeProperty testEnv = do
   resumeEnv <- liftIO $ newResumeSessionEnv sessionEnv
 
   -- Make sure we didn't accidentally keep the first build's state
-  bcosPre <- liftIO $ loadedBcos resumeEnv.env
+  bcosPre <- loadedBcos resumeEnv.env
   [] === bcosPre
 
   resumeResult <- liftIO $ executeResumeBuild buildSys resumeEnv thBuild initialResult cachedSchedule
   assertNoFailures "resume" resumeResult
 
-  bcos <- liftIO $ loadedBcos resumeEnv.env
+  bcos <- loadedBcos resumeEnv.env
   targetBcos === bcos
 
 test_thDepBytecode :: TestTree
