@@ -4,7 +4,7 @@ module Main where
 
 import qualified BuildPlanTest.Test1 (test_buildPlan)
 import qualified BuildPlanTest.Test2 (test_buildPlan)
-import BytecodeCacheTest (test_evictBySize, test_touchNoEviction)
+import BytecodeCacheTest (test_evictBySize, test_evictIgnoresInUseRecency, test_touchNoEviction)
 import FlagParserTest (test_parseBuckArgs)
 import Incremental.BuildTest (test_incrementalBuild)
 import Incremental.FlowTest (test_incrementalFlow)
@@ -48,6 +48,7 @@ testsGeneral =
     test_thDepBytecode,
     test_touchNoEviction,
     test_evictBySize,
+    test_evictIgnoresInUseRecency,
     testGroup "incremental metadata" [
       test_incrementalBuild,
       test_incrementalFlow
