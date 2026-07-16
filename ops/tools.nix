@@ -782,6 +782,28 @@ in {
     done
     '';
 
+    outputs.apps.parallel = util.zapp "parallel" ''
+    num_modules=''${1-1000}
+    project=$(mktemp -d --tmpdir parallel.XXXXXXXX)
+
+    ${fixedServerPkg}/bin/gen-project flat $project $num_modules
+    rm $project/unit1/M0.hs
+
+    ${cleanup}
+
+    echo "Starting ghc-server..."
+    ${fixedServerPkg}/bin/ghc-server --verbose $project -j 80 &
+    server_pid=$!
+
+    echo "Building..."
+    time ${fixedServerPkg}/bin/ghc-client $project --wait
+
+    echo "Stopping server..."
+    kill $server_pid
+    wait $server_pid || true
+    server_pid=
+    '';
+
   };
 
 }
