@@ -482,6 +482,86 @@ in {
     done
     '';
 
+    outputs.apps.profile-incremental = util.zapp "profile-incremental" ''
+    num_modules=''${1-1000}
+    project=$(mktemp -d --tmpdir profile-incremental.XXXXXXXX)
+
+    export resource_test_ext_deps=${fixedExtDeps}
+    ${fixedServerPkg}/bin/gen-project --flat $project $num_modules
+
+    ${cleanup}
+
+    echo "Starting ghc-server for initial full build..."
+    ${fixedServerPkg}/bin/ghc-server --verbose $project &
+    server_pid=$!
+
+    echo "Building all units..."
+    ${fixedServerPkg}/bin/ghc-client $project --wait
+
+    echo "Stopping server..."
+    kill $server_pid
+    wait $server_pid || true
+    server_pid=
+
+    echo "Modifying M0 to trigger incremental metadata..."
+    echo "-- modified" >> $project/unit1/M0.hs
+
+    echo "Deleting output and cache for unit1..."
+    rm -rf $project/output/unit1
+    rm -rf $project/cache/unit1
+    rm -rf $project/socket
+
+    rts_opts="''${2--p}"
+    echo "Starting profiled ghc-server with RTS opts: $rts_opts"
+    cd $project
+    ${profiledFixedPkg}/bin/ghc-server --verbose $project +RTS $rts_opts &
+    server_pid=$!
+    cd -
+
+    echo "Running metadata for unit1..."
+    ${fixedServerPkg}/bin/ghc-client $project --wait unit1:metadata
+
+    echo "Stopping profiled server..."
+    kill -INT $server_pid
+    wait $server_pid || true
+    server_pid=
+
+    for f in $project/ghc-server.prof $project/ghc-server.eventlog; do
+      if [[ -f $f ]]; then
+        base=$(basename $f)
+        cp $f $base
+        echo "Copied: $base"
+        if [[ $f == *.prof ]]; then
+          ${profiteur}/bin/profiteur $f
+          cp ''${f%.prof}.prof.html $base.html
+          echo "Rendered: $base.html"
+        fi
+      fi
+    done
+    '';
+
+    outputs.apps.parallel = util.zapp "parallel" ''
+    num_modules=''${1-1000}
+    project=$(mktemp -d --tmpdir parallel.XXXXXXXX)
+
+    ${fixedServerPkg}/bin/gen-project flat $project $num_modules
+    rm $project/unit1/M0.hs
+
+    ${cleanup}
+
+    echo "Starting ghc-server..."
+    ${fixedServerPkg}/bin/ghc-server --verbose $project -j 80 &
+    server_pid=$!
+
+    echo "Building..."
+    time ${fixedServerPkg}/bin/ghc-client $project --wait
+
+    echo "Stopping server..."
+    kill $server_pid
+    wait $server_pid || true
+    server_pid=
+    '';
+
   };
 
 }
