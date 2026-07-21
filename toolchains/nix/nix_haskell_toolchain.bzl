@@ -208,7 +208,7 @@ def _get_nix_config(ctx: AnalysisContext) -> Artifact:
     nix_config_json = ctx.actions.declare_output("nix_conf.json")
     flake = ctx.attrs.flake
     ctx.actions.run(
-        cmd_args("bash", "-ec", '''nix eval --json --apply 'f: f.nixConfig or {}' --file "$1/flake.nix" > "$2" ''', "--", flake, nix_config_json.as_output()),
+        cmd_args("bash",  "-ec", '''nix --extra-experimental-features 'flakes nix-command' eval --json --apply 'f: f.nixConfig or {}' --file "$1/flake.nix" > "$2" ''', "--", flake, nix_config_json.as_output()),
         category = "nix_config",
         local_only = True,
     )

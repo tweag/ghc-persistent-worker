@@ -51,6 +51,8 @@ def _nix_build_impl(ctx: AnalysisContext):
         "env",
         "--",  # this is needed to avoid "Spawning executable `nix` failed: Failed to spawn a process"
         "nix",
+        # Ensure that flakes and nix-command are available.
+        "--extra-experimental-features", "flakes nix-command",
         "build",
         "--print-build-logs",
         "--show-trace",

@@ -24,6 +24,8 @@ def main():
     out = subprocess.check_output(
         [
             "nix",
+            # Ensure that flakes and nix-command are available.
+            "--extra-experimental-features", "flakes nix-command",
             "eval",
             "--json",
             # this only really matters for IFD but let's do it anyway
@@ -41,7 +43,14 @@ def main():
     drvs = json.loads(out).values()
 
     subprocess.run(
-        ["nix", "derivation", "show", "--stdin"],
+        [
+            "nix",
+            # Ensure that flakes and nix-command are available.
+            "--extra-experimental-features", "flakes nix-command",
+            "derivation",
+            "show",
+            "--stdin"
+        ],
         input="\n".join(sorted(drvs)),
         text=True,
         stdout=args.output,
