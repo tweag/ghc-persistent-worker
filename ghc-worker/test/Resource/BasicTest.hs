@@ -4,21 +4,16 @@
 -- values.
 module Resource.BasicTest where
 
-import Control.Monad (unless)
 import Control.Monad.IO.Class (liftIO)
-import Data.Functor ((<&>))
-import Data.List (intercalate)
 import qualified Data.Set as Set
-import Hedgehog.Internal.Property (TestT, failWith)
 import Resource.LazyByteCodeTest (test_memory_lazyByteCode)
 import Resource.Measure (assertMeasurements, checkEnvironment)
-import System.Environment (lookupEnv)
 import System.IO (hPutStrLn, stderr)
 import Test.Data.Project (BuildModule (..), GenUnit (..), ModuleKey (..))
 import Test.Env (newSessionEnv, withTestEnv)
 import Test.Resource.Build (runResourceBuild)
 import Test.Resource.Project (mkUnit)
-import Test.Resource.Stats (PhaseReference (..), PhaseResult (..), phaseSummary, rtsStatsAvailable)
+import Test.Resource.Stats (PhaseReference (..))
 import Test.Run (unitTest)
 import Test.Tasty (DependencyType (..), TestTree, dependentTestGroup)
 
