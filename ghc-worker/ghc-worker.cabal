@@ -107,6 +107,7 @@ test-suite ghc-worker-test
     BuildPlanTest.Test1,
     BuildPlanTest.Test2,
     BytecodeCacheTest,
+    ConcurrentInterpretedTest,
     FlagParserTest,
     Incremental.BuildTest,
     Incremental.Flow,
@@ -121,6 +122,7 @@ test-suite ghc-worker-test
   ghc-options: -threaded -rtsopts "-with-rtsopts=-N -T"
   build-depends:
     aeson,
+    async,
     buck-worker-internal,
     buck-worker-types,
     bytestring,

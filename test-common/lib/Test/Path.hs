@@ -41,6 +41,11 @@ indexedValueName :: ModuleKey -> Int -> String
 indexedValueName key i =
   moduleValueName key ++ "_" ++ show i
 
+-- | Name of the @IO ()@ test entry point generated for a leaf/test module, e.g. @"test_1_0"@.
+testFunctionName :: ModuleKey -> String
+testFunctionName ModuleKey {unit, number} =
+  "test_" ++ showUnit unit ++ "_" ++ show number
+
 moduleOutputBase :: ModuleKey -> OsPath
 moduleOutputBase key =
   unitOutputDir key.unit </> toOsPath (moduleName key)

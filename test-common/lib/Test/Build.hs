@@ -36,12 +36,13 @@ import Test.Data.Project (
   )
 import Test.Data.Scheduler (Dispatch (..), RequestFailure (..), RequestResult (..), Schedule (..), SchedulerState (..))
 import Test.Data.TestLog (DiagnosticEntry (..), TestLog (..))
+import Test.Interp (runInterpretedTest)
 import Test.Log (withTestLog)
 import Test.Path (compileTmpDir, extDepName, moduleName, moduleSourcePath, unitDir, unitName, unitOutputDir, unitTmpDir)
 import Test.Scheduler (initScheduler, runScheduler)
 import qualified Types.Args as Args
 import Types.Args (Args (..))
-import Types.BuckArgs (IsInterpreted (Compiled))
+import Types.BuckArgs (IsInterpreted (Compiled, Interpreted))
 import Types.BuildPlan.Incremental (BuckHashesPath (..), BuildPlanPath (..))
 import Types.Env (Env (..))
 import Types.Target (ModuleTarget (..), TargetSpec (..))
@@ -69,7 +70,7 @@ runBuildTask ::
   (Env -> IO Bool) ->
   IO RequestResult
 runBuildTask env label tempName expectedCodes action =
-  withTestLog True label \ (log, logVar) -> do
+  withTestLog False label \ (log, logVar) -> do
     let taskEnv = env.env {log, args = env.env.args {Args.tempDir = Just tempDir}}
     OsDir.createDirectoryIfMissing True tempDir
     success <- action taskEnv
@@ -106,6 +107,28 @@ runCompile env mkArgs key = do
     result <- withGhcMakeModule Compiled target compileEnv \ _targetSpec -> do
       modifyGlobalFlags \ d -> d {ghcMode = CompManager}
       compileModuleWithDepsInHpt compileEnv.log (TargetModule target)
+    pure (isJust result)
+  where
+    (args, codes) = mkArgs key
+
+-- | Execute a compile task using the interpreted (bytecode-only) target and then, on successful compilation, run the
+-- module's @IO ()@ test entry point via 'Test.Interp.runInterpretedTest'.
+--
+-- This mirrors how Buck's test execution mode marks a target 'Interpreted' (see 'Types.BuckArgs.IsInterpreted') so
+-- that the worker compiles to bytecode only, and models a test runner subsequently invoking the compiled function.
+runCompileTest :: SessionEnv -> (ModuleKey -> (Args, Set Natural)) -> String -> ModuleKey -> IO RequestResult
+runCompileTest env mkArgs functionName key = do
+  runBuildTask env "compile-test" (compileTmpDir key) codes \ taskEnv -> do
+    let compileEnv = taskEnv {args}
+        target = compileTarget key
+    result <- withGhcMakeModule Interpreted target compileEnv \ _targetSpec -> do
+      modifyGlobalFlags \ d -> d {ghcMode = CompManager}
+      iface <- compileModuleWithDepsInHpt compileEnv.log (TargetModuleInterp target)
+      case iface of
+        Nothing -> pure Nothing
+        Just _ -> do
+          ok <- runInterpretedTest target.mod functionName
+          pure (if ok then iface else Nothing)
     pure (isJust result)
   where
     (args, codes) = mkArgs key

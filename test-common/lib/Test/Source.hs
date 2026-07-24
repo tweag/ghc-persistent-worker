@@ -20,6 +20,7 @@ import Test.Path (
   moduleName,
   moduleSourcePath,
   moduleValueName,
+  testFunctionName,
   unitDir,
   )
 
@@ -88,3 +89,24 @@ writeProjectSources srcDir modules =
   for_ (Map.toList modules) \ (key, ms) -> do
     createDirectoryIfMissing True (srcDir </> unitDir key.unit)
     OsPath.writeFile (srcDir </> moduleSourcePath key) (moduleSource ms.bindings ms.th ms.extDeps SourceNormal key ms.deps)
+
+-- | Like 'moduleSource', but appends a top-level @IO ()@ binding named via 'testFunctionName' that prints the
+-- module's primary value binding. Used for leaf/test modules whose entry point is invoked directly (e.g. via
+-- 'Test.Interp.runInterpretedTest') rather than only imported by other modules.
+testModuleSource :: Int -> Bool -> Set Int -> ModuleKey -> [ModuleKey] -> ByteString
+testModuleSource numBindings useTh extDeps key deps =
+  moduleSource numBindings useTh extDeps SourceNormal key deps <> encodeUtf8 (Text.pack extra)
+  where
+    extra =
+      unlines [
+        "",
+        testFunctionName key ++ " :: IO ()",
+        testFunctionName key ++ " = print " ++ moduleValueName key
+        ]
+
+-- | Write source files for all test/leaf modules, using 'testModuleSource' instead of 'moduleSource'.
+writeTestModuleSources :: OsPath -> Map ModuleKey ModuleSource -> IO ()
+writeTestModuleSources srcDir modules =
+  for_ (Map.toList modules) \ (key, ms) -> do
+    createDirectoryIfMissing True (srcDir </> unitDir key.unit)
+    OsPath.writeFile (srcDir </> moduleSourcePath key) (testModuleSource ms.bindings ms.th ms.extDeps key ms.deps)
