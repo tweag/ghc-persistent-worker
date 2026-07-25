@@ -62,6 +62,7 @@ library
     GhcServer.Data.Unit
     GhcServer.Data.UnitConfig
     GhcServer.Cache
+    GhcServer.CompareEviction
     GhcServer.CompareFeatures
     GhcServer.GenProject
     GhcServer.GenProject.Run
@@ -124,6 +125,14 @@ executable compare-features
   main-is: Main.hs
   hs-source-dirs: app/compare-features
   ghc-options: -O2 -threaded "-with-rtsopts=-N"
+  build-depends:
+    ghc-server
+
+executable compare-eviction
+  import: all
+  main-is: Main.hs
+  hs-source-dirs: app/compare-eviction
+  ghc-options: -O2 -threaded "-with-rtsopts=-N -T"
   build-depends:
     ghc-server
 
