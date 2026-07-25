@@ -54,7 +54,6 @@ library
     Test.Gen.Project
     Test.Gen.ProjectBuild
     Test.Gen.Resume
-    Test.Interp
     Test.Log
     Test.PackageDb
     Test.Path

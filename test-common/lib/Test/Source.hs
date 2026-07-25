@@ -90,9 +90,11 @@ writeProjectSources srcDir modules =
     createDirectoryIfMissing True (srcDir </> unitDir key.unit)
     OsPath.writeFile (srcDir </> moduleSourcePath key) (moduleSource ms.bindings ms.th ms.extDeps SourceNormal key ms.deps)
 
--- | Like 'moduleSource', but appends a top-level @IO ()@ binding named via 'testFunctionName' that prints the
--- module's primary value binding. Used for leaf/test modules whose entry point is invoked directly (e.g. via
--- 'Test.Interp.runInterpretedTest') rather than only imported by other modules.
+-- | Like 'moduleSource', but appends a top-level @(Int, Int)@ binding named via 'testFunctionName', of the shape
+-- @(total, failed)@ expected by 'Internal.Evaluate.evaluate'. Forcing the binding also forces the module's primary
+-- value binding via 'seq', so evaluating it exercises the same code path the original @print@-based entry point did.
+-- Used for leaf/test modules whose entry point is invoked directly via the worker's eval mode rather than only
+-- imported by other modules.
 testModuleSource :: Int -> Bool -> Set Int -> ModuleKey -> [ModuleKey] -> ByteString
 testModuleSource numBindings useTh extDeps key deps =
   moduleSource numBindings useTh extDeps SourceNormal key deps <> encodeUtf8 (Text.pack extra)
@@ -100,8 +102,8 @@ testModuleSource numBindings useTh extDeps key deps =
     extra =
       unlines [
         "",
-        testFunctionName key ++ " :: IO ()",
-        testFunctionName key ++ " = print " ++ moduleValueName key
+        testFunctionName key ++ " :: (Int, Int)",
+        testFunctionName key ++ " = " ++ moduleValueName key ++ " `seq` (1, 0)"
         ]
 
 -- | Write source files for all test/leaf modules, using 'testModuleSource' instead of 'moduleSource'.

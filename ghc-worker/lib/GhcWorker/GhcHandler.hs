@@ -53,6 +53,7 @@ import Types.Target (TargetSpec (..))
 import Internal.Log (dbg)
 import System.IO (stdout)
 import System.IO.Silently (hCapture)
+import System.OsPath.Extra (fromOsPath)
 
 #if __DEBUG__
 
@@ -142,7 +143,7 @@ dispatch hooks env args =
         hCapture [stdout] $
           withGhcMakeModule Interpreted modTarget env
             (\_ -> do
-              isSuccessful <- Internal.Evaluate.evaluate env args.homeUnit modTarget imports stmt
+              isSuccessful <- Internal.Evaluate.evaluate env (fromOsPath <$> args.homeUnit) modTarget imports stmt
               pure (Just isSuccessful)
             )
       env.log.infoD (text res_stdout)

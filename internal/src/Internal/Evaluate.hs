@@ -1,100 +1,75 @@
-module Internal.Evaluate
-  ( evaluate,
-  ) where
+{-# OPTIONS_GHC -Wno-unused-local-binds #-}
+{-# OPTIONS_GHC -Wno-unused-matches #-}
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
+{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
+module Internal.Evaluate where
 
-import Control.Concurrent (modifyMVar, withMVar)
+import Control.Concurrent (withMVar)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_)
 import Data.Maybe (mapMaybe)
 import GHC (
   Ghc,
-  getModuleGraph,
   getSession,
   getSessionDynFlags,
-  isLoaded,
-  mgModSummaries,
   runTcInteractive,
   setInteractiveDynFlags,
   setSession,
   )
 import GHC.Data.Bag (emptyBag)
-import GHC.Driver.DynFlags (DynFlags(packageFlags), GeneralFlag (Opt_UseBytecodeRatherThanObjects), gopt_set)
-import GHC.Driver.Env (hsc_HPT, hsc_home_unit, hscInterp, runInteractiveHsc, hscSetActiveUnitId)
-import GHC.Driver.Env.Types (HscEnv (hsc_IC), hsc_mod_graph, hsc_targets)
+import GHC.Driver.Env (hsc_home_unit, hscInterp, runInteractiveHsc, hscSetActiveUnitId)
+import GHC.Driver.Env.Types (HscEnv (hsc_IC), hsc_mod_graph)
 import GHC.Driver.Errors.Types (hoistTcRnMessage)
 import GHC.Driver.Main (hscParseStmtWithLocation, ioMsgMaybe)
-import GHC.Driver.Monad (modifySession)
 import GHC.Iface.Load (loadSrcInterface)
-import GHC.Rename.Names (importsFromIface)
 import GHC.Runtime.Context (
   InteractiveContext (..),
   InteractiveImport (..),
-  replaceImportEnv,
   )
 import GHC.Runtime.Eval (
-  execLineNumber,
   execOptions,
-  execSourceFile,
   setContext,
   )
 import GHC.Runtime.Eval.Types (
-  ExecResult (..),
   IcGlobalRdrEnv (..),
   )
 import GHC.Tc.Utils.Env (lookupGlobal)
 import GHC.Types.Avail (AvailInfo (..))
-import GHC.Types.Name (nameOccName, pprName)
+import GHC.Types.Name (nameOccName)
 import GHC.Types.Name.Reader (
   GlobalRdrEltX (..),
   GlobalRdrEnvX,
   GREInfo,
   IfGlobalRdrEnv,
-  ImpDeclSpec (..),
   Parent (NoParent),
   hydrateGlobalRdrEnv,
   plusGlobalRdrEnv,
   )
 import GHC.Types.Name.Occurrence (OccName, mkOccEnv)
 import GHC.Types.PkgQual (PkgQual (NoPkgQual, ThisPkg))
-import GHC.Types.Target (Target (..), TargetId (..))
 import GHC.Types.TyThing (tyThingGREInfo)
 import GHC.Unit (moduleUnitId)
 import GHC.Unit.Finder qualified as Finder
 import GHC.Unit.Finder.Types (FindResult (..))
 import GHC.Unit.Home (homeUnitId)
-import GHC.Unit.Home.Graph (
-  HomeUnitEnv (..),
-  allUnits,
-  lookupHug,
-  lookupHugUnit,
-  pprHomeUnitGraph,
-  pprHomeUnitEnv,
-  unitEnv_adjust,
-  )
-import GHC.Unit.Home.PackageTable (hptCollectModules, pprHPT)
-import GHC.Unit.Module.Graph (ModuleGraph (..))
 import GHC.Unit.Module.ModIface (mi_exports)
 import GHC.Unit.Types (
-  Definite (..),
-  GenUnit (..),
   IsBootInterface (..),
   moduleName,
-  moduleUnit,
   )
-import GHC.Utils.Outputable (empty, ppr, text, (<+>))
+import GHC.Utils.Outputable (ppr, text, (<+>))
 import Internal.Cache.Hpt (loadHomeUnit)
 import Internal.Log (logDebugD, logTimed)
 import Language.Haskell.Syntax.Module.Name (ModuleName (..), mkModuleName)
+import System.OsPath.Extra (toOsPath)
+import Types.Args (Args (..))
 import Types.Env (Env (..))
-import Types.Log (Logger (..))
 import Types.State (WorkerState (..))
 import Types.State.Make (MakeState (..))
 import Types.Target (ModuleTarget (..))
 
-import System.IO (hPutStrLn, stderr)
 
 import GHC.Driver.Config (initEvalOpts)
-import GHC.Driver.Flags (WarningFlag (..))
 import GHC.Driver.Env (hsc_interp, mkInteractiveHscEnv)
 import GHC.Driver.Main (hscParsedStmt)
 import GHC.Driver.Monad (GhcMonad)
@@ -117,8 +92,10 @@ evaluate env mHomeUnit target@(ModuleTarget modu) imports expr = do
       Nothing -> logDebugD env.log (text "Nothing") >> pure False
       Just homeUnit -> do
         logDebugD env.log (text (show homeUnit))
-        hsc_env1 <- liftIO $ loadHomeUnit env.log env.state dflags0 (moduleUnitId target.mod) hsc_env0 homeUnit
-        hsc_env2 <- liftIO $ withMVar env.state \ state -> pure hsc_env1 {hsc_mod_graph = state.make.moduleGraph}
+        hsc_env2 <- liftIO $ withMVar env.state \ state -> do
+          (_, hsc_env1) <-
+            loadHomeUnit env.log dflags0 env.args.features (moduleUnitId target.mod) (state, hsc_env0) (toOsPath homeUnit)
+          pure hsc_env1 {hsc_mod_graph = state.make.moduleGraph}
         let hsc_env = hscSetActiveUnitId (moduleUnitId target.mod) (hsc_env2)
         GHC.setSession hsc_env
         dflags <- GHC.getSessionDynFlags

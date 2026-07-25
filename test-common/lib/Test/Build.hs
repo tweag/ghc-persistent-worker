@@ -13,6 +13,7 @@ import GHC.Types.Error (diagnosticCodeNumber)
 import GHC.Unit (stringToUnit)
 import Internal.Compile.Make (compileModuleWithDepsInHpt)
 import Internal.DynFlags (modifyGlobalFlags)
+import qualified Internal.Evaluate as Evaluate
 import Internal.Metadata (computeMetadata)
 import Internal.Session (withGhcMakeModule)
 import Numeric.Natural (Natural)
@@ -36,7 +37,6 @@ import Test.Data.Project (
   )
 import Test.Data.Scheduler (Dispatch (..), RequestFailure (..), RequestResult (..), Schedule (..), SchedulerState (..))
 import Test.Data.TestLog (DiagnosticEntry (..), TestLog (..))
-import Test.Interp (runInterpretedTest)
 import Test.Log (withTestLog)
 import Test.Path (compileTmpDir, extDepName, moduleName, moduleSourcePath, unitDir, unitName, unitOutputDir, unitTmpDir)
 import Test.Scheduler (initScheduler, runScheduler)
@@ -111,14 +111,18 @@ runCompile env mkArgs key = do
   where
     (args, codes) = mkArgs key
 
--- | Execute a compile task using the interpreted (bytecode-only) target and then, on successful compilation, run the
--- module's @IO ()@ test entry point via 'Test.Interp.runInterpretedTest'.
+-- | Execute a compile task using the interpreted (bytecode-only) target and then, on successful compilation, evaluate
+-- an expression against the module via the worker's eval mode ('Internal.Evaluate.evaluate').
 --
 -- This mirrors how Buck's test execution mode marks a target 'Interpreted' (see 'Types.BuckArgs.IsInterpreted') so
--- that the worker compiles to bytecode only, and models a test runner subsequently invoking the compiled function.
-runCompileTest :: SessionEnv -> (ModuleKey -> (Args, Set Natural)) -> String -> ModuleKey -> IO RequestResult
-runCompileTest env mkArgs functionName key = do
-  runBuildTask env "compile-test" (compileTmpDir key) codes \ taskEnv -> do
+-- that the worker compiles to bytecode only, then drives the compiled module through the same production eval
+-- machinery a @buck test@ invocation would use, rather than an ad-hoc call into GHC's interactive API.
+--
+-- @expr@ must evaluate to a @(total, failed) :: (Int, Int)@ pair (the convention used by 'Internal.Evaluate.evaluate'
+-- to report success); see 'Test.Source.testModuleSource' for the generated binding.
+runEvaluate :: SessionEnv -> (ModuleKey -> (Args, Set Natural)) -> String -> ModuleKey -> IO RequestResult
+runEvaluate env mkArgs expr key = do
+  runBuildTask env "evaluate" (compileTmpDir key) codes \ taskEnv -> do
     let compileEnv = taskEnv {args}
         target = compileTarget key
     result <- withGhcMakeModule Interpreted target compileEnv \ _targetSpec -> do
@@ -127,7 +131,9 @@ runCompileTest env mkArgs functionName key = do
       case iface of
         Nothing -> pure Nothing
         Just _ -> do
-          ok <- runInterpretedTest target.mod functionName
+          -- The home unit is always already loaded in this session (just compiled above), so 'evaluate' takes the
+          -- short-circuiting path in 'Internal.Cache.Hpt.loadHomeUnit' and never reads this dummy path.
+          ok <- Evaluate.evaluate compileEnv (Just "") target [] expr
           pure (if ok then iface else Nothing)
     pure (isJust result)
   where

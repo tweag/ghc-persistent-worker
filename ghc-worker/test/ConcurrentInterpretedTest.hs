@@ -1,7 +1,8 @@
 -- | Description: Harness for reproducing a "missing closure" error observed in production when Buck executes
 -- multiple tests concurrently against the worker, where test targets are compiled with @IsInterpreted = Interpreted@
--- (bytecode-only) and their @IO ()@ entry point is invoked directly via GHC's interactive evaluation machinery
--- ('Test.Interp.runInterpretedTest'), analogous to how Buck's test runner would invoke a compiled test function.
+-- (bytecode-only) and their test entry point is invoked via the worker's production eval mode
+-- ('Internal.Evaluate.evaluate', driven here through 'Test.Build.runEvaluate'), analogous to how Buck's test runner
+-- would invoke a compiled test target.
 --
 -- The project structure is a configurable two-tier dependency graph:
 --
@@ -26,7 +27,7 @@ import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Hedgehog (annotateShow, assert)
-import Test.Build (metadataArgs, runCompile, runCompileTest, runMetadata)
+import Test.Build (metadataArgs, runCompile, runEvaluate, runMetadata)
 import Test.Data.Env (SessionEnv (..), TestEnv (..))
 import Test.Data.Project (BuildModule (..), GenUnit (..), ModuleKey (..), ModuleSource (..), UnitKey)
 import Test.Data.Scheduler (RequestResult (..))
@@ -153,7 +154,7 @@ buildLeaves sessionEnv units = do
   where
     runLeafModule :: ModuleKey -> IO RequestResult
     runLeafModule key =
-      runCompileTest sessionEnv plainArgs (testFunctionName key) key
+      runEvaluate sessionEnv plainArgs (testFunctionName key) key
 
     plainArgs _ = (sessionEnv.shared.baseArgs, mempty)
 
