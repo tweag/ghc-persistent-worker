@@ -71,8 +71,8 @@ persistent_worker(
     worker_proxy = ":buck_proxy",
     # worker = ":impure_ghc_worker",
     # worker_proxy = ":impure_buck_proxy",
-    # worker_args = ["--instrument"],
-    proxy_args = [],
+    worker_args = ["--instrument", "--lazy-bytecode-limit", "5"],
+    # proxy_args = [],
 )
 
 ghc_proxy(
