@@ -66,6 +66,7 @@ library
     GhcServer.CompareFeatures
     GhcServer.GenProject
     GhcServer.GenProject.Run
+    GhcServer.Grpc
     GhcServer.Handler
     GhcServer.Log
     GhcServer.Path
@@ -88,6 +89,7 @@ library
     file-io,
     filepath,
     ghc,
+    ghc-worker,
     ghc-worker-test-common,
     grapesy ^>=1.0.1,
     optparse-applicative,

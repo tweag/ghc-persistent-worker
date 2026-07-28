@@ -8,7 +8,7 @@ import Control.Monad (filterM, forever, void, when)
 import Data.Binary (decode)
 import Data.ByteString (fromStrict)
 import Data.List (isInfixOf)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Text qualified as Text
 import Data.Time (getCurrentTime)
 import Graphics.Vty (Vty (shutdown))
@@ -65,6 +65,7 @@ main :: IO ()
 main = do
   workers <- envWorkerPath
   workerPathExists <- doesPathExist workers.path
+  instrSocket <- lookupEnv "INSTRUMENT_SOCKET"
   eventChan <- newBChan 10
 
   -- Update time every 100ms
@@ -73,22 +74,28 @@ main = do
     writeBChan eventChan (UI.SetTime time)
     threadDelay 100_000
 
-  -- Find already running workers
-  when workerPathExists do
-    primaryDirs <- do
-      dirs <- listDirectory workers.path
-      filterM (\dir -> doesPathExist (workers.path ++ dir ++ "/instrument")) dirs
-    mapM_ (listen eventChan . (++ "/instrument") . (workers.path ++)) primaryDirs
+  case instrSocket of
+    -- Connect directly to a single known socket (e.g. ghc-server's flat `<project>/socket/instrument` layout),
+    -- bypassing the `WORKER_PATH` directory-watching discovery mechanism below.
+    Just sock -> void $ forkIO $ listen eventChan sock
+    Nothing -> do
+      -- Find already running workers
+      when workerPathExists do
+        primaryDirs <- do
+          dirs <- listDirectory workers.path
+          filterM (\dir -> doesPathExist (workers.path ++ dir ++ "/instrument")) dirs
+        mapM_ (listen eventChan . (++ "/instrument") . (workers.path ++)) primaryDirs
 
-  void $ try @IOException do
-    createDirectoryIfMissing True workers.path
+      void $ try @IOException do
+        createDirectoryIfMissing True workers.path
 
   -- Detect new workers
   withManager $ \mgr -> do
-    void $ watchDir mgr workers.path (const True) $ \case
-      Added dir _ IsDirectory | not ("/log" `isInfixOf` dir) -> do
-        listen eventChan $ dir </> "instrument"
-      _ -> pure ()
+    when (isNothing instrSocket) do
+      void $ watchDir mgr workers.path (const True) $ \case
+        Added dir _ IsDirectory | not ("/log" `isInfixOf` dir) -> do
+          listen eventChan $ dir </> "instrument"
+        _ -> pure ()
 
     (_, vty) <- UI.customMainWithDefaultVty (Just eventChan) UI.app UI.initialState
     vty.shutdown

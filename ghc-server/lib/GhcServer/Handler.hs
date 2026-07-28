@@ -2,9 +2,10 @@
 module GhcServer.Handler where
 
 import Common.Grpc (GrpcHandler (..), fromGrpcHandler)
+import Control.Concurrent.MVar (MVar)
 import qualified Data.Map.Strict as Map
 import GHC (moduleNameString)
-import GhcServer.Build (BuildResult (..), awaitBuild, newBuild, newBuildState, scheduleBatch)
+import GhcServer.Build (Build, BuildResult (..), awaitBuild, newBuild, newBuildState, scheduleBatch)
 import GhcServer.Cabal (discoverCabalProject)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (newBuildEvents)
@@ -22,6 +23,7 @@ import Proto.Worker (Worker)
 import System.OsPath ((</>))
 import Types.Args (Args (..), emptyArgs)
 import Types.Grpc (RequestArgs (..))
+import Types.State (WorkerState)
 
 -- | Parsed schedule command with optional flags.
 data ScheduleCommand =
@@ -115,12 +117,24 @@ formatResult result
     ++
     ["  compile " ++ u.string ++ ":" ++ moduleNameString modName ++ ": " ++ msg | (u, modName, msg) <- result.compileErrors]
 
--- | Create the gRPC handler for the server.
+-- | Everything created at server boot that is needed to serve both the Worker protocol and (optionally) the
+-- Instrument protocol: the persistent 'WorkerState', the scheduler, and the discovered project (needed to parse
+-- target specs the same way 'ghc-client' does).
+data ServerContext =
+  ServerContext {
+    grpcHandler :: GrpcHandler,
+    stateVar :: MVar WorkerState,
+    build :: Build,
+    project :: Project
+  }
+
+-- | Create the server context: discovers the project, creates the persistent 'WorkerState' and scheduler, and
+-- builds the gRPC handler for the Worker protocol.
 --
 -- Starts the scheduler at boot. Each gRPC request submits a batch and awaits completion.
 -- The scheduler persists across requests, accumulating 'WorkerState' and skipping previously completed tasks.
-serverHandler :: ServerConfig -> IO GrpcHandler
-serverHandler config = do
+serverContext :: ServerConfig -> IO ServerContext
+serverContext config = do
   let
     outputDir = config.projectRoot </> outputDirName
     tmpDir = config.projectRoot </> tmpDirName
@@ -141,22 +155,28 @@ serverHandler config = do
       log,
       events
     }
-  cb <- newBuild config.maxJobs 300 env
-  pure $ GrpcHandler \ _commandEnv (RequestArgs argv) ->
-    case parseScheduleArgs project argv of
-      Left err ->
-        pure ([err], 1)
-      Right cmd -> do
-        scheduleBatch cb cmd.request
-        if cmd.scheduleWait
-        then do
-          result <- awaitBuild cb
-          let
-            report = formatResult result
-            exitCode = if result.success then 0 else 1
-          pure (report, exitCode)
-        else
-          pure (["Scheduled."], 0)
+  build <- newBuild config.maxJobs 300 env
+  let
+    grpcHandler = GrpcHandler \ _commandEnv (RequestArgs argv) ->
+      case parseScheduleArgs project argv of
+        Left err ->
+          pure ([err], 1)
+        Right cmd -> do
+          scheduleBatch build cmd.request
+          if cmd.scheduleWait
+          then do
+            result <- awaitBuild build
+            let
+              report = formatResult result
+              exitCode = if result.success then 0 else 1
+            pure (report, exitCode)
+          else
+            pure (["Scheduled."], 0)
+  pure ServerContext {grpcHandler, stateVar, build, project}
+
+-- | Create the gRPC handler for the server.
+serverHandler :: ServerConfig -> IO GrpcHandler
+serverHandler config = (.grpcHandler) <$> serverContext config
 
 -- | Create the gRPC 'Methods' for the server.
 serverMethods :: ServerConfig -> IO (Methods IO (ProtobufMethodsOf Worker))

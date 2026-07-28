@@ -4,11 +4,15 @@ module GhcServer.Run where
 
 import Common.Grpc (fromGrpcHandler, runGrpcServer)
 import Control.Applicative (many, optional, (<|>))
+import Control.Concurrent.Async (async)
+import Control.Concurrent.Chan (newChan)
+import Control.Monad (void)
 import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Except (runExceptT)
+import Control.Monad.Trans.Except (ExceptT, runExceptT)
 import GhcServer.Data.Config (ServerConfig (..))
-import GhcServer.Handler (serverHandler)
-import GhcServer.Path (socketDirName, socketPath)
+import GhcServer.Grpc (instrumentMethods)
+import GhcServer.Handler (ServerContext (..), serverContext)
+import GhcServer.Path (instrumentSocketPath, socketDirName, socketPath)
 import Options.Applicative (
   Parser,
   ParserInfo,
@@ -101,7 +105,8 @@ serverParserInfo =
   info (serverConfigParser <**> helper)
     (fullDesc <> progDesc "Standalone GHC build server" <> header "ghc-server - worker without Buck")
 
--- | Run the server: parse CLI args, start the gRPC server on a Unix socket.
+-- | Run the server: parse CLI args, start the gRPC server on a Unix socket. If the @instrument@ feature is
+-- enabled, also starts the Instrument gRPC service on a second socket, mirroring 'ghc-worker'\'s behavior.
 runServer :: IO ()
 runServer = do
   hSetBuffering stdout LineBuffering
@@ -111,11 +116,20 @@ runServer = do
     Left err -> die err
     Right () -> pure ()
   where
+    server :: ServerConfig -> ExceptT String IO ()
     server config = do
       let socket = socketPath config.projectRoot
       lift do
         createDirectoryIfMissing True (config.projectRoot </> socketDirName)
+        ServerContext {grpcHandler, stateVar, build, project} <- serverContext config
+        let methods = fromGrpcHandler grpcHandler
+        if config.features.instrument
+        then do
+          let instrSocket = instrumentSocketPath config.projectRoot
+          instrChan <- newChan
+          hPutStrLn stderr ("Starting instrument service on " ++ fromOsPath instrSocket)
+          void $ async $ runGrpcServer instrSocket (instrumentMethods instrChan stateVar build project)
+        else
+          pure ()
         hPutStrLn stderr ("Starting ghc-server on " ++ fromOsPath socket)
-        handler <- serverHandler config
-        let methods = fromGrpcHandler handler
         runGrpcServer socket methods

@@ -328,6 +328,7 @@
           "file-io"
           "filepath"
           "ghc"
+          "ghc-worker"
           "ghc-worker-test-common"
           "grapesy"
           "optparse-applicative"
