@@ -12,7 +12,7 @@ default_nix_toolchains()
 
 default_flake_attrs()
 
-env = read_root_config("ghc-worker", "env", "mwb-26-04")
+env = read_root_config("ghc-worker", "env", "mwb-26-04-fixed")
 
 ################################################################################
 
@@ -71,7 +71,7 @@ persistent_worker(
     worker_proxy = ":buck_proxy",
     # worker = ":impure_ghc_worker",
     # worker_proxy = ":impure_buck_proxy",
-    worker_args = ["--instrument", "--lazy-bytecode-limit", "5"],
+    worker_args = ["--enable", "instrument", "--max-bytecode", "5"],
     # proxy_args = [],
 )
 
