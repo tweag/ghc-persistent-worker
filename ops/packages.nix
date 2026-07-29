@@ -317,6 +317,7 @@
           "Cabal-syntax"
           "aeson"
           "async"
+          "binary"
           "buck-worker-grpc"
           "buck-worker-internal"
           "buck-worker-proto"

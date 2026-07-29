@@ -14,9 +14,9 @@ executable instrument
     UI.ActiveTasks
     UI.BytecodeBrowser
     UI.GhcDebug
-    UI.ModuleSelector
     UI.Session
     UI.SessionSelector
+    UI.TaskTree
     UI.Types
     UI.Utils
   ghc-options:

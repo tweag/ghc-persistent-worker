@@ -6,8 +6,7 @@ import Data.Text (Text)
 data Name
   = ActiveTasks
   | TaskDetails
-  | ModuleSelector
-  | ModuleDetails
+  | TaskTree
   | SessionSelector
   | OptionsEditor
   | OEExtraGhcOptions

@@ -1,4 +1,5 @@
--- | Popup browser for the worker's lazily-loaded bytecode cache (see 'Internal.Cache.Bytecode' in the worker).
+-- | Persistent side panel for the worker's lazily-loaded bytecode cache (see 'Internal.Cache.Bytecode' in the
+-- worker), embedded next to the task tree rather than shown as a modal popup.
 --
 -- The worker only tracks cache entries per home module (not per top-level binding), so "grouping" here means grouping
 -- module rows by their owning unit; there is no finer-grained binding-level data available to display. Data is
@@ -6,6 +7,7 @@
 module UI.BytecodeBrowser where
 
 import Brick.Types (EventM, Widget)
+import Brick.Widgets.Border (borderWithLabel)
 import Brick.Widgets.Core (Padding (Max), padRight, str, withAttr, (<+>))
 import Brick.Widgets.List (GenericList, list, listSelectedElement, renderList)
 import Control.Monad.State (gets, modify)
@@ -16,7 +18,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Lens.Micro.Platform (Lens', lens)
 import UI.Types (Name (BytecodeBrowser), disabledAttr)
-import UI.Utils (formatBytes, popup)
+import UI.Utils (formatBytes)
 
 -- | A single tracked bytecode cache entry, as reported by the worker's @GetBytecodeState@ RPC.
 data Entry = Entry
@@ -104,9 +106,10 @@ groupByUnit entries =
 rowsLens :: Lens' State (GenericList Name Seq.Seq Row)
 rowsLens = lens rows (\s r -> s {rows = r})
 
-draw :: State -> Widget Name
-draw State{rows, sortOrder} =
-  popup 60 ("Bytecode Cache (" ++ sortOrderLabel sortOrder ++ ")") $ renderList drawRow True rows
+draw :: Name -> State -> Widget Name
+draw current State{rows, sortOrder} =
+  borderWithLabel (str (" Bytecode Cache (" ++ sortOrderLabel sortOrder ++ ") ")) $
+    renderList drawRow (current == BytecodeBrowser) rows
  where
   drawRow isSel row =
     (if isSel then withAttr disabledAttr else id) $ drawRow' row

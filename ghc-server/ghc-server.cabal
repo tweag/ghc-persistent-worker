@@ -78,6 +78,7 @@ library
     async,
     buck-worker-grpc,
     buck-worker-internal,
+    binary,
     buck-worker-proto,
     buck-worker-types,
     bytestring,

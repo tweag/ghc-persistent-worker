@@ -24,13 +24,26 @@ mkOptions Options{..} =
     & Fields.extraGhcOptions
     .~ Text.pack extraGhcOptions
 
-triggerRebuild :: Connection -> TargetSpec -> IO ()
-triggerRebuild conn target =
+-- | Send a raw target-text 'RebuildRequest' to the server. Shared by 'triggerRebuild' (worker flow, target text is
+-- 'renderTargetSpec' output) and 'triggerBuild' (ghc-server flow, target text is @unitName:metadata@).
+triggerRebuildText :: Connection -> Text.Text -> IO ()
+triggerRebuildText conn targetText =
   void $ forkIO $ void $
     nonStreaming conn (rpc @(Protobuf Instrument "triggerRebuild")) $
       defMessage
         & Fields.target
-        .~ Text.pack (renderTargetSpec target)
+        .~ targetText
+
+triggerRebuild :: Connection -> TargetSpec -> IO ()
+triggerRebuild conn target =
+  triggerRebuildText conn (Text.pack (renderTargetSpec target))
+
+-- | Trigger a metadata build for the given @ghc-server@ unit, equivalent to running
+-- @ghc-client $project unitName:metadata@. Uses 'GhcServer.Handler.parseTarget'\'s target-text syntax, which
+-- 'GhcServer.Grpc.triggerRebuild' parses on the server side.
+triggerBuild :: Connection -> Text.Text -> IO ()
+triggerBuild conn unitName =
+  triggerRebuildText conn (unitName <> ":metadata")
 
 -- | Request a snapshot of the lazily-loaded bytecode cache state.
 getBytecodeState :: Connection -> IO (Proto Instr.BytecodeState)
