@@ -28,8 +28,8 @@ jobs:
         run: rm -rf /opt/hostedtoolcache
       - name: Nix build and test
         run: nix -L build
-      - name: Nix build and test with mwb-25-10
-        run: nix -L build .#mwb-25-10.ghc-worker
+      - name: Nix build and test without fixed nodes
+        run: nix -L build .#mwb-26-04.ghc-worker
       - name: Init Cabal
         run: nix -L develop -c cabal update
       - name: Build packages
