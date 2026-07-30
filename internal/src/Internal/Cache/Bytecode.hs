@@ -25,7 +25,7 @@ import GHC.Unit.Home.Graph (HomeUnitEnv (..), UnitEnvGraph (..), unitEnv_lookup_
 import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..))
 import GHC.Unit.Home.PackageTable (addHomeModInfoToHpt, lookupHpt)
 import GHC.Unit.Types (Module, moduleName, moduleUnitId)
-import Types.State.Make (BcoCacheEntry (..), MakeState (..))
+import Types.State.Make (BcoCacheEntry (..), BcoHistoryEntry (..), MakeState (..))
 
 -- | Approximate the memory footprint of a linkable's bytecode by the number of BCOs (unlinked bindings) it contains.
 -- This is a coarse proxy, not an attempt at measuring actual heap usage, but it is sufficient to compare the relative
@@ -40,12 +40,18 @@ linkableBcoCount lnk = sum [fromIntegral (sizeFlatBag (bc_bcos cbc)) | cbc <- li
 -- package dependencies since package-DB bytecode support was removed, see 'Internal.Compat.LinkDeps') are ignored.
 touchBcoCache :: [Linkable] -> MakeState -> MakeState
 touchBcoCache linkables make =
-  make {bcoCache = List.foldl' touch make.bcoCache withBcos, bcoAccessCounter = counter'}
+  make
+    { bcoCache = List.foldl' touch make.bcoCache withBcos
+    , bcoHistory = List.foldl' touchHistory make.bcoHistory withBcos
+    , bcoAccessCounter = counter'
+    }
   where
     counter' = make.bcoAccessCounter + 1
     withBcos = filter (not . null . linkableBCOs) linkables
     touch cache lnk =
       Map.insert (linkableModule lnk) BcoCacheEntry {linkable = lnk, lastAccess = counter', size = linkableBcoCount lnk} cache
+    touchHistory hist lnk =
+      Map.insert (linkableModule lnk) BcoHistoryEntry {lastAccess = counter', size = linkableBcoCount lnk} hist
 
 -- | If the tracked total size of 'MakeState.bcoCache' exceeds the given limit, unload the least-recently-used
 -- entries: reset their 'HomeModInfo' in the HPT to have no bytecode (so it can be lazily reconstructed again later),
@@ -62,9 +68,9 @@ evictBcoCache hsc_env limit make
   | totalSize <= limit = pure make
   | otherwise = unloadEvicted hsc_env evicted make
   where
-    totalSize = sum (size <$> Map.elems make.bcoCache)
+    totalSize = sum ((.size) <$> Map.elems make.bcoCache)
     -- Oldest (least recently used) first.
-    sorted = List.sortOn (lastAccess . snd) (Map.toList make.bcoCache)
+    sorted = List.sortOn ((.lastAccess) . snd) (Map.toList make.bcoCache)
     evictedList = fst (selectEvictions (totalSize - limit) sorted)
     evicted = Map.fromList evictedList
 

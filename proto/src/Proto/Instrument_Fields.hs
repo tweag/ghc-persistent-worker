@@ -55,6 +55,18 @@ moduleName ::
    Data.ProtoLens.Field.HasField s "moduleName" a) =>
   Lens.Family2.LensLike' f s a
 moduleName = Data.ProtoLens.Field.field @"moduleName"
+pendingEviction ::
+  forall f s a.
+  (Prelude.Functor f,
+   Data.ProtoLens.Field.HasField s "pendingEviction" a) =>
+  Lens.Family2.LensLike' f s a
+pendingEviction = Data.ProtoLens.Field.field @"pendingEviction"
+resident ::
+  forall f s a.
+  (Prelude.Functor f,
+   Data.ProtoLens.Field.HasField s "resident" a) =>
+  Lens.Family2.LensLike' f s a
+resident = Data.ProtoLens.Field.field @"resident"
 size ::
   forall f s a.
   (Prelude.Functor f, Data.ProtoLens.Field.HasField s "size" a) =>

@@ -10,26 +10,21 @@ import Data.Foldable (for_)
 import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
 import Data.Text qualified as Text
+import GHC (moduleName, moduleNameString)
 import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats)
+import GHC.Unit.Types (moduleUnitId, unitIdString)
 import Network.GRPC.Common (NextElem (..))
 import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
 import Network.GRPC.Server.Protobuf (ProtobufMethodsOf)
-import Network.GRPC.Server.StreamType (
-  Methods (..),
-  mkNonStreaming,
-  mkServerStreaming,
-  simpleMethods,
-  )
+import Network.GRPC.Server.StreamType (Methods (..), mkNonStreaming, mkServerStreaming, simpleMethods)
 import qualified Proto.Instrument as Instr
 import Proto.Instrument (Instrument)
 import Proto.Instrument_Fields qualified as Instr
 import Types.Grpc (CommandEnv (..), RequestArgs (..))
 import Types.Instrument (Event (..))
-import Types.State (WorkerState (..), Options (..))
-import Types.State.Make (BcoCacheEntry (..), MakeState (..))
+import Types.State (Options (..), WorkerState (..))
+import Types.State.Make (BcoHistoryEntry (..), MakeState (..))
 import Types.Target (TargetSpec (..))
-import GHC (moduleName, moduleNameString)
-import GHC.Unit.Types (moduleUnitId, unitIdString)
 
 -- | Fetch statistics about the current state of the RTS for instrumentation.
 mkStats :: WorkerState -> IO Event
@@ -90,7 +85,9 @@ triggerRebuild stateVar recompile target = do
   for_ margs (uncurry recompile)
   pure defMessage
 
--- | Snapshot the current lazily-loaded bytecode cache for the instrumentation UI.
+-- | Snapshot the historic lazily-loaded bytecode cache for the instrumentation UI: every module that has ever been
+-- tracked in 'MakeState.bcoHistory' (current residents and past evictees alike), decorated with whether it's
+-- currently resident in 'MakeState.bcoCache' and whether it has a pending eviction request.
 getBytecodeState ::
   MVar WorkerState ->
   Proto Instr.Empty ->
@@ -103,7 +100,9 @@ getBytecodeState stateVar _ = do
             & Instr.moduleName .~ Text.pack (moduleNameString (moduleName m))
             & Instr.size .~ fromIntegral (entry.size :: Int)
             & Instr.lastAccess .~ fromIntegral (entry.lastAccess :: Int)
-        | (m, entry) <- Map.toList state.make.bcoCache
+            & Instr.resident .~ Map.member m state.make.bcoCache
+            & Instr.pendingEviction .~ Set.member m state.make.pendingEvictions
+        | (m, entry) <- Map.toList state.make.bcoHistory
         ]
   pure (defMessage & Instr.entries .~ entries)
 

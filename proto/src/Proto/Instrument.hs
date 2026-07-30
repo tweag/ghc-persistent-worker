@@ -37,12 +37,16 @@ import qualified Text.Read
          * 'Proto.Instrument_Fields.unitId' @:: Lens' BcoCacheEntry Data.Text.Text@
          * 'Proto.Instrument_Fields.moduleName' @:: Lens' BcoCacheEntry Data.Text.Text@
          * 'Proto.Instrument_Fields.size' @:: Lens' BcoCacheEntry Data.Int.Int64@
-         * 'Proto.Instrument_Fields.lastAccess' @:: Lens' BcoCacheEntry Data.Int.Int64@ -}
+         * 'Proto.Instrument_Fields.lastAccess' @:: Lens' BcoCacheEntry Data.Int.Int64@
+         * 'Proto.Instrument_Fields.resident' @:: Lens' BcoCacheEntry Prelude.Bool@
+         * 'Proto.Instrument_Fields.pendingEviction' @:: Lens' BcoCacheEntry Prelude.Bool@ -}
 data BcoCacheEntry
   = BcoCacheEntry'_constructor {_BcoCacheEntry'unitId :: !Data.Text.Text,
                                 _BcoCacheEntry'moduleName :: !Data.Text.Text,
                                 _BcoCacheEntry'size :: !Data.Int.Int64,
                                 _BcoCacheEntry'lastAccess :: !Data.Int.Int64,
+                                _BcoCacheEntry'resident :: !Prelude.Bool,
+                                _BcoCacheEntry'pendingEviction :: !Prelude.Bool,
                                 _BcoCacheEntry'_unknownFields :: !Data.ProtoLens.FieldSet}
   deriving stock (Prelude.Eq, Prelude.Ord)
 instance Prelude.Show BcoCacheEntry where
@@ -78,6 +82,20 @@ instance Data.ProtoLens.Field.HasField BcoCacheEntry "lastAccess" Data.Int.Int64
            _BcoCacheEntry'lastAccess
            (\ x__ y__ -> x__ {_BcoCacheEntry'lastAccess = y__}))
         Prelude.id
+instance Data.ProtoLens.Field.HasField BcoCacheEntry "resident" Prelude.Bool where
+  fieldOf _
+    = (Prelude..)
+        (Lens.Family2.Unchecked.lens
+           _BcoCacheEntry'resident
+           (\ x__ y__ -> x__ {_BcoCacheEntry'resident = y__}))
+        Prelude.id
+instance Data.ProtoLens.Field.HasField BcoCacheEntry "pendingEviction" Prelude.Bool where
+  fieldOf _
+    = (Prelude..)
+        (Lens.Family2.Unchecked.lens
+           _BcoCacheEntry'pendingEviction
+           (\ x__ y__ -> x__ {_BcoCacheEntry'pendingEviction = y__}))
+        Prelude.id
 instance Data.ProtoLens.Message BcoCacheEntry where
   messageName _ = Data.Text.pack "instrument.BcoCacheEntry"
   packedMessageDescriptor _
@@ -88,7 +106,9 @@ instance Data.ProtoLens.Message BcoCacheEntry where
       \moduleName\DC2\DC2\n\
       \\EOTsize\CAN\ETX \SOH(\ETXR\EOTsize\DC2\US\n\
       \\vlast_access\CAN\EOT \SOH(\ETXR\n\
-      \lastAccess"
+      \lastAccess\DC2\SUB\n\
+      \\bresident\CAN\ENQ \SOH(\bR\bresident\DC2)\n\
+      \\DLEpending_eviction\CAN\ACK \SOH(\bR\SIpendingEviction"
   packedFileDescriptor _ = packedFileDescriptor
   fieldsByTag
     = let
@@ -126,12 +146,32 @@ instance Data.ProtoLens.Message BcoCacheEntry where
                  Data.ProtoLens.Optional
                  (Data.ProtoLens.Field.field @"lastAccess")) ::
               Data.ProtoLens.FieldDescriptor BcoCacheEntry
+        resident__field_descriptor
+          = Data.ProtoLens.FieldDescriptor
+              "resident"
+              (Data.ProtoLens.ScalarField Data.ProtoLens.BoolField ::
+                 Data.ProtoLens.FieldTypeDescriptor Prelude.Bool)
+              (Data.ProtoLens.PlainField
+                 Data.ProtoLens.Optional
+                 (Data.ProtoLens.Field.field @"resident")) ::
+              Data.ProtoLens.FieldDescriptor BcoCacheEntry
+        pendingEviction__field_descriptor
+          = Data.ProtoLens.FieldDescriptor
+              "pending_eviction"
+              (Data.ProtoLens.ScalarField Data.ProtoLens.BoolField ::
+                 Data.ProtoLens.FieldTypeDescriptor Prelude.Bool)
+              (Data.ProtoLens.PlainField
+                 Data.ProtoLens.Optional
+                 (Data.ProtoLens.Field.field @"pendingEviction")) ::
+              Data.ProtoLens.FieldDescriptor BcoCacheEntry
       in
         Data.Map.fromList
           [(Data.ProtoLens.Tag 1, unitId__field_descriptor),
            (Data.ProtoLens.Tag 2, moduleName__field_descriptor),
            (Data.ProtoLens.Tag 3, size__field_descriptor),
-           (Data.ProtoLens.Tag 4, lastAccess__field_descriptor)]
+           (Data.ProtoLens.Tag 4, lastAccess__field_descriptor),
+           (Data.ProtoLens.Tag 5, resident__field_descriptor),
+           (Data.ProtoLens.Tag 6, pendingEviction__field_descriptor)]
   unknownFields
     = Lens.Family2.Unchecked.lens
         _BcoCacheEntry'_unknownFields
@@ -142,6 +182,8 @@ instance Data.ProtoLens.Message BcoCacheEntry where
          _BcoCacheEntry'moduleName = Data.ProtoLens.fieldDefault,
          _BcoCacheEntry'size = Data.ProtoLens.fieldDefault,
          _BcoCacheEntry'lastAccess = Data.ProtoLens.fieldDefault,
+         _BcoCacheEntry'resident = Data.ProtoLens.fieldDefault,
+         _BcoCacheEntry'pendingEviction = Data.ProtoLens.fieldDefault,
          _BcoCacheEntry'_unknownFields = []}
   parseMessage
     = let
@@ -195,6 +237,21 @@ instance Data.ProtoLens.Message BcoCacheEntry where
                                        "last_access"
                                 loop
                                   (Lens.Family2.set (Data.ProtoLens.Field.field @"lastAccess") y x)
+                        40
+                          -> do y <- (Data.ProtoLens.Encoding.Bytes.<?>)
+                                       (Prelude.fmap
+                                          ((Prelude./=) 0) Data.ProtoLens.Encoding.Bytes.getVarInt)
+                                       "resident"
+                                loop
+                                  (Lens.Family2.set (Data.ProtoLens.Field.field @"resident") y x)
+                        48
+                          -> do y <- (Data.ProtoLens.Encoding.Bytes.<?>)
+                                       (Prelude.fmap
+                                          ((Prelude./=) 0) Data.ProtoLens.Encoding.Bytes.getVarInt)
+                                       "pending_eviction"
+                                loop
+                                  (Lens.Family2.set
+                                     (Data.ProtoLens.Field.field @"pendingEviction") y x)
                         wire
                           -> do !y <- Data.ProtoLens.Encoding.Wire.parseTaggedValueFromWire
                                         wire
@@ -261,8 +318,34 @@ instance Data.ProtoLens.Message BcoCacheEntry where
                                (Data.ProtoLens.Encoding.Bytes.putVarInt 32)
                                ((Prelude..)
                                   Data.ProtoLens.Encoding.Bytes.putVarInt Prelude.fromIntegral _v))
-                      (Data.ProtoLens.Encoding.Wire.buildFieldSet
-                         (Lens.Family2.view Data.ProtoLens.unknownFields _x)))))
+                      ((Data.Monoid.<>)
+                         (let
+                            _v = Lens.Family2.view (Data.ProtoLens.Field.field @"resident") _x
+                          in
+                            if (Prelude.==) _v Data.ProtoLens.fieldDefault then
+                                Data.Monoid.mempty
+                            else
+                                (Data.Monoid.<>)
+                                  (Data.ProtoLens.Encoding.Bytes.putVarInt 40)
+                                  ((Prelude..)
+                                     Data.ProtoLens.Encoding.Bytes.putVarInt
+                                     (\ b -> if b then 1 else 0) _v))
+                         ((Data.Monoid.<>)
+                            (let
+                               _v
+                                 = Lens.Family2.view
+                                     (Data.ProtoLens.Field.field @"pendingEviction") _x
+                             in
+                               if (Prelude.==) _v Data.ProtoLens.fieldDefault then
+                                   Data.Monoid.mempty
+                               else
+                                   (Data.Monoid.<>)
+                                     (Data.ProtoLens.Encoding.Bytes.putVarInt 48)
+                                     ((Prelude..)
+                                        Data.ProtoLens.Encoding.Bytes.putVarInt
+                                        (\ b -> if b then 1 else 0) _v))
+                            (Data.ProtoLens.Encoding.Wire.buildFieldSet
+                               (Lens.Family2.view Data.ProtoLens.unknownFields _x)))))))
 instance Control.DeepSeq.NFData BcoCacheEntry where
   rnf
     = \ x__
@@ -274,7 +357,12 @@ instance Control.DeepSeq.NFData BcoCacheEntry where
                    (_BcoCacheEntry'moduleName x__)
                    (Control.DeepSeq.deepseq
                       (_BcoCacheEntry'size x__)
-                      (Control.DeepSeq.deepseq (_BcoCacheEntry'lastAccess x__) ()))))
+                      (Control.DeepSeq.deepseq
+                         (_BcoCacheEntry'lastAccess x__)
+                         (Control.DeepSeq.deepseq
+                            (_BcoCacheEntry'resident x__)
+                            (Control.DeepSeq.deepseq
+                               (_BcoCacheEntry'pendingEviction x__) ()))))))
 {- | Fields :
      
          * 'Proto.Instrument_Fields.entries' @:: Lens' BytecodeState [BcoCacheEntry]@
@@ -1024,14 +1112,16 @@ packedFileDescriptor
     \\aOptions\DC2*\n\
     \\DC1extra_ghc_options\CAN\SOH \SOH(\tR\SIextraGhcOptions\"(\n\
     \\SORebuildRequest\DC2\SYN\n\
-    \\ACKtarget\CAN\SOH \SOH(\tR\ACKtarget\"~\n\
+    \\ACKtarget\CAN\SOH \SOH(\tR\ACKtarget\"\197\SOH\n\
     \\rBcoCacheEntry\DC2\ETB\n\
     \\aunit_id\CAN\SOH \SOH(\tR\ACKunitId\DC2\US\n\
     \\vmodule_name\CAN\STX \SOH(\tR\n\
     \moduleName\DC2\DC2\n\
     \\EOTsize\CAN\ETX \SOH(\ETXR\EOTsize\DC2\US\n\
     \\vlast_access\CAN\EOT \SOH(\ETXR\n\
-    \lastAccess\"D\n\
+    \lastAccess\DC2\SUB\n\
+    \\bresident\CAN\ENQ \SOH(\bR\bresident\DC2)\n\
+    \\DLEpending_eviction\CAN\ACK \SOH(\bR\SIpendingEviction\"D\n\
     \\rBytecodeState\DC23\n\
     \\aentries\CAN\SOH \ETX(\v2\EM.instrument.BcoCacheEntryR\aentries\"P\n\
     \\DC4EvictBytecodeRequest\DC2\ETB\n\
@@ -1045,8 +1135,8 @@ packedFileDescriptor
     \SetOptions\DC2\DC3.instrument.Options\SUB\DC1.instrument.Empty\"\NUL\DC2A\n\
     \\SOTriggerRebuild\DC2\SUB.instrument.RebuildRequest\SUB\DC1.instrument.Empty\"\NUL\DC2B\n\
     \\DLEGetBytecodeState\DC2\DC1.instrument.Empty\SUB\EM.instrument.BytecodeState\"\NUL\DC2F\n\
-    \\rEvictBytecode\DC2 .instrument.EvictBytecodeRequest\SUB\DC1.instrument.Empty\"\NULJ\176\b\n\
-    \\ACK\DC2\EOT\NUL\NUL(\SOH\n\
+    \\rEvictBytecode\DC2 .instrument.EvictBytecodeRequest\SUB\DC1.instrument.Empty\"\NULJ\154\v\n\
+    \\ACK\DC2\EOT\NUL\NUL-\SOH\n\
     \\b\n\
     \\SOH\f\DC2\ETX\NUL\NUL\DC2\n\
     \\b\n\
@@ -1102,7 +1192,7 @@ packedFileDescriptor
     \\ENQ\EOT\ETX\STX\NUL\ETX\DC2\ETX\SI\DC2\DC3\n\
     \\n\
     \\n\
-    \\STX\EOT\EOT\DC2\EOT\DC2\NUL\ETB\SOH\n\
+    \\STX\EOT\EOT\DC2\EOT\DC2\NUL\FS\SOH\n\
     \\n\
     \\n\
     \\ETX\EOT\EOT\SOH\DC2\ETX\DC2\b\NAK\n\
@@ -1138,90 +1228,109 @@ packedFileDescriptor
     \\ENQ\EOT\EOT\STX\ETX\SOH\DC2\ETX\SYN\b\DC3\n\
     \\f\n\
     \\ENQ\EOT\EOT\STX\ETX\ETX\DC2\ETX\SYN\SYN\ETB\n\
+    \{\n\
+    \\EOT\EOT\EOT\STX\EOT\DC2\ETX\CAN\STX\DC4\SUBn Whether the module is currently present in the worker's loader state (home package table), i.e. not evicted.\n\
+    \\n\
+    \\f\n\
+    \\ENQ\EOT\EOT\STX\EOT\ENQ\DC2\ETX\CAN\STX\ACK\n\
+    \\f\n\
+    \\ENQ\EOT\EOT\STX\EOT\SOH\DC2\ETX\CAN\a\SI\n\
+    \\f\n\
+    \\ENQ\EOT\EOT\STX\EOT\ETX\DC2\ETX\CAN\DC2\DC3\n\
+    \\150\SOH\n\
+    \\EOT\EOT\EOT\STX\ENQ\DC2\ETX\ESC\STX\FS\SUB\136\SOH Whether the module has been requested for eviction but the request hasn't been applied yet (see\n\
+    \ 'Types.State.Make.pendingEvictions').\n\
+    \\n\
+    \\f\n\
+    \\ENQ\EOT\EOT\STX\ENQ\ENQ\DC2\ETX\ESC\STX\ACK\n\
+    \\f\n\
+    \\ENQ\EOT\EOT\STX\ENQ\SOH\DC2\ETX\ESC\a\ETB\n\
+    \\f\n\
+    \\ENQ\EOT\EOT\STX\ENQ\ETX\DC2\ETX\ESC\SUB\ESC\n\
     \\n\
     \\n\
-    \\STX\EOT\ENQ\DC2\EOT\EM\NUL\ESC\SOH\n\
+    \\STX\EOT\ENQ\DC2\EOT\RS\NUL \SOH\n\
     \\n\
     \\n\
-    \\ETX\EOT\ENQ\SOH\DC2\ETX\EM\b\NAK\n\
+    \\ETX\EOT\ENQ\SOH\DC2\ETX\RS\b\NAK\n\
     \\v\n\
-    \\EOT\EOT\ENQ\STX\NUL\DC2\ETX\SUB\STX%\n\
+    \\EOT\EOT\ENQ\STX\NUL\DC2\ETX\US\STX%\n\
     \\f\n\
-    \\ENQ\EOT\ENQ\STX\NUL\EOT\DC2\ETX\SUB\STX\n\
+    \\ENQ\EOT\ENQ\STX\NUL\EOT\DC2\ETX\US\STX\n\
     \\n\
     \\f\n\
-    \\ENQ\EOT\ENQ\STX\NUL\ACK\DC2\ETX\SUB\v\CAN\n\
+    \\ENQ\EOT\ENQ\STX\NUL\ACK\DC2\ETX\US\v\CAN\n\
     \\f\n\
-    \\ENQ\EOT\ENQ\STX\NUL\SOH\DC2\ETX\SUB\EM \n\
+    \\ENQ\EOT\ENQ\STX\NUL\SOH\DC2\ETX\US\EM \n\
     \\f\n\
-    \\ENQ\EOT\ENQ\STX\NUL\ETX\DC2\ETX\SUB#$\n\
+    \\ENQ\EOT\ENQ\STX\NUL\ETX\DC2\ETX\US#$\n\
     \\n\
     \\n\
-    \\STX\EOT\ACK\DC2\EOT\GS\NUL \SOH\n\
+    \\STX\EOT\ACK\DC2\EOT\"\NUL%\SOH\n\
     \\n\
     \\n\
-    \\ETX\EOT\ACK\SOH\DC2\ETX\GS\b\FS\n\
+    \\ETX\EOT\ACK\SOH\DC2\ETX\"\b\FS\n\
     \\v\n\
-    \\EOT\EOT\ACK\STX\NUL\DC2\ETX\RS\STX\NAK\n\
+    \\EOT\EOT\ACK\STX\NUL\DC2\ETX#\STX\NAK\n\
     \\f\n\
-    \\ENQ\EOT\ACK\STX\NUL\ENQ\DC2\ETX\RS\STX\b\n\
+    \\ENQ\EOT\ACK\STX\NUL\ENQ\DC2\ETX#\STX\b\n\
     \\f\n\
-    \\ENQ\EOT\ACK\STX\NUL\SOH\DC2\ETX\RS\t\DLE\n\
+    \\ENQ\EOT\ACK\STX\NUL\SOH\DC2\ETX#\t\DLE\n\
     \\f\n\
-    \\ENQ\EOT\ACK\STX\NUL\ETX\DC2\ETX\RS\DC3\DC4\n\
+    \\ENQ\EOT\ACK\STX\NUL\ETX\DC2\ETX#\DC3\DC4\n\
     \\v\n\
-    \\EOT\EOT\ACK\STX\SOH\DC2\ETX\US\STX\EM\n\
+    \\EOT\EOT\ACK\STX\SOH\DC2\ETX$\STX\EM\n\
     \\f\n\
-    \\ENQ\EOT\ACK\STX\SOH\ENQ\DC2\ETX\US\STX\b\n\
+    \\ENQ\EOT\ACK\STX\SOH\ENQ\DC2\ETX$\STX\b\n\
     \\f\n\
-    \\ENQ\EOT\ACK\STX\SOH\SOH\DC2\ETX\US\t\DC4\n\
+    \\ENQ\EOT\ACK\STX\SOH\SOH\DC2\ETX$\t\DC4\n\
     \\f\n\
-    \\ENQ\EOT\ACK\STX\SOH\ETX\DC2\ETX\US\ETB\CAN\n\
+    \\ENQ\EOT\ACK\STX\SOH\ETX\DC2\ETX$\ETB\CAN\n\
     \\n\
     \\n\
-    \\STX\ACK\NUL\DC2\EOT\"\NUL(\SOH\n\
+    \\STX\ACK\NUL\DC2\EOT'\NUL-\SOH\n\
     \\n\
     \\n\
-    \\ETX\ACK\NUL\SOH\DC2\ETX\"\b\DC2\n\
+    \\ETX\ACK\NUL\SOH\DC2\ETX'\b\DC2\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\NUL\DC2\ETX#\STX/\n\
+    \\EOT\ACK\NUL\STX\NUL\DC2\ETX(\STX/\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\SOH\DC2\ETX#\ACK\SO\n\
+    \\ENQ\ACK\NUL\STX\NUL\SOH\DC2\ETX(\ACK\SO\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\STX\DC2\ETX#\SI\DC4\n\
+    \\ENQ\ACK\NUL\STX\NUL\STX\DC2\ETX(\SI\DC4\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\ACK\DC2\ETX#\US%\n\
+    \\ENQ\ACK\NUL\STX\NUL\ACK\DC2\ETX(\US%\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\ETX\DC2\ETX#&+\n\
+    \\ENQ\ACK\NUL\STX\NUL\ETX\DC2\ETX(&+\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\SOH\DC2\ETX$\STX,\n\
+    \\EOT\ACK\NUL\STX\SOH\DC2\ETX)\STX,\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\SOH\DC2\ETX$\ACK\DLE\n\
+    \\ENQ\ACK\NUL\STX\SOH\SOH\DC2\ETX)\ACK\DLE\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\STX\DC2\ETX$\DC1\CAN\n\
+    \\ENQ\ACK\NUL\STX\SOH\STX\DC2\ETX)\DC1\CAN\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\ETX\DC2\ETX$#(\n\
+    \\ENQ\ACK\NUL\STX\SOH\ETX\DC2\ETX)#(\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\STX\DC2\ETX%\STX7\n\
+    \\EOT\ACK\NUL\STX\STX\DC2\ETX*\STX7\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\STX\SOH\DC2\ETX%\ACK\DC4\n\
+    \\ENQ\ACK\NUL\STX\STX\SOH\DC2\ETX*\ACK\DC4\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\STX\STX\DC2\ETX%\NAK#\n\
+    \\ENQ\ACK\NUL\STX\STX\STX\DC2\ETX*\NAK#\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\STX\ETX\DC2\ETX%.3\n\
+    \\ENQ\ACK\NUL\STX\STX\ETX\DC2\ETX*.3\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\ETX\DC2\ETX&\STX8\n\
+    \\EOT\ACK\NUL\STX\ETX\DC2\ETX+\STX8\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\ETX\SOH\DC2\ETX&\ACK\SYN\n\
+    \\ENQ\ACK\NUL\STX\ETX\SOH\DC2\ETX+\ACK\SYN\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\ETX\STX\DC2\ETX&\ETB\FS\n\
+    \\ENQ\ACK\NUL\STX\ETX\STX\DC2\ETX+\ETB\FS\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\ETX\ETX\DC2\ETX&'4\n\
+    \\ENQ\ACK\NUL\STX\ETX\ETX\DC2\ETX+'4\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\EOT\DC2\ETX'\STX<\n\
+    \\EOT\ACK\NUL\STX\EOT\DC2\ETX,\STX<\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\EOT\SOH\DC2\ETX'\ACK\DC3\n\
+    \\ENQ\ACK\NUL\STX\EOT\SOH\DC2\ETX,\ACK\DC3\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\EOT\STX\DC2\ETX'\DC4(\n\
+    \\ENQ\ACK\NUL\STX\EOT\STX\DC2\ETX,\DC4(\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\EOT\ETX\DC2\ETX'38b\ACKproto3"
+    \\ENQ\ACK\NUL\STX\EOT\ETX\DC2\ETX,38b\ACKproto3"

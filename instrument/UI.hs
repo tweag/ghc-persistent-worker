@@ -51,7 +51,7 @@ import UI.GhcDebug (debug)
 import UI.Session qualified as Session
 import UI.SessionSelector qualified as SessionSelector
 import UI.TaskTree qualified as TaskTree
-import UI.Types (Name (..), WorkerId, canDebugAttr, disabledAttr)
+import UI.Types (Name (..), WorkerId, canDebugAttr, disabledAttr, evictedAttr, pendingEvictionAttr)
 import UI.Utils (handleListEventOf, popup)
 
 data Event
@@ -114,7 +114,7 @@ drawUI State{..} =
                   session
           , modifyDefAttr (`V.withStyle` V.italic) $
               str
-                " q:quit   Tab:switch pane   Enter:expand/details   b:build (metadata)   r:trigger rebuild   d:debug   o:options   s:sessions   t:sort bytecode   x:evict bytecode"
+                " q:quit   Tab:switch pane   Enter:expand/details   b:build (metadata)   r:trigger rebuild   d:debug   o:options   s:sessions   t:sort bytecode   e:evict bytecode"
           ]
        ]
  where
@@ -145,7 +145,13 @@ withTarget handler = do
 
 toEntries :: Proto Instr.BytecodeState -> [BytecodeBrowser.Entry]
 toEntries resp =
-  [ BytecodeBrowser.Entry (e ^. InstrF.unitId) (e ^. InstrF.moduleName) (fromIntegral (e ^. InstrF.size)) (fromIntegral (e ^. InstrF.lastAccess))
+  [ BytecodeBrowser.Entry
+      (e ^. InstrF.unitId)
+      (e ^. InstrF.moduleName)
+      (fromIntegral (e ^. InstrF.size))
+      (fromIntegral (e ^. InstrF.lastAccess))
+      (e ^. InstrF.resident)
+      (e ^. InstrF.pendingEviction)
   | e <- resp ^. InstrF.entries
   ]
 
@@ -242,7 +248,7 @@ handleEvent (VtyEvent evt) = do
           _ -> beep
       V.EvKey (V.KChar 't') [] | current == BytecodeBrowser ->
         handleEvent (AppEvent (BytecodeBrowserEvent BytecodeBrowser.ToggleSort))
-      V.EvKey (V.KChar 'x') [] | current == BytecodeBrowser -> do
+      V.EvKey (V.KChar 'e') [] | current == BytecodeBrowser -> do
         bco <- use bcoBrowser
         case BytecodeBrowser.selectedTarget bco of
           Nothing -> beep
@@ -260,6 +266,8 @@ handleEvent (VtyEvent evt) = do
           withTarget \_ _ -> currentFocus .= TaskDetails
         TaskTree ->
           zoom (currentSession . Session.taskTree) (TaskTree.handleEvent TaskTree.ToggleExpand)
+        BytecodeBrowser ->
+          zoom bcoBrowser (BytecodeBrowser.handleEvent BytecodeBrowser.ToggleExpand)
         _ -> pure ()
       _ -> case current of
         ActiveTasks -> handleListEventOf (currentSession . Session.activeTasks) evt
@@ -284,6 +292,8 @@ app =
             , (listSelectedFocusedAttr, brightWhite `on` blue)
             , (disabledAttr, V.withStyle V.defAttr V.dim)
             , (canDebugAttr, V.withStyle V.defAttr V.bold)
+            , (evictedAttr, V.withStyle (V.defAttr `V.withForeColor` brightBlack) V.dim)
+            , (pendingEvictionAttr, V.withStyle V.defAttr V.italic)
             ]
     , appChooseCursor = showFirstCursor
     }

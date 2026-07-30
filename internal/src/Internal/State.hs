@@ -40,7 +40,8 @@ newState = do
       bcoLoadState,
       bcoCache = M.empty,
       bcoAccessCounter = 0,
-      pendingEvictions = mempty
+      pendingEvictions = mempty,
+      bcoHistory = M.empty
     },
     targetArgs = mempty
   }
