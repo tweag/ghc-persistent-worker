@@ -5,7 +5,6 @@ module GhcServer.Run where
 import Common.Grpc (fromGrpcHandler, runGrpcServer)
 import Control.Applicative (many, optional, (<|>))
 import Control.Concurrent.Async (async)
-import Control.Concurrent.Chan (newChan)
 import Control.Monad (void)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
@@ -121,15 +120,14 @@ runServer = do
       let socket = socketPath config.projectRoot
       lift do
         createDirectoryIfMissing True (config.projectRoot </> socketDirName)
-        ServerContext {grpcHandler, stateVar, build, project} <- serverContext config
+        ServerContext {grpcHandler, stateVar, build, project, instrChan} <- serverContext config
         let methods = fromGrpcHandler grpcHandler
-        if config.features.instrument
-        then do
-          let instrSocket = instrumentSocketPath config.projectRoot
-          instrChan <- newChan
-          hPutStrLn stderr ("Starting instrument service on " ++ fromOsPath instrSocket)
-          void $ async $ runGrpcServer instrSocket (instrumentMethods instrChan stateVar build project)
-        else
-          pure ()
+        case instrChan of
+          Just chan -> do
+            let instrSocket = instrumentSocketPath config.projectRoot
+            hPutStrLn stderr ("Starting instrument service on " ++ fromOsPath instrSocket)
+            void $ async $ runGrpcServer instrSocket (instrumentMethods chan stateVar build project)
+          Nothing ->
+            pure ()
         hPutStrLn stderr ("Starting ghc-server on " ++ fromOsPath socket)
         runGrpcServer socket methods

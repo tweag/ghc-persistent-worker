@@ -73,7 +73,8 @@ runCabalFresh tp steps = timedBuild do
         stateVar,
         project = tp.project,
         log,
-        events
+        events,
+        instrChan = Nothing
       }
   result <- runBuild 4 testTaskTimeout env ScheduleRequest {steps, recompile = False, rebuild = False}
   evs <- readEvents events

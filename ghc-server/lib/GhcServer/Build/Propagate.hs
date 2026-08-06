@@ -9,10 +9,11 @@
 -- (lifecycle management) keeps each module focused on one concern.
 module GhcServer.Build.Propagate where
 
+import Control.Concurrent.Chan (writeChan)
 import Control.Monad.Extra (ifM)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
-import GHC (ModuleName)
+import GHC (ModuleName, moduleNameString)
 import qualified GHC.Utils.Outputable as O
 import GHC.Utils.Outputable (ppr, (<+>))
 import GhcServer.Build.Compile (compileSingleModule)
@@ -31,6 +32,7 @@ import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (BuildEvent (..), logEvent)
 import GhcServer.Data.Unit (UnitName (..))
 import GhcServer.Scheduler (Phase (..), SchedulerState (..), Task (..), TaskResult (..), addResolutions)
+import Types.Instrument (Event (..))
 import Types.Log (Logger (..))
 
 -- | Extension state threaded through the scheduler's @ext@ parameter.
@@ -56,6 +58,37 @@ taskResultFromErrors :: [(a, String)] -> TaskResult String
 taskResultFromErrors = \case
   [] -> TaskSuccess
   (_, msg) : _ -> TaskFailed msg
+
+-- | Push an instrumentation event to the UI's channel, if instrumentation is enabled.
+emitEvent :: BuildEnv -> Event -> IO ()
+emitEvent env evt = maybe (pure ()) (`writeChan` evt) env.instrChan
+
+-- | Send a 'CompileStart' event for a metadata or compile task about to run.
+emitTaskStart :: BuildEnv -> String -> IO ()
+emitTaskStart env target = emitEvent env CompileStart {target, canDebug = False}
+
+-- | Send a 'CompileEnd' event for a metadata or compile task that just finished, deriving the exit code and
+-- stderr content from the task's 'TaskResult'.
+emitTaskEnd :: BuildEnv -> String -> TaskResult String -> IO ()
+emitTaskEnd env target result =
+  emitEvent env CompileEnd {
+    target,
+    exitCode = case result of
+      TaskSuccess -> 0
+      TaskFailed _ -> 1,
+    stderr = case result of
+      TaskSuccess -> ""
+      TaskFailed msg -> msg
+  }
+
+-- | Run an instrumented task: emits 'CompileStart' before and 'CompileEnd' after, deriving the target's
+-- display text from the given unit\/module description.
+withTaskEvents :: BuildEnv -> String -> IO (TaskResult String) -> IO (TaskResult String)
+withTaskEvents env target action = do
+  emitTaskStart env target
+  result <- action
+  emitTaskEnd env target result
+  pure result
 
 -- | Skip metadata for a cached unit.
 skipMetadata :: BuildEnv -> UnitName -> IO (TaskResult String)
@@ -103,10 +136,11 @@ dispatchTask :: BuildCache -> BuildEnv -> BuildExt -> Task TaskKey 'Resolved Bui
 dispatchTask cache env ext task = case task.key of
   MetaTask name
     | not task.value.rebuild && task.value.cached -> skipMetadata env name
-    | otherwise -> taskResultFromErrors . fst <$> runMetadata env name
+    | otherwise ->
+      withTaskEvents env (name.string ++ ":metadata") (taskResultFromErrors . fst <$> runMetadata env name)
   ResolvedModule name modName
     | shouldSkipCompile -> skipCompileIfCached cache ext env name modName
-    | otherwise -> compile ext env name modName
+    | otherwise -> withTaskEvents env (name.string ++ ":" ++ moduleNameString modName) (compile ext env name modName)
     where
       shouldSkipCompile = not task.value.rebuild && not task.enabled
 

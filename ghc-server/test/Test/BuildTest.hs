@@ -112,7 +112,8 @@ newBuildEnv tp stateVar = do
     stateVar,
     project = tp.project,
     log,
-    events
+    events,
+    instrChan = Nothing
   }, events)
 
 -- ---------------------------------------------------------------------------

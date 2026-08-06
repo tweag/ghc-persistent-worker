@@ -2,6 +2,7 @@
 module GhcServer.Handler where
 
 import Common.Grpc (GrpcHandler (..), fromGrpcHandler)
+import Control.Concurrent.Chan (Chan, newChan)
 import Control.Concurrent.MVar (MVar)
 import qualified Data.Map.Strict as Map
 import GHC (moduleNameString)
@@ -22,7 +23,9 @@ import Prelude hiding (log)
 import Proto.Worker (Worker)
 import System.OsPath ((</>))
 import Types.Args (Args (..), emptyArgs)
+import Types.FeatureFlags (FeatureFlags (..))
 import Types.Grpc (RequestArgs (..))
+import Types.Instrument (Event)
 import Types.State (WorkerState)
 
 -- | Parsed schedule command with optional flags.
@@ -125,7 +128,10 @@ data ServerContext =
     grpcHandler :: GrpcHandler,
     stateVar :: MVar WorkerState,
     build :: Build,
-    project :: Project
+    project :: Project,
+    -- | Channel carrying instrumentation events (metadata\/compile task start\/end) to the Instrument gRPC
+    -- service, if the @instrument@ feature is enabled.
+    instrChan :: Maybe (Chan Event)
   }
 
 -- | Create the server context: discovers the project, creates the persistent 'WorkerState' and scheduler, and
@@ -144,6 +150,7 @@ serverContext config = do
     else discoverProject config.projectRoot outputDir tmpDir
   stateVar <- newBuildState
   events <- newBuildEvents
+  instrChan <- if config.features.instrument then Just <$> newChan else pure Nothing
   let
     env = BuildEnv {
       baseArgs = (emptyArgs Map.empty) {features = config.features},
@@ -153,7 +160,8 @@ serverContext config = do
       stateVar,
       project,
       log,
-      events
+      events,
+      instrChan
     }
   build <- newBuild config.maxJobs 300 env
   let
@@ -172,7 +180,7 @@ serverContext config = do
             pure (report, exitCode)
           else
             pure (["Scheduled."], 0)
-  pure ServerContext {grpcHandler, stateVar, build, project}
+  pure ServerContext {grpcHandler, stateVar, build, project, instrChan}
 
 -- | Create the gRPC handler for the server.
 serverHandler :: ServerConfig -> IO GrpcHandler

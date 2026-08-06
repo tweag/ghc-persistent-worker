@@ -63,6 +63,11 @@ notifyMe project stateVar chan callback = do
 -- | Trigger a build for the given target, parsed and scheduled the same way 'ghc-client' would from its argv
 -- (@unitName@, @unitName:metadata@, @unitName:modules@, @unitName:ModuleName@). Fire-and-forget: does not wait for
 -- completion, matching the semantics of the worker's own 'triggerRebuild'.
+--
+-- Always forces @rebuild = True@: unlike a scheduled build implicitly triggered by another target's dependency
+-- resolution, this is always an explicit user request (from the instrument UI's 'b'/'r' keys, or 'ghc-client'
+-- without flags), so metadata must actually be recomputed rather than silently skipped because the unit's cache
+-- from a previous build looks up to date (see 'GhcServer.Build.Propagate.dispatchTask').
 triggerRebuild ::
   Build ->
   Project ->
@@ -72,7 +77,7 @@ triggerRebuild build project req = do
   case parseTarget project (Text.unpack req.target) of
     Left _ -> pure ()
     Right (name, unitReq) ->
-      scheduleBatch build ScheduleRequest {steps = [(name, unitReq)], recompile = True, rebuild = False}
+      scheduleBatch build ScheduleRequest {steps = [(name, unitReq)], recompile = True, rebuild = True}
   pure defMessage
 
 -- | A grapesy server that streams instrumentation data and serves the bytecode-cache browser RPCs, backed by

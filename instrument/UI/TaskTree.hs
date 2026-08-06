@@ -94,10 +94,15 @@ handleEvent ToggleExpand = do
  where
   toggle x s = if Set.member x s then Set.delete x s else Set.insert x s
 
--- | The unit name owning the currently selected row, used to target the 'b' build (metadata) action regardless of
--- whether a header or one of its module children is selected.
-selectedUnit :: State -> Maybe Text
-selectedUnit State{rows} = rowUnit . snd <$> listSelectedElement rows
+-- | The build target text for the currently selected row, used by the 'b' build action.
+--
+-- Selecting a unit header targets that unit's metadata step (@unitName:metadata@); selecting one of its module
+-- children targets that specific module's compilation (@unitName:moduleName@), skipping metadata.
+selectedTarget :: State -> Maybe Text
+selectedTarget State{rows} = target . snd <$> listSelectedElement rows
+ where
+  target (Header uid _) = uid <> ":metadata"
+  target (ModuleRow uid m _) = uid <> ":" <> m
 
 draw :: Name -> State -> Widget Name
 draw current State{rows} = renderList drawRow (current == TaskTree) rows
