@@ -10,6 +10,7 @@ executable instrument
   hs-source-dirs: .
   other-modules:
     Grpc
+    ServeGhcServer
     UI
     UI.ActiveTasks
     UI.BytecodeBrowser
@@ -53,6 +54,9 @@ executable instrument
     grapesy,
     microlens-platform,
     mtl,
+    network,
+    optparse-applicative,
+    process,
     text,
     time,
     vty

@@ -3,6 +3,7 @@
   inherit (util) build;
 
   serverPkg = build.packages.min.ghc-server.package;
+  instrumentPkg = build.packages.min.instrument.package;
   fixedServerPkg = build.packages.mwb-26-04-fixed.ghc-server.package;
   profiledServerPkg = build.packages.profiled.ghc-server.package;
   profiledFixedPkg = build.packages.profiled-fixed.ghc-server.package;
@@ -81,6 +82,10 @@
 in {
 
   config = {
+
+    outputs.apps.instrument-serve = util.zapp "instrument-serve" ''
+    exec ${instrumentPkg}/bin/instrument --server-exe ${serverPkg}/bin/ghc-server "$@"
+    '';
 
     outputs.apps.rebuild-impure-worker = util.zapp "rebuild-impure-worker" ''
     if [[ -z $1 ]]

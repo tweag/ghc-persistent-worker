@@ -17,6 +17,24 @@ import Network.GRPC.Client.StreamType.IO (serverStreaming)
 import Network.GRPC.Common (def)
 import Network.GRPC.Common.NextElem (whileNext_)
 import Network.GRPC.Common.Protobuf (Protobuf, defMessage)
+import Options.Applicative (
+  Parser,
+  ParserInfo,
+  execParser,
+  fullDesc,
+  header,
+  help,
+  helper,
+  info,
+  long,
+  metavar,
+  optional,
+  progDesc,
+  strOption,
+  switch,
+  (<**>),
+  )
+import ServeGhcServer (ensureGhcServer)
 import System.Directory (doesPathExist, getModificationTime, listDirectory, createDirectoryIfMissing)
 import System.Environment (lookupEnv)
 import System.FilePath ((</>))
@@ -25,6 +43,28 @@ import UI qualified
 import UI.Session qualified as Session
 import UI.SessionSelector qualified as SS
 import UI.Types (WorkerId (WorkerId))
+
+-- | CLI options for the @instrument@ client.
+data Options = Options {serve :: Bool, serverExe :: Maybe FilePath}
+
+optionsParser :: Parser Options
+optionsParser =
+  Options
+    <$> switch (
+      long "serve"
+      <> help "Start a ghc-server for the current directory if one isn't already running, and connect to it"
+      )
+    <*> optional (
+      strOption (
+        long "server-exe"
+        <> metavar "PATH"
+        <> help "Path to the ghc-server executable to use with --serve (defaults to a PATH lookup)"
+        )
+      )
+
+optionsInfo :: ParserInfo Options
+optionsInfo =
+  info (optionsParser <**> helper) (fullDesc <> progDesc "Instrumentation TUI client" <> header "instrument")
 
 newtype WorkerPath
   = WorkerPath {path :: FilePath}
@@ -63,9 +103,14 @@ listen eventChan instrPath = do
 
 main :: IO ()
 main = do
+  opts <- execParser optionsInfo
   workers <- envWorkerPath
   workerPathExists <- doesPathExist workers.path
-  instrSocket <- lookupEnv "INSTRUMENT_SOCKET"
+  instrSocketEnv <- lookupEnv "INSTRUMENT_SOCKET"
+  instrSocket <-
+    if opts.serve
+      then Just <$> ensureGhcServer opts.serverExe
+      else pure instrSocketEnv
   eventChan <- newBChan 10
 
   -- Update time every 100ms
