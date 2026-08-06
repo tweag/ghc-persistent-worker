@@ -6,7 +6,7 @@
 module Test.BuildTest where
 
 import Control.Concurrent.Async (cancel)
-import Control.Concurrent.MVar (MVar, readMVar)
+import Control.Concurrent.MVar (MVar, newMVar, readMVar)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Aeson (encode)
 import qualified Data.ByteString.Lazy as LBS
@@ -104,6 +104,7 @@ newBuildEnv :: TestProject -> MVar WorkerState -> IO (BuildEnv, BuildEvents)
 newBuildEnv tp stateVar = do
   log <- newLogger False
   events <- newBuildEvents
+  extDepsDb <- newMVar Nothing
   pure (BuildEnv {
     baseArgs = emptyArgs Map.empty,
     projectRoot = tp.rootOs,
@@ -113,7 +114,8 @@ newBuildEnv tp stateVar = do
     project = tp.project,
     log,
     events,
-    instrChan = Nothing
+    instrChan = Nothing,
+    extDepsDb
   }, events)
 
 -- ---------------------------------------------------------------------------

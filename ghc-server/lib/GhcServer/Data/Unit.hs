@@ -63,6 +63,10 @@ data Unit =
     sources :: [OsPath],
     -- | Names of home units that this unit depends on, as declared in @unit.json@.
     depUnits :: [UnitName],
+    -- | Names of external (non-local) package dependencies, as declared in a Cabal project's
+    -- @build-depends@. Empty for @unit.json@-based projects. Non-empty entries require building
+    -- these packages into the Cabal store before metadata can run (see "GhcServer.Cabal.ExtDeps").
+    extDeps :: [String],
     -- | Precomputed cache paths for this unit.
     cache :: UnitCache
   }

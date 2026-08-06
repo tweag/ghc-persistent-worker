@@ -313,6 +313,46 @@ in {
     ${testServerBuild "--cabal"}
     '';
 
+    outputs.apps.test-server-cabal-ext-deps = util.zapp "test-server-cabal-ext-deps" ''
+    ${setupProject}
+
+    cat > $project/unit0/A.hs <<'EOF'
+    module A where
+    import Data.Aeson (Value)
+    hello :: Maybe Value
+    hello = Nothing
+    EOF
+
+    rm -f $project/unit1/B.hs
+
+    cat > $project/test-project.cabal <<'EOF'
+    cabal-version: 3.0
+    name: test-project
+    version: 0.1
+    build-type: Simple
+
+    library unit0
+      hs-source-dirs: unit0
+      exposed-modules: A
+      build-depends: base, aeson
+      default-language: GHC2021
+    EOF
+
+    ${cleanup}
+
+    server="${serverPkg}/bin/ghc-server"
+    client="${serverPkg}/bin/ghc-client"
+
+    echo "Starting ghc-server with Cabal external dependency support..."
+    $server --verbose --cabal $project &
+    server_pid=$!
+
+    echo "Running client (builds external deps into the store on first metadata request)..."
+    $client $project --wait unit0:modules
+
+    echo "SUCCESS: external Cabal dependency (aeson) resolved and compiled."
+    '';
+
     outputs.apps.profile-cache-restore = util.zapp "profile-cache-restore" ''
     depth=''${1-2}
     project=$(mktemp -d --tmpdir profile-cache-restore.XXXXXXXX)

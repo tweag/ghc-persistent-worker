@@ -8,6 +8,7 @@ import Control.Concurrent.Async (async)
 import Control.Monad (void)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
+import GhcServer.Cabal.Setup (cabalSetup)
 import GhcServer.Data.Config (ServerConfig (..))
 import GhcServer.Grpc (instrumentMethods)
 import GhcServer.Handler (ServerContext (..), serverContext)
@@ -17,6 +18,7 @@ import Options.Applicative (
   ParserInfo,
   argument,
   auto,
+  command,
   eitherReader,
   execParser,
   fullDesc,
@@ -30,10 +32,13 @@ import Options.Applicative (
   progDesc,
   short,
   str,
+  strArgument,
+  subparser,
   switch,
   value,
   (<**>),
   )
+import Options.Applicative.Builder (allPositional)
 import System.Directory.OsPath (createDirectoryIfMissing)
 import System.Exit (die)
 import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
@@ -84,6 +89,12 @@ maxBytecodeParser =
       )
     )
 
+data ExecMode =
+  ExecServer ServerConfig
+  |
+  ExecCabalSetup [String]
+  deriving stock (Show)
+
 -- | CLI argument parser for the server.
 serverConfigParser :: Parser ServerConfig
 serverConfigParser =
@@ -99,10 +110,21 @@ serverConfigParser =
         Right p -> pure p
         Left e -> fail ("Invalid path: " ++ show e)
 
-serverParserInfo :: ParserInfo ServerConfig
+cabalSetupParser :: Parser [String]
+cabalSetupParser =
+  subparser $
+  command "act-as-setup" (info (many (strArgument mempty)) (allPositional <> progDesc "cabal act-as-setup proxy"))
+
+execModeParser :: Parser ExecMode
+execModeParser =
+  (ExecCabalSetup <$> cabalSetupParser)
+  <|>
+  (ExecServer <$> serverConfigParser)
+
+serverParserInfo :: ParserInfo ExecMode
 serverParserInfo =
-  info (serverConfigParser <**> helper)
-    (fullDesc <> progDesc "Standalone GHC build server" <> header "ghc-server - worker without Buck")
+  info (execModeParser <**> helper)
+    (fullDesc <> progDesc "Standalone GHC build server" <> header "ghc-server")
 
 -- | Run the server: parse CLI args, start the gRPC server on a Unix socket. If the @instrument@ feature is
 -- enabled, also starts the Instrument gRPC service on a second socket, mirroring 'ghc-worker'\'s behavior.
@@ -110,10 +132,9 @@ runServer :: IO ()
 runServer = do
   hSetBuffering stdout LineBuffering
   hSetBuffering stderr LineBuffering
-  config <- execParser serverParserInfo
-  runExceptT (server config) >>= \case
-    Left err -> die err
-    Right () -> pure ()
+  execParser serverParserInfo >>= \case
+    ExecServer config -> either die pure =<< runExceptT (server config)
+    ExecCabalSetup args -> cabalSetup args
   where
     server :: ServerConfig -> ExceptT String IO ()
     server config = do

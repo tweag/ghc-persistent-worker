@@ -52,12 +52,13 @@ library
     GhcServer.Build.Propagate
     GhcServer.Build.Schedule
     GhcServer.Cabal
+    GhcServer.Cabal.ExtDeps
+    GhcServer.Cabal.Setup
     GhcServer.Data.BuildEnv
     GhcServer.Data.BuildCache
     GhcServer.Data.BuildEvent
     GhcServer.Data.BuildSystem
     GhcServer.Data.Config
-
     GhcServer.Data.Request
     GhcServer.Data.Unit
     GhcServer.Data.UnitConfig
@@ -84,12 +85,14 @@ library
     bytestring,
     Cabal,
     Cabal-syntax,
+    cabal-install,
     containers,
     directory,
     extra,
     file-io,
     filepath,
     ghc,
+    ghc-paths,
     ghc-worker,
     ghc-worker-test-common,
     grapesy ^>=1.0.1,

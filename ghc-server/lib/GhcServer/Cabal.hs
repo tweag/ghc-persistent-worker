@@ -81,6 +81,10 @@ classifyDep pkgName locals dep
     depName = unPackageName (depPkgName dep)
 
 -- | Partition dependencies into local (home unit) and external names.
+--
+-- Packages bundled with the GHC toolchain itself (see 'bootPackages') are excluded from the external
+-- list: they are always resolvable via GHC's global package database, so they never need to be built
+-- into the Cabal store via "GhcServer.Cabal.ExtDeps".
 partitionDeps :: String -> Set.Set UnitName -> [Dependency] -> ([UnitName], [String])
 partitionDeps pkgName locals deps =
   (concatMap (classifyDep pkgName locals) deps, externals)
@@ -91,7 +95,57 @@ partitionDeps pkgName locals deps =
       , let dn = unPackageName (depPkgName d)
       , dn /= pkgName
       , UnitName dn `Set.notMember` locals
+      , dn `Set.notMember` bootPackages
       ]
+
+-- | Package names bundled with the GHC toolchain, always resolvable via the global package database
+-- without requiring an external Cabal build.
+bootPackages :: Set.Set String
+bootPackages =
+  Set.fromList [
+    "array",
+    "base",
+    "binary",
+    "bytestring",
+    "Cabal",
+    "Cabal-syntax",
+    "containers",
+    "deepseq",
+    "directory",
+    "exceptions",
+    "file-io",
+    "filepath",
+    "ghc",
+    "ghc-bignum",
+    "ghc-boot",
+    "ghc-boot-th",
+    "ghc-compact",
+    "ghc-experimental",
+    "ghc-heap",
+    "ghc-internal",
+    "ghc-prim",
+    "ghci",
+    "haskeline",
+    "hpc",
+    "integer-gmp",
+    "libiserv",
+    "mtl",
+    "os-string",
+    "parsec",
+    "pretty",
+    "process",
+    "rts",
+    "semaphore-compat",
+    "stm",
+    "template-haskell",
+    "terminfo",
+    "text",
+    "time",
+    "transformers",
+    "unix",
+    "Win32",
+    "xhtml"
+  ]
 
 -- | Discover source files in a list of source directories.
 discoverSources :: OsPath -> [FilePath] -> IO [OsPath]
@@ -136,6 +190,7 @@ buildUnit projectRoot outputDir tmpDir pkgName locals libName lib = do
     ghcArgs,
     sources,
     depUnits = localDeps,
+    extDeps,
     cache = mkUnitCache projectRoot name
   }
 

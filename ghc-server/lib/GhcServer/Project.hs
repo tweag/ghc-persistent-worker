@@ -69,6 +69,7 @@ discoverUnit projectRoot outputDir tmpDir name = do
         ghcArgs = config.args,
         sources,
         depUnits = UnitName <$> config.deps,
+        extDeps = [],
         cache = mkUnitCache projectRoot unitName
       })
 

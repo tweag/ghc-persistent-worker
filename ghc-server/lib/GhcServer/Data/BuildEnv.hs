@@ -25,5 +25,8 @@ data BuildEnv =
     -- | Channel for pushing 'Types.Instrument.Event's to the instrument UI, if the @instrument@ feature is
     -- enabled. 'Nothing' when the feature is disabled, avoiding the cost of constructing events that nobody
     -- consumes.
-    instrChan :: Maybe (Chan Event)
+    instrChan :: Maybe (Chan Event),
+    -- | Memoized result of building the project's external Cabal dependencies into the store, shared by
+    -- all units so the build only runs once per server lifetime. 'Nothing' until first requested.
+    extDepsDb :: MVar (Maybe (Either String FilePath))
   }

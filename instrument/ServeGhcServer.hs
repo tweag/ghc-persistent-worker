@@ -38,7 +38,7 @@ spawnGhcServer :: FilePath -> FilePath -> IO ()
 spawnGhcServer exe projectRoot = do
   _ <-
     createProcess
-      (proc exe [projectRoot, "--enable", "instrument"])
+      (proc exe [projectRoot, "--enable", "instrument", "--cabal"])
         { std_in = NoStream
         , std_out = CreatePipe
         , std_err = CreatePipe

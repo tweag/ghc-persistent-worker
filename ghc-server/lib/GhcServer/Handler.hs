@@ -3,7 +3,7 @@ module GhcServer.Handler where
 
 import Common.Grpc (GrpcHandler (..), fromGrpcHandler)
 import Control.Concurrent.Chan (Chan, newChan)
-import Control.Concurrent.MVar (MVar)
+import Control.Concurrent.MVar (MVar, newMVar)
 import qualified Data.Map.Strict as Map
 import GHC (moduleNameString)
 import GhcServer.Build (Build, BuildResult (..), awaitBuild, newBuild, newBuildState, scheduleBatch)
@@ -151,6 +151,7 @@ serverContext config = do
   stateVar <- newBuildState
   events <- newBuildEvents
   instrChan <- if config.features.instrument then Just <$> newChan else pure Nothing
+  extDepsDb <- newMVar Nothing
   let
     env = BuildEnv {
       baseArgs = (emptyArgs Map.empty) {features = config.features},
@@ -161,7 +162,8 @@ serverContext config = do
       project,
       log,
       events,
-      instrChan
+      instrChan,
+      extDepsDb
     }
   build <- newBuild config.maxJobs 300 env
   let

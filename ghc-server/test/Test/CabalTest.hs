@@ -1,6 +1,7 @@
 -- | Tests for Cabal-based project discovery in the standalone GHC server.
 module Test.CabalTest where
 
+import Control.Concurrent.MVar (newMVar)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -65,6 +66,7 @@ runCabalFresh tp steps = timedBuild do
   stateVar <- newBuildState
   log <- newLogger False
   events <- newBuildEvents
+  extDepsDb <- newMVar Nothing
   let env = BuildEnv {
         baseArgs = emptyArgs Map.empty,
         projectRoot = tp.rootOs,
@@ -74,7 +76,8 @@ runCabalFresh tp steps = timedBuild do
         project = tp.project,
         log,
         events,
-        instrChan = Nothing
+        instrChan = Nothing,
+        extDepsDb
       }
   result <- runBuild 4 testTaskTimeout env ScheduleRequest {steps, recompile = False, rebuild = False}
   evs <- readEvents events
