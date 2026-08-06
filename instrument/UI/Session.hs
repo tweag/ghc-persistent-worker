@@ -5,7 +5,6 @@ module UI.Session where
 import Brick.Types (EventM, Widget)
 import Brick.Widgets.Border (borderWithLabel, hBorder, vBorder)
 import Brick.Widgets.Core (hBox, hLimitPercent, str, vBox, vLimitPercent)
-import Control.Monad (void)
 import Data.Map qualified as Map
 import Data.Text qualified as Text
 import Data.Time (UTCTime)
@@ -108,10 +107,13 @@ handleEvent (InstrEvent wid evt) =
       zoom activeTasks $ ActiveTasks.addTask (TargetUnknown target) wid canDebug
     Instr.CompileEnd {..} -> do
       let content = stripEscSeqs stderr
-          target' = TargetUnknown $ if target == "" then takeWhile (/= ':') content else target
+          rawTarget = if target == "" then takeWhile (/= ':') content else target
+          target' = TargetUnknown rawTarget
       if exitCode == 0
-        then void $ zoom activeTasks $ ActiveTasks.removeTask target'
-        else zoom activeTasks $ ActiveTasks.taskFailure target' content
+        then do
+          zoom activeTasks $ ActiveTasks.completeTask target' ActiveTasks.Succeeded
+          zoom taskTree $ TaskTree.handleEvent $ TaskTree.MarkBuilt (Text.pack rawTarget)
+        else zoom activeTasks $ ActiveTasks.completeTask target' (ActiveTasks.Failed content)
     Instr.Stats {..} -> do
         modifying (workers . each . filtered (\w -> w._workerId == wid) . stats) \st ->
           st

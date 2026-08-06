@@ -31,3 +31,19 @@ evictedAttr = attrName "evicted"
 -- request that hasn't been applied by the worker yet.
 pendingEvictionAttr :: AttrName
 pendingEvictionAttr = attrName "pendingEviction"
+
+-- | Applied to active-task rows for tasks that are still running.
+taskRunningAttr :: AttrName
+taskRunningAttr = attrName "taskRunning"
+
+-- | Applied to active-task rows for tasks that finished successfully.
+taskSucceededAttr :: AttrName
+taskSucceededAttr = attrName "taskSucceeded"
+
+-- | Applied to active-task rows for tasks that finished with an error.
+taskFailedAttr :: AttrName
+taskFailedAttr = attrName "taskFailed"
+
+-- | Suffix appended to a 'UI.TaskTree.ModuleRow' label once that module has been built successfully.
+builtMarker :: Text
+builtMarker = " \9989"

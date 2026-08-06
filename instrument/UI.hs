@@ -51,7 +51,7 @@ import UI.GhcDebug (debug)
 import UI.Session qualified as Session
 import UI.SessionSelector qualified as SessionSelector
 import UI.TaskTree qualified as TaskTree
-import UI.Types (Name (..), WorkerId, canDebugAttr, disabledAttr, evictedAttr, pendingEvictionAttr)
+import UI.Types (Name (..), WorkerId, canDebugAttr, disabledAttr, evictedAttr, pendingEvictionAttr, taskFailedAttr, taskRunningAttr, taskSucceededAttr)
 import UI.Utils (handleListEventOf, popup)
 
 data Event
@@ -296,6 +296,9 @@ app =
             , (canDebugAttr, V.withStyle V.defAttr V.bold)
             , (evictedAttr, V.withStyle (V.defAttr `V.withForeColor` brightBlack) V.dim)
             , (pendingEvictionAttr, V.withStyle V.defAttr V.italic)
+            , (taskRunningAttr, V.defAttr `V.withForeColor` yellow)
+            , (taskSucceededAttr, V.defAttr `V.withForeColor` green)
+            , (taskFailedAttr, V.defAttr `V.withForeColor` red)
             ]
     , appChooseCursor = showFirstCursor
     }

@@ -8,7 +8,7 @@
 module UI.TaskTree where
 
 import Brick.Types (EventM, Widget)
-import Brick.Widgets.Core (str, withAttr)
+import Brick.Widgets.Core (str, withAttr, (<+>))
 import Brick.Widgets.List (GenericList, list, listSelectedElement, renderList)
 import Control.Monad.State (gets, modify)
 import Data.Sequence qualified as Seq
@@ -17,7 +17,8 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Lens.Micro.Platform (Lens', lens)
-import UI.Types (Name (TaskTree), disabledAttr)
+import UI.Types (Name (TaskTree), builtMarker, disabledAttr)
+import UI.Utils (wideStr)
 
 -- | A unit and its module names, as reported by 'Types.Instrument.ProjectStructure'.
 data Entry = Entry
@@ -37,12 +38,15 @@ data State = State
   { rows :: GenericList Name Seq.Seq Row
   , units :: [Entry]
   , expanded :: Set Text
+  , built :: Set Text
   }
 
 data Event
   = Load [Entry]
   | -- | Toggle the expanded state of the unit owning the currently selected row.
     ToggleExpand
+  | -- | Mark a unit\/module target (@unitName:metadata@ or @unitName:moduleName@) as successfully built.
+    MarkBuilt Text
 
 initialState :: State
 initialState =
@@ -50,6 +54,7 @@ initialState =
     { rows = list TaskTree Seq.empty 1
     , units = []
     , expanded = Set.empty
+    , built = Set.empty
     }
 
 -- | The unit name owning a row, whether it's the header itself or one of its module children.
@@ -93,6 +98,8 @@ handleEvent ToggleExpand = do
       refreshRows
  where
   toggle x s = if Set.member x s then Set.delete x s else Set.insert x s
+handleEvent (MarkBuilt target) =
+  modify \s -> s{built = Set.insert target s.built}
 
 -- | The build target text for the currently selected row, used by the 'b' build action.
 --
@@ -105,10 +112,19 @@ selectedTarget State{rows} = target . snd <$> listSelectedElement rows
   target (ModuleRow uid m _) = uid <> ":" <> m
 
 draw :: Name -> State -> Widget Name
-draw current State{rows} = renderList drawRow (current == TaskTree) rows
+draw current State{rows, built} = renderList drawRow (current == TaskTree) rows
  where
   drawRow isSel row = (if isSel then withAttr disabledAttr else id) (drawRow' row)
   drawRow' (Header uid expanded') =
-    str ((if expanded' then "\9662 " else "\9656 ") ++ Text.unpack uid)
-  drawRow' (ModuleRow _ m isLast) =
-    str ("  " ++ (if isLast then "\9492\9472 " else "\9500\9472 ") ++ Text.unpack m)
+    str ((if expanded' then "\9662 " else "\9656 ") ++ Text.unpack uid) <+> mark (uid <> ":metadata")
+  drawRow' (ModuleRow uid m isLast) =
+    str ("  " ++ (if isLast then "\9492\9472 " else "\9500\9472 ") ++ Text.unpack m) <+> mark (uid <> ":" <> m)
+
+  -- The built marker is a leading space plus a checkmark emoji ('UI.Types.builtMarker'). 'wideStr' builds
+  -- it through vty's low-level 'HorizText' constructor with an explicit display width of 3 (1 for the
+  -- space, 2 for the emoji, which terminals render double-width even though vty's East-Asian-Width-based
+  -- 'textWidth' reports it as 1), bypassing wcwidth entirely.
+  mark target =
+    if Set.member target built
+      then wideStr 3 (Text.unpack builtMarker)
+      else str ""
