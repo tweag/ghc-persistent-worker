@@ -2,6 +2,7 @@ module Main where
 
 import Brick.BChan (BChan, newBChan, writeBChan)
 import BuckWorkerProto (Instrument)
+import Control.Applicative ((<|>))
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Exception (SomeException, catch, try, IOException)
 import Control.Monad (filterM, forever, void, when)
@@ -31,11 +32,10 @@ import Options.Applicative (
   optional,
   progDesc,
   strOption,
-  switch,
   (<**>),
   )
-import ServeGhcServer (ensureGhcServer)
-import System.Directory (doesPathExist, getModificationTime, listDirectory, createDirectoryIfMissing)
+import ServeGhcServer (defaultSocketPath, ensureGhcServer, isServerUp)
+import System.Directory (doesPathExist, getModificationTime, listDirectory, createDirectoryIfMissing, getCurrentDirectory)
 import System.Environment (lookupEnv)
 import System.FilePath ((</>))
 import System.FSNotify (Event (..), EventIsDirectory (..), watchDir, withManager)
@@ -45,20 +45,16 @@ import UI.SessionSelector qualified as SS
 import UI.Types (WorkerId (WorkerId))
 
 -- | CLI options for the @instrument@ client.
-data Options = Options {serve :: Bool, serverExe :: Maybe FilePath}
+newtype Options = Options {serverExe :: Maybe FilePath}
 
 optionsParser :: Parser Options
 optionsParser =
   Options
-    <$> switch (
-      long "serve"
-      <> help "Start a ghc-server for the current directory if one isn't already running, and connect to it"
-      )
-    <*> optional (
+    <$> optional (
       strOption (
         long "server-exe"
         <> metavar "PATH"
-        <> help "Path to the ghc-server executable to use with --serve (defaults to a PATH lookup)"
+        <> help "Path to the ghc-server executable to use when starting one (defaults to a PATH lookup)"
         )
       )
 
@@ -101,16 +97,24 @@ listen eventChan instrPath = do
       )
       (const $ threadDelay 100_000 >> go (n - 1))
 
+-- | Builds the closure passed to 'UI.initialState' that backs the capital-@S@ key binding: ensures a @ghc-server@
+-- is running for the given path (empty means the current directory) with the given extra CLI options, then starts
+-- listening on its Instrument socket.
+startServer :: Maybe FilePath -> BChan UI.Event -> Text.Text -> [String] -> IO ()
+startServer serverExe eventChan path extraOpts = do
+  let explicitRoot = if Text.null path then Nothing else Just (Text.unpack path)
+  sock <- ensureGhcServer serverExe explicitRoot extraOpts
+  listen eventChan sock
+
 main :: IO ()
 main = do
   opts <- execParser optionsInfo
   workers <- envWorkerPath
   workerPathExists <- doesPathExist workers.path
   instrSocketEnv <- lookupEnv "INSTRUMENT_SOCKET"
-  instrSocket <-
-    if opts.serve
-      then Just <$> ensureGhcServer opts.serverExe
-      else pure instrSocketEnv
+  cwd <- getCurrentDirectory
+  defaultUp <- isServerUp (defaultSocketPath cwd)
+  let instrSocket = instrSocketEnv <|> (if defaultUp then Just (defaultSocketPath cwd) else Nothing)
   eventChan <- newBChan 10
 
   -- Update time every 100ms
@@ -142,5 +146,5 @@ main = do
           listen eventChan $ dir </> "instrument"
         _ -> pure ()
 
-    (_, vty) <- UI.customMainWithDefaultVty (Just eventChan) UI.app UI.initialState
+    (_, vty) <- UI.customMainWithDefaultVty (Just eventChan) UI.app (UI.initialState (startServer opts.serverExe eventChan))
     vty.shutdown

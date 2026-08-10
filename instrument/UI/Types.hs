@@ -11,6 +11,9 @@ data Name
   | OptionsEditor
   | OEExtraGhcOptions
   | BytecodeBrowser
+  | ServeOptions
+  | SOPath
+  | SOExtraOptions
   deriving stock (Eq, Ord, Show)
 
 newtype WorkerId = WorkerId { unWorkerId :: Text }

@@ -1,7 +1,7 @@
--- | Support for the @--serve@ CLI option: ensures a @ghc-server@ instance is running for the current directory,
--- spawning one as a detached daemon subprocess if necessary. The executable can be looked up on @PATH@ or given
--- explicitly (via @--server-exe@), see 'ensureGhcServer'.
-module ServeGhcServer (ensureGhcServer) where
+-- | Support for starting a @ghc-server@ instance on demand from the instrument UI (the capital-@S@ key binding):
+-- ensures one is running for a given project directory, spawning it as a detached daemon subprocess if necessary.
+-- The executable can be looked up on @PATH@ or given explicitly (via @--server-exe@), see 'ensureGhcServer'.
+module ServeGhcServer (ensureGhcServer, isServerUp, defaultSocketPath) where
 
 import Control.Concurrent (threadDelay)
 import Control.Exception (SomeException, bracket, catch)
@@ -21,6 +21,10 @@ isServerUp sock =
     (bracket (socket AF_UNIX Stream 0) close (\s -> connect s (SockAddrUnix sock)) >> pure True)
     (const (pure False))
 
+-- | The default Instrument socket path for a given project root, i.e. @PROJECT_ROOT/socket/instrument@.
+defaultSocketPath :: FilePath -> FilePath
+defaultSocketPath projectRoot = projectRoot ++ "/socket/instrument"
+
 -- | Poll the socket until the server responds, retrying up to @n@ times with a 100ms delay (matches the retry budget
 -- used elsewhere in this codebase, e.g. 'Common.Grpc.waitPoll').
 waitForServer :: FilePath -> Int -> IO ()
@@ -33,12 +37,13 @@ waitForServer sock n
         else threadDelay 100_000 >> waitForServer sock (n - 1)
 
 -- | Spawn @ghc-server@ as a detached daemon process rooted at the given project directory, with the @instrument@
--- feature enabled so it opens an Instrument gRPC socket.
-spawnGhcServer :: FilePath -> FilePath -> IO ()
-spawnGhcServer exe projectRoot = do
+-- feature enabled so it opens an Instrument gRPC socket, plus any extra CLI options given by the caller (e.g. from
+-- the UI's start-server popup).
+spawnGhcServer :: FilePath -> FilePath -> [String] -> IO ()
+spawnGhcServer exe projectRoot extraArgs = do
   _ <-
     createProcess
-      (proc exe [projectRoot, "--enable", "instrument", "--cabal"])
+      (proc exe (projectRoot : "--enable" : "instrument" : extraArgs))
         { std_in = NoStream
         , std_out = CreatePipe
         , std_err = CreatePipe
@@ -55,19 +60,21 @@ resolveServerExe = \case
     mExe <- findExecutable "ghc-server"
     maybe (die "ghc-server executable not found in PATH; pass --server-exe or ensure it's on PATH") pure mExe
 
--- | Ensure a @ghc-server@ instance is running for the current directory, starting one as a daemon subprocess if none
--- is listening yet. Returns the path to its Instrument gRPC socket.
+-- | Ensure a @ghc-server@ instance is running for the given project directory (defaulting to the current directory
+-- when 'Nothing'), starting one as a daemon subprocess if none is listening yet. Returns the path to its Instrument
+-- gRPC socket.
 --
 -- If @serverExe@ is @Nothing@, the executable is looked up on @PATH@ (see 'resolveServerExe').
-ensureGhcServer :: Maybe FilePath -> IO FilePath
-ensureGhcServer serverExe = do
-  projectRoot <- getCurrentDirectory
-  let sock = projectRoot ++ "/socket/instrument"
+ensureGhcServer :: Maybe FilePath -> Maybe FilePath -> [String] -> IO FilePath
+ensureGhcServer serverExe explicitRoot extraArgs = do
+  projectRoot <- maybe getCurrentDirectory pure explicitRoot
+  let sock = defaultSocketPath projectRoot
   up <- isServerUp sock
   if up
     then pure sock
     else do
       exe <- resolveServerExe serverExe
-      spawnGhcServer exe projectRoot
+      spawnGhcServer exe projectRoot extraArgs
       waitForServer sock 30
       pure sock
+

@@ -66,16 +66,40 @@ data Event
   | BytecodeBrowserEvent BytecodeBrowser.Event
   | FetchBytecodeState
   | RequestEvict Text.Text (Maybe Text.Text)
+  | -- | Start (or connect to) a @ghc-server@ instance, as requested via the capital-@S@ key binding's popup.
+    -- Carries the user-entered project path (empty means "use the current directory") and extra CLI options to
+    -- pass to @ghc-server@.
+    RequestServe Text.Text Text.Text
+
+-- | Input fields for the "start ghc-server" popup (the capital-@S@ key binding).
+data ServeInput = ServeInput
+  { _serveInputPath :: Text.Text
+  , _serveInputOptions :: Text.Text
+  }
+
+defaultServeInput :: ServeInput
+defaultServeInput = ServeInput{_serveInputPath = Text.empty, _serveInputOptions = Text.empty}
 
 data State = State
   { _sessions :: SessionSelector.State
   , _options :: Form Options Event Name
+  , _serveForm :: Form ServeInput Event Name
   , _currentFocus :: Name
   , _currentTime :: UTCTime
   , _bcoBrowser :: BytecodeBrowser.State
+  , -- | Starts (or connects to) a @ghc-server@ instance for the given project path (empty for the current
+    -- directory) and extra options, dispatched from the capital-@S@ popup. Supplied by @Main@, which owns the
+    -- event channel and the socket-listening logic.
+    _startServer :: Text.Text -> [String] -> IO ()
   }
 
 makeLenses ''State
+
+servePathLens :: Lens' ServeInput Text.Text
+servePathLens = lens (._serveInputPath) (\s v -> s{_serveInputPath = v})
+
+serveOptionsLens :: Lens' ServeInput Text.Text
+serveOptionsLens = lens (._serveInputOptions) (\s v -> s{_serveInputOptions = v})
 
 ghcOptionsLens :: Lens' Options Text.Text
 ghcOptionsLens =
@@ -84,14 +108,16 @@ ghcOptionsLens =
     (\opts s -> opts{extraGhcOptions = s})
     . packed
 
-initialState :: State
-initialState =
+initialState :: (Text.Text -> [String] -> IO ()) -> State
+initialState onStartServer =
   State
     { _sessions = SessionSelector.initialState
     , _options = newForm optionFields defaultOptions
+    , _serveForm = newForm serveFields defaultServeInput
     , _currentFocus = TaskTree
     , _currentTime = UTCTime (fromGregorian 1970 1 1) 0
     , _bcoBrowser = BytecodeBrowser.initialState
+    , _startServer = onStartServer
     }
 
 optionFields :: [Options -> FormFieldState Options Event Name]
@@ -99,11 +125,18 @@ optionFields =
   [ (str "Extra GHC Options: " <+>) @@= editTextField ghcOptionsLens OEExtraGhcOptions (Just 1)
   ]
 
+serveFields :: [ServeInput -> FormFieldState ServeInput Event Name]
+serveFields =
+  [ (str "Project path: " <+>) @@= editTextField servePathLens SOPath (Just 1)
+  , (str "Extra options: " <+>) @@= editTextField serveOptionsLens SOExtraOptions (Just 1)
+  ]
+
 drawUI :: State -> [Widget Name]
 drawUI State{..} =
   ( case _currentFocus of
       SessionSelector -> [SessionSelector.draw _sessions]
       OptionsEditor -> [drawOptionsEditor _options]
+      ServeOptions -> [drawServeEditor _serveForm]
       TaskDetails -> let task = session >>= listSelectedElement . Session._activeTasks in maybe [] (pure . ActiveTasks.drawTaskDetails . snd) task
       _ -> []
   )
@@ -116,7 +149,7 @@ drawUI State{..} =
                   session
           , modifyDefAttr (`V.withStyle` V.italic) $
               str
-                " q:quit   Tab:switch pane   Enter:expand/details   b:build   r:trigger rebuild   d:debug   o:options   s:sessions   t:sort bytecode   e:evict bytecode"
+                " q:quit   Tab:switch pane   Enter:expand/details   b:build   r:trigger rebuild   d:debug   o:options   s:sessions   S:start server   t:sort bytecode   e:evict bytecode"
           ]
        ]
  where
@@ -124,6 +157,15 @@ drawUI State{..} =
 
 drawOptionsEditor :: Form Options Event Name -> Widget Name
 drawOptionsEditor form = popup 50 "Session Options" $ renderForm form
+
+drawServeEditor :: Form ServeInput Event Name -> Widget Name
+drawServeEditor form =
+  popup 50 "Start ghc-server" $
+    vBox
+      [ renderForm form
+      , str " "
+      , str "Leaving the path empty starts ghc-server in the current directory."
+      ]
 
 currentSession :: Traversal' State Session.State
 currentSession = sessions . listSelectedElementL . _2
@@ -204,6 +246,9 @@ handleEvent (AppEvent (RequestEvict unitId modName)) = do
   zoom bcoBrowser (BytecodeBrowser.handleEvent (BytecodeBrowser.Evicted unitId modName))
 handleEvent (AppEvent (SessionSelectorEvent evt)) =
   zoom sessions (SessionSelector.handleEvent evt)
+handleEvent (AppEvent (RequestServe path opts)) = do
+  action <- use startServer
+  liftIO $ action path (words (Text.unpack opts))
 handleEvent (VtyEvent evt) = do
   current <- use currentFocus
   case current of
@@ -222,6 +267,15 @@ handleEvent (VtyEvent evt) = do
         V.EvKey V.KEsc [] -> hide
         V.EvKey V.KEnter [] -> hide
         _ -> zoom options (handleFormEvent (VtyEvent evt))
+    ServeOptions -> do
+      let hide = currentFocus .= TaskTree
+      case evt of
+        V.EvKey V.KEsc [] -> hide
+        V.EvKey V.KEnter [] -> do
+          input <- formState <$> use serveForm
+          hide
+          handleEvent (AppEvent (RequestServe input._serveInputPath input._serveInputOptions))
+        _ -> zoom serveForm (handleFormEvent (VtyEvent evt))
     TaskDetails -> do
       let hide = currentFocus .= ActiveTasks
       case evt of
@@ -235,6 +289,8 @@ handleEvent (VtyEvent evt) = do
         currentFocus .= SessionSelector
       V.EvKey (V.KChar 'o') [] -> do
         currentFocus .= OptionsEditor
+      V.EvKey (V.KChar 'S') [] -> do
+        currentFocus .= ServeOptions
       V.EvKey (V.KChar 'd') [] -> do
         withTarget $ \_wid target ->
           suspendAndResume' $

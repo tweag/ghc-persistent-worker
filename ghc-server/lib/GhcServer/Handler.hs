@@ -7,7 +7,7 @@ import Control.Concurrent.MVar (MVar, newMVar)
 import qualified Data.Map.Strict as Map
 import GHC (moduleNameString)
 import GhcServer.Build (Build, BuildResult (..), awaitBuild, newBuild, newBuildState, scheduleBatch)
-import GhcServer.Cabal (discoverCabalProject)
+import GhcServer.Cabal (discoverCabalProject, findCabalFile)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (newBuildEvents)
 import GhcServer.Data.Config (ServerConfig (..))
@@ -145,9 +145,12 @@ serverContext config = do
     outputDir = config.projectRoot </> outputDirName
     tmpDir = config.projectRoot </> tmpDirName
   log <- newLogger config.verbose
-  project <- if config.cabal
-    then discoverCabalProject log config.projectRoot outputDir tmpDir
-    else discoverProject config.projectRoot outputDir tmpDir
+  projectCabal <- if config.jsonConfig
+    then pure Nothing
+    else do
+      cabal <- findCabalFile config.projectRoot
+      traverse (discoverCabalProject log config.projectRoot outputDir tmpDir) cabal
+  project <- maybe (discoverProject config.projectRoot outputDir tmpDir) pure projectCabal
   stateVar <- newBuildState
   events <- newBuildEvents
   instrChan <- if config.features.instrument then Just <$> newChan else pure Nothing

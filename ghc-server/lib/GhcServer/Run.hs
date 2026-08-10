@@ -39,10 +39,10 @@ import Options.Applicative (
   (<**>),
   )
 import Options.Applicative.Builder (allPositional)
-import System.Directory.OsPath (createDirectoryIfMissing)
+import System.Directory.OsPath (createDirectoryIfMissing, getCurrentDirectory)
 import System.Exit (die)
 import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
-import System.OsPath (encodeUtf, (</>))
+import System.OsPath (OsPath, encodeUtf, (</>))
 import System.OsPath.Extra (fromOsPath)
 import Types.FeatureFlags (FeatureFlag (..), FeatureFlags (..), defaultFeatureFlags, parseByteSize)
 
@@ -90,25 +90,50 @@ maxBytecodeParser =
     )
 
 data ExecMode =
-  ExecServer ServerConfig
+  ExecServer RawServerConfig
   |
   ExecCabalSetup [String]
   deriving stock (Show)
 
+-- | Server CLI config prior to resolving the project root, which defaults to the current directory when not given
+-- explicitly (see 'resolveServerConfig').
+data RawServerConfig =
+  RawServerConfig {
+    projectRootArg :: Maybe OsPath,
+    maxJobs :: Int,
+    verbose :: Bool,
+    jsonConfig :: Bool,
+    features :: FeatureFlags
+  }
+  deriving stock (Show)
+
 -- | CLI argument parser for the server.
-serverConfigParser :: Parser ServerConfig
+serverConfigParser :: Parser RawServerConfig
 serverConfigParser =
-  ServerConfig
-    <$> argument readOsPath (metavar "PROJECT_ROOT" <> help "Path to the project root directory")
+  RawServerConfig
+    <$> optional (argument readOsPath (metavar "PROJECT_ROOT" <> help "Path to the project root directory (defaults to the current directory)"))
     <*> option auto (long "jobs" <> short 'j' <> metavar "N" <> help "Maximum concurrent jobs" <> value 4)
     <*> switch (long "verbose" <> short 'v' <> help "Print the build log on success")
-    <*> switch (long "cabal" <> help "Use .cabal file for project discovery")
+    <*> switch (long "json-config" <> help "Force unit.json-based project discovery even if a .cabal file is present")
     <*> featureFlagsParser
   where
     readOsPath = str >>= \ s ->
       case encodeUtf s of
         Right p -> pure p
         Left e -> fail ("Invalid path: " ++ show e)
+
+-- | Resolve a 'RawServerConfig' into a 'ServerConfig', defaulting the project root to the current directory when
+-- not given explicitly.
+resolveServerConfig :: RawServerConfig -> IO ServerConfig
+resolveServerConfig raw = do
+  projectRoot <- maybe getCurrentDirectory pure raw.projectRootArg
+  pure ServerConfig {
+    projectRoot,
+    maxJobs = raw.maxJobs,
+    verbose = raw.verbose,
+    jsonConfig = raw.jsonConfig,
+    features = raw.features
+  }
 
 cabalSetupParser :: Parser [String]
 cabalSetupParser =
@@ -133,7 +158,7 @@ runServer = do
   hSetBuffering stdout LineBuffering
   hSetBuffering stderr LineBuffering
   execParser serverParserInfo >>= \case
-    ExecServer config -> either die pure =<< runExceptT (server config)
+    ExecServer raw -> either die pure =<< runExceptT (server =<< lift (resolveServerConfig raw))
     ExecCabalSetup args -> cabalSetup args
   where
     server :: ServerConfig -> ExceptT String IO ()

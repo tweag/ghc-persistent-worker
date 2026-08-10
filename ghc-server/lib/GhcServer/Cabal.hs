@@ -6,9 +6,7 @@
 -- against the set of known library names in the same package.
 module GhcServer.Cabal where
 
-import Data.List (isSuffixOf)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (catMaybes)
 import qualified Data.Set as Set
 import Distribution.Compat.NonEmptySet (toList)
 import Distribution.Package (packageName)
@@ -25,27 +23,23 @@ import Distribution.Utils.Path (getSymbolicPath)
 #if MIN_VERSION_Cabal(3,14,0)
 import Distribution.Utils.Path (makeSymbolicPath)
 #endif
+import Data.Foldable (find)
 import Distribution.Verbosity (silent)
 import GHC.Data.Graph.Directed (graphFromEdgedVerticesOrd)
+import GHC.Data.OsPath (isSuffixOf)
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..), mkUnitCache)
 import GhcServer.Path (osPath)
 import GhcServer.Project (isHaskellSource, unitDepNode)
 import System.Directory.OsPath (createDirectoryIfMissing, doesFileExist, listDirectory)
-import System.OsPath (OsPath, decodeUtf, (</>))
+import System.OsPath (OsPath, (</>))
+import System.OsPath.Extra (fromOsPath, toOsPath)
 import Types.Log (Logger (..))
 
 -- | Find the first @.cabal@ file in a directory.
-findCabalFile :: OsPath -> IO (Maybe FilePath)
+findCabalFile :: OsPath -> IO (Maybe OsPath)
 findCabalFile dir = do
   entries <- listDirectory dir
-  paths <- catMaybes <$> traverse decode entries
-  pure (case filter (".cabal" `isSuffixOf`) paths of
-    [f] -> Just f
-    _ -> Nothing)
-  where
-    decode e = case decodeUtf (dir </> e) of
-      Right p -> pure (Just p)
-      Left _ -> pure Nothing
+  pure ((dir </>) <$> find (toOsPath ".cabal" `isSuffixOf`) entries)
 
 -- | The name of a library component.
 libraryUnitName :: String -> LibraryName -> UnitName
@@ -198,21 +192,15 @@ buildUnit projectRoot outputDir tmpDir pkgName locals libName lib = do
 --
 -- Each library component becomes a unit. Sub-libraries that depend on each other
 -- are linked via 'depUnits'. External dependencies become @-package@ flags.
-discoverCabalProject :: Logger -> OsPath -> OsPath -> OsPath -> IO Project
-discoverCabalProject logger projectRoot outputDir tmpDir = do
+discoverCabalProject :: Logger -> OsPath -> OsPath -> OsPath -> OsPath -> IO Project
+discoverCabalProject logger projectRoot outputDir tmpDir cabalFile = do
   createDirectoryIfMissing True outputDir
   createDirectoryIfMissing True tmpDir
-  mCabalFile <- findCabalFile projectRoot
-  cabalFile <- case mCabalFile of
-    Nothing -> do
-      root <- either (const "<decode error>") id <$> pure (decodeUtf projectRoot)
-      fail ("No .cabal file found in: " ++ root)
-    Just f -> pure f
-  logger.info ("Loading project configuration from " ++ cabalFile)
+  logger.info ("Loading project configuration from " ++ cabalFp)
 #if MIN_VERSION_Cabal(3,14,0)
-  gpd <- readGenericPackageDescription silent Nothing (makeSymbolicPath cabalFile)
+  gpd <- readGenericPackageDescription silent Nothing (makeSymbolicPath cabalFp)
 #else
-  gpd <- readGenericPackageDescription silent cabalFile
+  gpd <- readGenericPackageDescription silent cabalFp
 #endif
   let pkgName = unPackageName (packageName gpd)
       locals = localLibNames pkgName gpd
@@ -226,3 +214,5 @@ discoverCabalProject logger projectRoot outputDir tmpDir = do
   let unitMap = Map.fromList [(u.name, u) | u <- units]
       depGraph = graphFromEdgedVerticesOrd (map unitDepNode units)
   pure Project {units = unitMap, depGraph}
+  where
+    cabalFp = fromOsPath cabalFile

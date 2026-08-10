@@ -13,8 +13,9 @@ data ServerConfig =
     maxJobs :: Int,
     -- | Print the build log even when steps succeed.
     verbose :: Bool,
-    -- | Use Cabal file for project discovery instead of @unit.json@ files.
-    cabal :: Bool,
+    -- | Force @unit.json@-based project discovery even if a @.cabal@ file is present in the project root. Normally
+    -- discovery auto-detects: a @.cabal@ file triggers Cabal-based discovery, otherwise @unit.json@ files are used.
+    jsonConfig :: Bool,
     -- | Runtime feature flags.
     features :: FeatureFlags
   }

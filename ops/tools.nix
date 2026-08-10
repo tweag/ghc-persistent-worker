@@ -310,7 +310,7 @@ in {
       default-language: GHC2021
     EOF
 
-    ${testServerBuild "--cabal"}
+    ${testServerBuild ""}
     '';
 
     outputs.apps.test-server-cabal-ext-deps = util.zapp "test-server-cabal-ext-deps" ''
@@ -344,7 +344,7 @@ in {
     client="${serverPkg}/bin/ghc-client"
 
     echo "Starting ghc-server with Cabal external dependency support..."
-    $server --verbose --cabal $project &
+    $server --verbose $project &
     server_pid=$!
 
     echo "Running client (builds external deps into the store on first metadata request)..."
