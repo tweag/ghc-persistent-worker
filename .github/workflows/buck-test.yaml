@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - dev
+      - tek/dev
   workflow_dispatch:
 
 env:
