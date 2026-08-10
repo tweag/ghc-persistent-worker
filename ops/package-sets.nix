@@ -81,11 +81,13 @@
     (overrides_mwb_flag flags)
   ];
 
+  defaultGhciArgs = ["-DMWB" "-DDOWNSWEEP_CACHE" "-DUNIT_INDEX" "-DFIXED_NODES"];
+
   defaultEnv = extra: {
     hls.enable = lib.mkForce false;
     package-set.extends = "mwb-26-07";
     overrides = commonOverrides ["mwb" "unit-index" "downsweep-cache"] ++ [ipeOverrides] ++ extra;
-    ghci.args = ["-DMWB" "-DDOWNSWEEP_CACHE" "-DUNIT_INDEX"];
+    ghci.args = defaultGhciArgs;
   };
 
   mkGithub = {force, source, nodoc, ...}: {owner ? "tek", repo, rev, hash, path ? ""}:
@@ -101,7 +103,6 @@ in {
   envs.dev = defaultEnv [] // {
     package-set.extends = "mwb-26-07";
     buildInputs = pkgs: [pkgs.zlib pkgs.snappy pkgs.protobuf build.envs.dev.toolchain.packages.proto-lens-protoc];
-    ghci.args = ["-DMWB" "-DDOWNSWEEP_CACHE" "-DUNIT_INDEX" "-DFIXED_NODES"];
   };
 
   envs.min = defaultEnv [];
@@ -110,7 +111,7 @@ in {
     expose.scoped = true;
     package-set.extends = "mwb-26-07-linkables";
     overrides = commonOverrides ["mwb" "unit-index" "downsweep-cache" "linkables"] ++ [buckBinOverrides ipeOverrides];
-    ghci.args = ["-DMWB" "-DDOWNSWEEP_CACHE" "-DUNIT_INDEX" "-DFIXED_NODES"];
+    ghci.args = defaultGhciArgs ++ ["-DLINKABLES"];
   };
 
   envs.mwb-26-07 = defaultEnv [] // {
