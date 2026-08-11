@@ -111,3 +111,30 @@ For example, running `cabal build -ffixed-nodes` enables the fixed nodes feature
 
   This allows the worker to hook into the bytecode loading procedure to lazily compile interface Core to bytecode when
   the module is requested for a splice or test execution.
+
+GHC server
+==========
+
+The package `ghc-server` provides two executables that allow testing the worker in server mode without a Buck build from
+the CLI.
+The executable `ghc-server` starts the worker's gRPC server, while `ghc-client` sends requests in a custom format:
+
+```
+$ nix run .#ghc-server -- path/to/project &
+$ nix run .#ghc-client -- path/to/project unit1:metadata unit1:modules
+$ nix run .#ghc-client -- path/to/project unit2 unit3:Module3
+```
+
+Units are configured with JSON files in their directory:
+
+```
+$ ls path/to/project/unit2
+Module2.hs unit.json
+$ cat path/to/project/unit2/unit.json
+{
+  "deps": ["unit1"],
+  "args": ["-package", "base"]
+}
+```
+
+You can run the flake app `.#test-server` to see an example build.
