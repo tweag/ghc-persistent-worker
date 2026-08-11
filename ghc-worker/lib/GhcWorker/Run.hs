@@ -62,6 +62,7 @@ featureFlagsParser =
         (flagParser, FeatureFlagParser) -> flags {flagParser}
         (concurrentInitUnits, FeatureConcurrentInitUnits) -> flags {concurrentInitUnits}
         (instrument, FeatureInstrument) -> flags {instrument}
+        (incrementalBuildPlan, FeatureIncrementalMetadata) -> flags {incrementalBuildPlan}
         (lazyByteCode, FeatureLazyByteCode) -> flags {lazyByteCode}
 
     flagOption value = do
