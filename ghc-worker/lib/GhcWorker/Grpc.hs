@@ -85,6 +85,13 @@ triggerRebuild stateVar recompile target = do
   for_ margs (uncurry recompile)
   pure defMessage
 
+-- | Stub for the persistent-worker protocol: 'GhcWorker' has no unit\/module-oriented project model to execute a
+-- unit's modules against (see 'GhcServer.Grpc.triggerExecute' for the real implementation, used by @ghc-server@).
+triggerExecute ::
+  Proto Instr.RebuildRequest ->
+  IO (Proto Instr.Empty)
+triggerExecute _ = pure defMessage
+
 -- | Snapshot the historic lazily-loaded bytecode cache for the instrumentation UI: every module that has ever been
 -- tracked in 'MakeState.bcoHistory' (current residents and past evictees alike), decorated with whether it's
 -- currently resident in 'MakeState.bcoCache' and whether it has a pending eviction request.
@@ -135,4 +142,5 @@ instrumentMethods chan stateVar recompile =
     (mkNonStreaming (getBytecodeState stateVar))
     (mkServerStreaming (const (notifyMe stateVar chan)))
     (mkNonStreaming (setOptions stateVar))
+    (mkNonStreaming triggerExecute)
     (mkNonStreaming (triggerRebuild stateVar recompile))

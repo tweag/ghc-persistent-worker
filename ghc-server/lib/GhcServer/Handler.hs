@@ -131,7 +131,10 @@ data ServerContext =
     project :: Project,
     -- | Channel carrying instrumentation events (metadata\/compile task start\/end) to the Instrument gRPC
     -- service, if the @instrument@ feature is enabled.
-    instrChan :: Maybe (Chan Event)
+    instrChan :: Maybe (Chan Event),
+    -- | The build environment, needed by the Instrument gRPC service to run ad hoc tasks against the project
+    -- outside of the scheduler (e.g. 'GhcServer.Grpc.triggerExecute').
+    buildEnv :: BuildEnv
   }
 
 -- | Create the server context: discovers the project, creates the persistent 'WorkerState' and scheduler, and
@@ -185,7 +188,7 @@ serverContext config = do
             pure (report, exitCode)
           else
             pure (["Scheduled."], 0)
-  pure ServerContext {grpcHandler, stateVar, build, project, instrChan}
+  pure ServerContext {grpcHandler, stateVar, build, project, instrChan, buildEnv = env}
 
 -- | Create the gRPC handler for the server.
 serverHandler :: ServerConfig -> IO GrpcHandler

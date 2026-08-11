@@ -1065,6 +1065,7 @@ instance Data.ProtoLens.Service.Types.Service Instrument where
                                      "getBytecodeState",
                                      "notifyMe",
                                      "setOptions",
+                                     "triggerExecute",
                                      "triggerRebuild"]
   packedServiceDescriptor _
     = "\n\
@@ -1073,7 +1074,8 @@ instance Data.ProtoLens.Service.Types.Service Instrument where
       \\bNotifyMe\DC2\DC1.instrument.Empty\SUB\DC1.instrument.Event\"\NUL0\SOH\DC26\n\
       \\n\
       \SetOptions\DC2\DC3.instrument.Options\SUB\DC1.instrument.Empty\"\NUL\DC2A\n\
-      \\SOTriggerRebuild\DC2\SUB.instrument.RebuildRequest\SUB\DC1.instrument.Empty\"\NUL\DC2B\n\
+      \\SOTriggerRebuild\DC2\SUB.instrument.RebuildRequest\SUB\DC1.instrument.Empty\"\NUL\DC2A\n\
+      \\SOTriggerExecute\DC2\SUB.instrument.RebuildRequest\SUB\DC1.instrument.Empty\"\NUL\DC2B\n\
       \\DLEGetBytecodeState\DC2\DC1.instrument.Empty\SUB\EM.instrument.BytecodeState\"\NUL\DC2F\n\
       \\rEvictBytecode\DC2 .instrument.EvictBytecodeRequest\SUB\DC1.instrument.Empty\"\NUL"
 instance Data.ProtoLens.Service.Types.HasMethodImpl Instrument "notifyMe" where
@@ -1091,6 +1093,11 @@ instance Data.ProtoLens.Service.Types.HasMethodImpl Instrument "triggerRebuild" 
   type MethodInput Instrument "triggerRebuild" = RebuildRequest
   type MethodOutput Instrument "triggerRebuild" = Empty
   type MethodStreamingType Instrument "triggerRebuild" = 'Data.ProtoLens.Service.Types.NonStreaming
+instance Data.ProtoLens.Service.Types.HasMethodImpl Instrument "triggerExecute" where
+  type MethodName Instrument "triggerExecute" = "TriggerExecute"
+  type MethodInput Instrument "triggerExecute" = RebuildRequest
+  type MethodOutput Instrument "triggerExecute" = Empty
+  type MethodStreamingType Instrument "triggerExecute" = 'Data.ProtoLens.Service.Types.NonStreaming
 instance Data.ProtoLens.Service.Types.HasMethodImpl Instrument "getBytecodeState" where
   type MethodName Instrument "getBytecodeState" = "GetBytecodeState"
   type MethodInput Instrument "getBytecodeState" = Empty
@@ -1127,16 +1134,17 @@ packedFileDescriptor
     \\DC4EvictBytecodeRequest\DC2\ETB\n\
     \\aunit_id\CAN\SOH \SOH(\tR\ACKunitId\DC2\US\n\
     \\vmodule_name\CAN\STX \SOH(\tR\n\
-    \moduleName2\201\STX\n\
+    \moduleName2\140\ETX\n\
     \\n\
     \Instrument\DC24\n\
     \\bNotifyMe\DC2\DC1.instrument.Empty\SUB\DC1.instrument.Event\"\NUL0\SOH\DC26\n\
     \\n\
     \SetOptions\DC2\DC3.instrument.Options\SUB\DC1.instrument.Empty\"\NUL\DC2A\n\
-    \\SOTriggerRebuild\DC2\SUB.instrument.RebuildRequest\SUB\DC1.instrument.Empty\"\NUL\DC2B\n\
+    \\SOTriggerRebuild\DC2\SUB.instrument.RebuildRequest\SUB\DC1.instrument.Empty\"\NUL\DC2A\n\
+    \\SOTriggerExecute\DC2\SUB.instrument.RebuildRequest\SUB\DC1.instrument.Empty\"\NUL\DC2B\n\
     \\DLEGetBytecodeState\DC2\DC1.instrument.Empty\SUB\EM.instrument.BytecodeState\"\NUL\DC2F\n\
-    \\rEvictBytecode\DC2 .instrument.EvictBytecodeRequest\SUB\DC1.instrument.Empty\"\NULJ\154\v\n\
-    \\ACK\DC2\EOT\NUL\NUL-\SOH\n\
+    \\rEvictBytecode\DC2 .instrument.EvictBytecodeRequest\SUB\DC1.instrument.Empty\"\NULJ\162\r\n\
+    \\ACK\DC2\EOT\NUL\NUL0\SOH\n\
     \\b\n\
     \\SOH\f\DC2\ETX\NUL\NUL\DC2\n\
     \\b\n\
@@ -1288,7 +1296,7 @@ packedFileDescriptor
     \\ENQ\EOT\ACK\STX\SOH\ETX\DC2\ETX$\ETB\CAN\n\
     \\n\
     \\n\
-    \\STX\ACK\NUL\DC2\EOT'\NUL-\SOH\n\
+    \\STX\ACK\NUL\DC2\EOT'\NUL0\SOH\n\
     \\n\
     \\n\
     \\ETX\ACK\NUL\SOH\DC2\ETX'\b\DC2\n\
@@ -1318,19 +1326,29 @@ packedFileDescriptor
     \\ENQ\ACK\NUL\STX\STX\STX\DC2\ETX*\NAK#\n\
     \\f\n\
     \\ENQ\ACK\NUL\STX\STX\ETX\DC2\ETX*.3\n\
+    \\219\SOH\n\
+    \\EOT\ACK\NUL\STX\ETX\DC2\ETX-\STX7\SUB\205\SOH Execute the `main` binding of every module in the given unit (target text is a bare unit name), in\n\
+    \ parallel, skipping modules that don't export `main`. Fire-and-forget, same semantics as TriggerRebuild.\n\
+    \\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\ETX\SOH\DC2\ETX-\ACK\DC4\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\ETX\STX\DC2\ETX-\NAK#\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\ETX\ETX\DC2\ETX-.3\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\ETX\DC2\ETX+\STX8\n\
+    \\EOT\ACK\NUL\STX\EOT\DC2\ETX.\STX8\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\ETX\SOH\DC2\ETX+\ACK\SYN\n\
+    \\ENQ\ACK\NUL\STX\EOT\SOH\DC2\ETX.\ACK\SYN\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\ETX\STX\DC2\ETX+\ETB\FS\n\
+    \\ENQ\ACK\NUL\STX\EOT\STX\DC2\ETX.\ETB\FS\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\ETX\ETX\DC2\ETX+'4\n\
+    \\ENQ\ACK\NUL\STX\EOT\ETX\DC2\ETX.'4\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\EOT\DC2\ETX,\STX<\n\
+    \\EOT\ACK\NUL\STX\ENQ\DC2\ETX/\STX<\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\EOT\SOH\DC2\ETX,\ACK\DC3\n\
+    \\ENQ\ACK\NUL\STX\ENQ\SOH\DC2\ETX/\ACK\DC3\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\EOT\STX\DC2\ETX,\DC4(\n\
+    \\ENQ\ACK\NUL\STX\ENQ\STX\DC2\ETX/\DC4(\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\EOT\ETX\DC2\ETX,38b\ACKproto3"
+    \\ENQ\ACK\NUL\STX\ENQ\ETX\DC2\ETX/38b\ACKproto3"

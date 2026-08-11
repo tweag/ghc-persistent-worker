@@ -45,7 +45,7 @@ import GHC.Types.Name.Reader (
   hydrateGlobalRdrEnv,
   plusGlobalRdrEnv,
   )
-import GHC.Types.Name.Occurrence (OccName, mkOccEnv)
+import GHC.Types.Name.Occurrence (OccName, mkOccEnv, mkVarOcc)
 import GHC.Types.PkgQual (PkgQual (NoPkgQual, ThisPkg))
 import GHC.Types.TyThing (tyThingGREInfo)
 import GHC.Unit (moduleUnitId)
@@ -156,6 +156,63 @@ evaluate env mHomeUnit target@(ModuleTarget modu) imports expr = do
           NoPackage _ -> logDebugD env.log (text "No Package") >> pure False
           FoundMultiple _ -> logDebugD env.log (text "Found Multiple") >> pure False
           NotFound {} -> logDebugD env.log (text "Not Found") >> pure False
+
+-- | Execute a module's exported @main@ binding via GHC's statement-evaluation machinery, mirroring the worker's
+-- @--expr@ mode (see 'GhcWorker.GhcHandler.dispatch'\'s @ModeEval@ branch), but without interpreting the
+-- evaluated value's runtime representation (unlike 'evaluate', which unsafely coerces the result to @(Int, Int)@
+-- for its test-harness use case). Returns 'Nothing' if the module does not export a binding named @main@
+-- (skipped, not an error); 'Just' the execution's success flag otherwise.
+executeMain :: Env -> Maybe String -> ModuleTarget -> Ghc (Maybe Bool)
+executeMain env mHomeUnit target@(ModuleTarget modu) = do
+  logTimed env.log "executeMain is called" do
+    hsc_env0 <- GHC.getSession
+    dflags0 <- GHC.getSessionDynFlags
+
+    case mHomeUnit of
+      Nothing -> logDebugD env.log (text "Nothing") >> pure Nothing
+      Just homeUnit -> do
+        hsc_env2 <- liftIO $ withMVar env.state \ state -> do
+          (_, hsc_env1) <-
+            loadHomeUnit env.log dflags0 env.args.features (moduleUnitId target.mod) (state, hsc_env0) (toOsPath homeUnit)
+          pure hsc_env1 {hsc_mod_graph = state.make.moduleGraph}
+        let hsc_env = hscSetActiveUnitId (moduleUnitId target.mod) hsc_env2
+        GHC.setSession hsc_env
+        dflags <- GHC.getSessionDynFlags
+        GHC.setInteractiveDynFlags dflags
+        let home_unit = hsc_home_unit hsc_env
+            home_unit_id = homeUnitId home_unit
+
+        let modname = moduleName modu
+            pkgqual = ThisPkg home_unit_id
+
+        result <- liftIO $ Finder.findImportedModule hsc_env modname pkgqual
+
+        case result of
+          Found _ _ -> do
+            hasMain <- liftIO $ moduleHasMain hsc_env modname pkgqual
+            if not hasMain
+              then pure Nothing
+              else do
+                setContext [IIModule modname]
+                r <- evalStmtCustom "main" execOptions
+                case r of
+                  EvalComplete _ (EvalSuccess _) -> pure (Just True)
+                  _ -> pure (Just False)
+          NoPackage _ -> logDebugD env.log (text "No Package") >> pure Nothing
+          FoundMultiple _ -> logDebugD env.log (text "Found Multiple") >> pure Nothing
+          NotFound {} -> logDebugD env.log (text "Not Found") >> pure Nothing
+
+-- | Check whether a module's interface exports a binding named @main@.
+moduleHasMain :: HscEnv -> ModuleName -> PkgQual -> IO Bool
+moduleHasMain hsc_env modname pkgqual = do
+  iface <-
+    runInteractiveHsc hsc_env $
+      ioMsgMaybe $ hoistTcRnMessage $ GHC.runTcInteractive hsc_env $
+        loadSrcInterface (text "checking for main") modname NotBoot pkgqual
+  pure (any isMain (mi_exports iface))
+  where
+    isMain (Avail n) = nameOccName n == mkVarOcc "main"
+    isMain (AvailTC _ _) = False
 
 loadImport :: Env -> ModuleName -> Ghc (Either String (GlobalRdrEnvX GREInfo))
 loadImport env modname = do

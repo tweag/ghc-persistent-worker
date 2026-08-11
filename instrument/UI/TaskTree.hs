@@ -111,6 +111,16 @@ selectedTarget State{rows} = target . snd <$> listSelectedElement rows
   target (Header uid _) = uid <> ":metadata"
   target (ModuleRow uid m _) = uid <> ":" <> m
 
+-- | The unit name for the 'x' execute action, which only applies at unit granularity: 'Nothing' unless a unit
+-- header row is currently selected (execution runs all of a unit's modules in parallel; selecting an individual
+-- module row does not narrow that down).
+selectedUnitForExecute :: State -> Maybe Text
+selectedUnitForExecute State{rows} = do
+  (_, row) <- listSelectedElement rows
+  case row of
+    Header uid _ -> Just uid
+    ModuleRow {} -> Nothing
+
 draw :: Name -> State -> Widget Name
 draw current State{rows, built} = renderList drawRow (current == TaskTree) rows
  where

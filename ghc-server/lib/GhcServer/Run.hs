@@ -166,13 +166,13 @@ runServer = do
       let socket = socketPath config.projectRoot
       lift do
         createDirectoryIfMissing True (config.projectRoot </> socketDirName)
-        ServerContext {grpcHandler, stateVar, build, project, instrChan} <- serverContext config
+        ServerContext {grpcHandler, stateVar, build, project, instrChan, buildEnv} <- serverContext config
         let methods = fromGrpcHandler grpcHandler
         case instrChan of
           Just chan -> do
             let instrSocket = instrumentSocketPath config.projectRoot
             hPutStrLn stderr ("Starting instrument service on " ++ fromOsPath instrSocket)
-            void $ async $ runGrpcServer instrSocket (instrumentMethods chan stateVar build project)
+            void $ async $ runGrpcServer instrSocket (instrumentMethods chan stateVar build project buildEnv)
           Nothing ->
             pure ()
         hPutStrLn stderr ("Starting ghc-server on " ++ fromOsPath socket)

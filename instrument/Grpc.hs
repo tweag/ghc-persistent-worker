@@ -39,6 +39,17 @@ triggerRebuild :: Connection -> TargetSpec -> IO ()
 triggerRebuild conn target =
   triggerRebuildText conn (Text.pack (renderTargetSpec target))
 
+-- | Send a bare unit-name target to the server's @triggerExecute@ RPC, requesting execution of @main@ for
+-- every module in that unit (in parallel, skipping modules without @main@). Fire-and-forget, mirroring
+-- 'triggerRebuildText'.
+triggerExecuteText :: Connection -> Text.Text -> IO ()
+triggerExecuteText conn targetText =
+  void $ forkIO $ void $
+    nonStreaming conn (rpc @(Protobuf Instrument "triggerExecute")) $
+      defMessage
+        & Fields.target
+        .~ targetText
+
 -- | Request a snapshot of the lazily-loaded bytecode cache state.
 getBytecodeState :: Connection -> IO (Proto Instr.BytecodeState)
 getBytecodeState conn =

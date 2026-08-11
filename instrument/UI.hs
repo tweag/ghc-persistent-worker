@@ -22,7 +22,7 @@ import Data.Text qualified as Text
 import Data.Time (UTCTime (..), fromGregorian)
 import Graphics.Vty qualified as V
 import Graphics.Vty.Attributes.Color
-import Grpc (evictBytecode, getBytecodeState, sendOptions, triggerRebuild, triggerRebuildText)
+import Grpc (evictBytecode, getBytecodeState, sendOptions, triggerExecuteText, triggerRebuild, triggerRebuildText)
 import Internal.Debug (debugSocketPath)
 import Lens.Micro.Platform (
   Lens',
@@ -63,6 +63,9 @@ data Event
     -- target is either @unitName:metadata@ (unit header selected) or @unitName:moduleName@ (module row selected),
     -- as computed by 'TaskTree.selectedTarget'.
     TriggerBuild WorkerId Text.Text
+  | -- | Trigger execution of all modules in a unit (the 'x' key). Only fires when a unit header is selected in
+    -- the project view, as computed by 'TaskTree.selectedUnitForExecute'. The target text is a bare unit name.
+    TriggerExecute WorkerId Text.Text
   | BytecodeBrowserEvent BytecodeBrowser.Event
   | FetchBytecodeState
   | RequestEvict Text.Text (Maybe Text.Text)
@@ -149,7 +152,7 @@ drawUI State{..} =
                   session
           , modifyDefAttr (`V.withStyle` V.italic) $
               str
-                " q:quit   Tab:switch pane   Enter:expand/details   b:build   r:trigger rebuild   d:debug   o:options   s:sessions   S:start server   t:sort bytecode   e:evict bytecode"
+                " q:quit   Tab:switch pane   Enter:expand/details   b:build   x:execute   r:trigger rebuild   d:debug   o:options   s:sessions   S:start server   t:sort bytecode   e:evict bytecode"
           ]
        ]
  where
@@ -231,6 +234,10 @@ handleEvent (AppEvent (TriggerBuild wid target)) = do
   mworker <- preuse (currentSession . Session.workers . each . filtered (\w -> Session._workerId w == wid))
   for_ mworker $ \worker -> do
     liftIO $ triggerRebuildText (Session._connection worker) target
+handleEvent (AppEvent (TriggerExecute wid target)) = do
+  mworker <- preuse (currentSession . Session.workers . each . filtered (\w -> Session._workerId w == wid))
+  for_ mworker $ \worker -> do
+    liftIO $ triggerExecuteText (Session._connection worker) target
 handleEvent (AppEvent (BytecodeBrowserEvent evt)) =
   zoom bcoBrowser (BytecodeBrowser.handleEvent evt)
 handleEvent (AppEvent FetchBytecodeState) = do
@@ -303,6 +310,12 @@ handleEvent (VtyEvent evt) = do
         mfirst <- firstWorker
         case (mtree >>= TaskTree.selectedTarget, mfirst) of
           (Just target, Just (wid, _)) -> handleEvent (AppEvent (TriggerBuild wid target))
+          _ -> beep
+      V.EvKey (V.KChar 'x') [] -> do
+        mtree <- preuse (currentSession . Session.taskTree)
+        mfirst <- firstWorker
+        case (mtree >>= TaskTree.selectedUnitForExecute, mfirst) of
+          (Just target, Just (wid, _)) -> handleEvent (AppEvent (TriggerExecute wid target))
           _ -> beep
       V.EvKey (V.KChar 't') [] | current == BytecodeBrowser ->
         handleEvent (AppEvent (BytecodeBrowserEvent BytecodeBrowser.ToggleSort))

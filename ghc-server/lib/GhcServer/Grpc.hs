@@ -8,11 +8,14 @@ module GhcServer.Grpc where
 import Common.Grpc ()
 import Control.Concurrent.Chan (Chan)
 import Control.Concurrent.MVar (MVar)
+import Control.Concurrent (forkIO)
 import Data.Binary (encode)
 import Data.ByteString (toStrict)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as Text
 import GhcServer.Build (Build, scheduleBatch)
+import GhcServer.Build.Execute (executeUnit)
+import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.Request (ScheduleRequest (..))
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
 import GhcServer.Handler (parseTarget)
@@ -28,6 +31,7 @@ import Proto.Instrument (Instrument)
 import Proto.Instrument_Fields qualified as Instr
 import System.FilePath (takeBaseName)
 import Types.Instrument (Event (..), UnitSummary (..))
+import Types.Log (Logger (..))
 import Types.State (WorkerState)
 
 -- | Build a snapshot of the project's units and modules for the instrument UI's task tree, from the units
@@ -80,6 +84,18 @@ triggerRebuild build project req = do
       scheduleBatch build ScheduleRequest {steps = [(name, unitReq)], recompile = True, rebuild = True}
   pure defMessage
 
+-- | Trigger execution of all modules in the given unit (target text is a bare unit name; any @:suffix@ is
+-- ignored). Fire-and-forget, like 'triggerRebuild'. Runs on 'GhcServer.Build.Execute.executeUnit', which fans
+-- out in parallel and skips modules without @main@.
+triggerExecute ::
+  BuildEnv ->
+  Proto Instr.RebuildRequest ->
+  IO (Proto Instr.Empty)
+triggerExecute buildEnv req = do
+  let unitText = takeWhile (/= ':') (Text.unpack req.target)
+  _ <- forkIO (executeUnit buildEnv (UnitName unitText))
+  pure defMessage
+
 -- | A grapesy server that streams instrumentation data and serves the bytecode-cache browser RPCs, backed by
 -- 'ghc-server'\'s persistent 'WorkerState' and scheduler.
 instrumentMethods ::
@@ -87,11 +103,13 @@ instrumentMethods ::
   MVar WorkerState ->
   Build ->
   Project ->
+  BuildEnv ->
   Methods IO (ProtobufMethodsOf Instrument)
-instrumentMethods chan stateVar build project =
+instrumentMethods chan stateVar build project buildEnv =
   simpleMethods
     (mkNonStreaming (evictBytecode stateVar))
     (mkNonStreaming (getBytecodeState stateVar))
     (mkServerStreaming (const (notifyMe project stateVar chan)))
     (mkNonStreaming (setOptions stateVar))
+    (mkNonStreaming (triggerExecute buildEnv))
     (mkNonStreaming (triggerRebuild build project))

@@ -48,6 +48,7 @@ library
     GhcServer.Build
     GhcServer.Build.Classify
     GhcServer.Build.Compile
+    GhcServer.Build.Execute
     GhcServer.Build.Metadata
     GhcServer.Build.Propagate
     GhcServer.Build.Schedule

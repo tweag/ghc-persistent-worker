@@ -41,6 +41,9 @@ service Instrument {
   rpc NotifyMe(Empty) returns (stream Event) {};
   rpc SetOptions(Options) returns (Empty) {};
   rpc TriggerRebuild(RebuildRequest) returns (Empty) {};
+  // Execute the `main` binding of every module in the given unit (target text is a bare unit name), in
+  // parallel, skipping modules that don't export `main`. Fire-and-forget, same semantics as TriggerRebuild.
+  rpc TriggerExecute(RebuildRequest) returns (Empty) {};
   rpc GetBytecodeState(Empty) returns (BytecodeState) {};
   rpc EvictBytecode(EvictBytecodeRequest) returns (Empty) {};
 }
