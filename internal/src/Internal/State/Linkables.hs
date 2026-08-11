@@ -46,6 +46,8 @@ import Types.State (WorkerState (..))
 import Types.State.Make (LibLoadState (..), MakeState (..))
 
 
+-- | An absent 'ModLocation' should be fatal even if we don't end up loading bytecode, since we always add it to the
+-- Finder when restoring from cache.
 requireLocation ::
   HscEnv ->
   Module ->
@@ -65,6 +67,18 @@ withFinder hsc_env hug f =
   where
     other_fopts = initFinderOpts . homeUnitEnv_dflags <$> hug
 
+-- | Load bytecode from an interface given an HPT entry.
+--
+-- Query the Finder for a 'ModLocation', since we don't have a file path available, which is normally used when loading
+-- bytecode from cache upfront.
+-- Then, compile bytecode from Core as usual.
+-- If the interface has no Core, skip and return 'Nothing'.
+-- Otherwise, add the bytecode 'Linkable' to the HPT in the state and return it.
+-- HPTs are stored in 'IORef's, so the bytecode will be available to other compile tasks immediately.
+--
+-- TODO possible race: when two splices are linked concurrently, and both enter @addLazyByteCode@ with @Nothing@, we'll
+-- probably compile bytecode twice.
+-- Maybe just look it up in the HUG inside of @modifyMVar@ once more.
 lazyLoadByteCode ::
   Logger ->
   MVar WorkerState ->
@@ -74,17 +88,25 @@ lazyLoadByteCode ::
 lazyLoadByteCode logger stateVar hsc_env hmi = do
   logger.debugD ("Loading lazy bytecode for " <+> ppr module_)
   modifyMVar stateVar \ state -> do
-    result <- withFinder hsc_env state.make.hug findExactModule (hsc_units hsc_env) (Just (hsc_home_unit hsc_env)) (toUnitId <$> module_) NotBoot
-    location <- requireLocation hsc_env module_ result
+    location <- findLocation state.make.hug
     loadCachedByteCodeFrom hsc_env location (hm_iface hmi) (hm_details hmi) >>= \case
-      Just bytecode -> do
-        let iface = hm_iface hmi
-            new = hmi {hm_iface = iface, hm_linkable = hmi.hm_linkable {homeMod_bytecode = Just bytecode}}
-        traverse_ (insertIntoHpt new) (unitEnv_lookup_maybe (moduleUnitId (mi_module iface)) state.make.hug)
-        pure (state, Just bytecode)
+      Just bytecode -> insertBytecode state bytecode
       Nothing -> pure (state, Nothing)
   where
+    findLocation hug = do
+      result <- withFinder hsc_env hug findExactModule (hsc_units hsc_env) (Just homeUnit) (toUnitId <$> module_) NotBoot
+      requireLocation hsc_env module_ result
+
+    insertBytecode state bytecode = do
+      let hm_iface = hmi.hm_iface
+          new = hmi {hm_iface, hm_linkable = hmi.hm_linkable {homeMod_bytecode = Just bytecode}}
+          unit = moduleUnitId (mi_module hm_iface)
+      traverse_ (insertIntoHpt new) (unitEnv_lookup_maybe unit state.make.hug)
+      pure (state, Just bytecode)
+
     insertIntoHpt new hue = addHomeModInfoToHpt new (homeUnitEnv_hpt hue)
+
+    homeUnit = hsc_home_unit hsc_env
 
     module_ = mi_module hmi.hm_iface
 
@@ -105,6 +127,10 @@ loadDLL_ hsc_env interp lib_paths lib = do
     emitError msg =
       workerErrorIO hsc_env ("Loading DLL error:" <+> msg)
 
+-- | If the link target is a home module that's missing bytecode (because it was restored from cache), load it from the
+-- interface into the HPT and store it in the returned value.
+-- 'selectLinkDeps' will then choose the bytecode for linking.
+-- If the interface does not contain Core bindings, this will not have an effect.
 addLazyByteCode ::
   Logger ->
   MVar WorkerState ->
