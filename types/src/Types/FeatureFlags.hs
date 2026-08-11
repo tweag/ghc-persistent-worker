@@ -15,6 +15,8 @@ data FeatureFlag =
   |
   FeatureInstrument
   |
+  FeatureIncrementalMetadata
+  |
   FeatureLazyByteCode
   deriving stock (Eq, Show)
 
@@ -29,6 +31,8 @@ data FeatureFlags =
     concurrentInitUnits :: Bool,
     -- | Integrated with accompanying monitoring instrument app
     instrument :: Bool,
+    -- | Use incremental metadata (only re-downsweep changed modules).
+    incrementalBuildPlan :: Bool,
     -- | Load bytecode on demand when linking splices or evaluating tests.
     lazyByteCode :: Bool,
     -- | Use incremental update of ModuleGraph.
@@ -66,6 +70,7 @@ defaultFeatureFlags =
     flagParser = False,
     concurrentInitUnits = True,
     instrument = False,
+    incrementalBuildPlan = True,
 #if defined(LINKABLES)
     lazyByteCode = True,
 #else
