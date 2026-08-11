@@ -89,3 +89,30 @@ It can be provided as CLI arguments as well:
 ```
 $ nix --option extra-substituters https://ghc-server.cachix.org --option extra-trusted-public-keys ghc-server.cachix.org-1:VPQv6cKWK7QjnkgE/v2zMBAvqdSdyRsLt2xGh7APKWc= run .#buck-tests
 ```
+
+GHC server
+==========
+
+The package `ghc-server` provides two executables that allow testing the worker in server mode without a Buck build from
+the CLI.
+The executable `ghc-server` starts the worker's gRPC server, while `ghc-client` sends requests in a custom format:
+
+```
+$ nix run .#ghc-server -- path/to/project &
+$ nix run .#ghc-client -- path/to/project unit1:metadata unit1:modules
+$ nix run .#ghc-client -- path/to/project unit2 unit3:Module3
+```
+
+Units are configured with JSON files in their directory:
+
+```
+$ ls path/to/project/unit2
+Module2.hs unit.json
+$ cat path/to/project/unit2/unit.json
+{
+  "deps": ["unit1"],
+  "args": ["-package", "base"]
+}
+```
+
+You can run the flake app `.#test-server` to see an example build.
