@@ -1,0 +1,10 @@
+cabal-version: 3.0
+name: project1
+version: 1
+build-type: Simple
+
+library unit1
+  hs-source-dirs: unit1
+  exposed-modules: M1
+  build-depends: base
+  default-language: GHC2021
