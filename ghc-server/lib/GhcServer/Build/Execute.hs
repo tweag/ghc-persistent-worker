@@ -16,6 +16,7 @@ import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
 import GhcServer.Log (instrumentLogger, withBuildLog)
 import GhcServer.Path (fp)
 import GhcServer.Scheduler (TaskResult (..))
+import Internal.Compile.Make (compileModuleWithDepsInHpt)
 import Internal.Evaluate (executeMain)
 import Internal.Session (withGhcMakeModule)
 import Prelude hiding (log)
@@ -48,7 +49,14 @@ executeModule buildEnv name unit modBaseName = do
       args = buildEnv.baseArgs {tempDir = Just modTmpDir, homeUnit = cachedUnit}
       env = Env {log = logger, state = buildEnv.stateVar, args}
       target = moduleTarget name modName
-    result <- withGhcMakeModule Interpreted target env \ _targetSpec ->
+    result <- withGhcMakeModule Interpreted target env \ targetSpec -> do
+      -- The module must be (re)compiled to bytecode before 'executeMain's 'setContext' call: any prior HPT
+      -- entry for this module (e.g. from a plain compile-to-object-code request) has an object-code linkable,
+      -- which GHC's interactive context machinery rejects with "not interpreted". 'compileModuleWithDepsInHpt'
+      -- with the 'TargetModuleInterp' spec ('targetSpec' here, since 'interp = Interpreted') compiles via
+      -- 'mkTargetAsInterpreted' (bytecode backend) and inserts the resulting 'HomeModInfo' into the HPT,
+      -- overwriting any stale object-code entry.
+      _ <- compileModuleWithDepsInHpt logger targetSpec
       executeMain env (fromOsPath <$> args.homeUnit) target
     captured <- logger.flush
     logger.debug ("executeModule: " ++ name.string ++ ":" ++ modBaseName ++ " GHC result=" ++ show result)

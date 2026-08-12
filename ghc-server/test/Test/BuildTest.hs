@@ -35,6 +35,8 @@ import GhcServer.Data.BuildEvent (BuildEvent (..), BuildEvents, newBuildEvents, 
 import GhcServer.Data.Request (ScheduleRequest (..), UnitRequest (..))
 import GhcServer.Data.Unit (ClientModule (..), Project (..), Unit (..), UnitCache (..), UnitName (..))
 import GhcServer.Data.UnitConfig (UnitConfig (..))
+import GhcServer.Build.Execute (executeModule)
+import GhcServer.Scheduler (TaskResult (..))
 import GhcServer.Log (newLogger)
 import GhcServer.Path (osPath)
 import GhcServer.Project (discoverProject)
@@ -1235,6 +1237,55 @@ test_cacheTransitiveMultipleRoots =
 -- Top-level test tree
 -- ---------------------------------------------------------------------------
 
+-- ---------------------------------------------------------------------------
+-- Test group: Execute module (@x@ key / 'GhcServer.Build.Execute.executeModule')
+-- ---------------------------------------------------------------------------
+
+-- | Project with a single unit whose module exports @main@, used to regression-test
+-- 'GhcServer.Build.Execute.executeModule' -- specifically, that it recompiles the module
+-- to bytecode before running @main@, rather than relying on a stale object-code HPT entry
+-- from a prior plain compile (which fails with \"Cannot add module ... to context: not interpreted\").
+createExecProject :: FilePath -> IO ()
+createExecProject root = do
+  createDirectoryIfMissing True (root ++ "/unit0")
+  writeUnitConfig root "unit0" UnitConfig {deps = [], args = baseGhcArgs}
+  writeProjectFile root "unit0/Main.hs" $ unlines
+    [ "module Main where"
+    , ""
+    , "main :: IO ()"
+    , "main = putStrLn \"hello from execute test\""
+    ]
+
+execProjectTest :: TestName -> (TestProject -> TestT IO ()) -> TestTree
+execProjectTest =
+  projectTest "ghc-server-exec" createExecProject
+
+-- | Regression test for the \"not interpreted\" execute failure: compile the module as
+-- object code (mirroring a normal build / the UI's @b@ key), then execute it (mirroring
+-- the UI's @x@ key) and assert it actually runs @main@ successfully rather than failing.
+test_executeAfterCompile :: TestTree
+test_executeAfterCompile =
+  execProjectTest "execute module after plain compile succeeds" \ tp -> do
+    (result, _) <- runFreshAll tp
+    assertSuccess "compile" result
+    stateVar <- liftIO newBuildState
+    (buildEnv, _) <- liftIO (newBuildEnv tp stateVar)
+    let name = UnitName "unit0"
+    unit <- case Map.lookup name buildEnv.project.units of
+      Just u -> pure u
+      Nothing -> fail "unit0 not found in discovered project"
+    mresult <- liftIO (executeModule buildEnv name unit "Main")
+    annotate ("executeModule result: " ++ show mresult)
+    case mresult of
+      Just TaskSuccess -> pure ()
+      other -> fail ("Expected Just TaskSuccess, got " ++ show other)
+
+test_executeModule :: TestTree
+test_executeModule =
+  dependentTestGroup "Execute module" AllFinish
+    [ test_executeAfterCompile
+    ]
+
 test_serverBuild :: TestTree
 test_serverBuild =
   dependentTestGroup "GhcServer.Build" AllFinish
@@ -1247,5 +1298,6 @@ test_serverBuild =
     , test_implicitDepCompileSkip
     , test_hptAssembly
     , test_transitiveDepRestore
+    , test_executeModule
     ]
 
