@@ -11,6 +11,7 @@ import Brick.Types (EventM, Widget)
 import Brick.Widgets.Core (str, withAttr, (<+>))
 import Brick.Widgets.List (GenericList, list, listSelectedElement, renderList)
 import Control.Monad.State (gets, modify)
+import Data.List qualified as List
 import Data.Sequence qualified as Seq
 import Data.Set (Set)
 import Data.Set qualified as Set
@@ -101,15 +102,27 @@ handleEvent ToggleExpand = do
 handleEvent (MarkBuilt target) =
   modify \s -> s{built = Set.insert target s.built}
 
--- | The build target text for the currently selected row, used by the 'b' build action.
+-- | The compile targets for the currently selected row, used by the 'b' build action (changed: no longer
+-- includes metadata, see 'selectedMetadataTarget' for that).
 --
--- Selecting a unit header targets that unit's metadata step (@unitName:metadata@); selecting one of its module
--- children targets that specific module's compilation (@unitName:moduleName@), skipping metadata.
-selectedTarget :: State -> Maybe Text
-selectedTarget State{rows} = target . snd <$> listSelectedElement rows
+-- Selecting a unit header schedules a compile job for every one of its modules (@unitName:moduleName@ for each);
+-- selecting one of its module children targets only that module's compilation.
+selectedCompileTargets :: State -> Maybe [Text]
+selectedCompileTargets State{rows, units} = do
+  (_, row) <- listSelectedElement rows
+  case row of
+    Header uid _ -> do
+      entry <- List.find ((== uid) . unitName) units
+      pure [uid <> ":" <> m | m <- modules entry]
+    ModuleRow uid m _ -> Just [uid <> ":" <> m]
+
+-- | The metadata target for the currently selected row, used by the 'm' key (added alongside the 'b' key's
+-- change to schedule per-module compiles instead of metadata). Always targets the owning unit's metadata step,
+-- regardless of whether a header or module row is selected.
+selectedMetadataTarget :: State -> Maybe Text
+selectedMetadataTarget State{rows} = mkTarget . snd <$> listSelectedElement rows
  where
-  target (Header uid _) = uid <> ":metadata"
-  target (ModuleRow uid m _) = uid <> ":" <> m
+  mkTarget row = rowUnit row <> ":metadata"
 
 -- | The unit name for the 'x' execute action, which only applies at unit granularity: 'Nothing' unless a unit
 -- header row is currently selected (execution runs all of a unit's modules in parallel; selecting an individual

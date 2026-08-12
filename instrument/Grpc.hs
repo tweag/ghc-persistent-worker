@@ -25,8 +25,9 @@ mkOptions Options{..} =
     .~ Text.pack extraGhcOptions
 
 -- | Send a raw target-text 'RebuildRequest' to the server. Shared by 'triggerRebuild' (worker flow, target text is
--- 'renderTargetSpec' output) and the instrument UI's 'b' key (ghc-server flow, target text is
--- @unitName:metadata@ or @unitName:moduleName@, computed by 'UI.TaskTree.selectedTarget').
+-- 'renderTargetSpec' output) and the instrument UI's 'b'\/'m' keys (ghc-server flow, target text is
+-- @unitName:moduleName@ for 'b' or @unitName:metadata@ for 'm', computed by 'UI.TaskTree.selectedCompileTargets'\/
+-- 'UI.TaskTree.selectedMetadataTarget').
 triggerRebuildText :: Connection -> Text.Text -> IO ()
 triggerRebuildText conn targetText =
   void $ forkIO $ void $

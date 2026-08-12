@@ -59,9 +59,10 @@ data Event
   | SetTime UTCTime
   | SessionSelectorEvent SessionSelector.Event
   | TriggerRebuild WorkerId TargetSpec
-  | -- | Trigger a build for the given target text (the 'b' key), equivalent to @ghc-client $project TARGET@. The
-    -- target is either @unitName:metadata@ (unit header selected) or @unitName:moduleName@ (module row selected),
-    -- as computed by 'TaskTree.selectedTarget'.
+  | -- | Trigger a build for the given target text (the 'b' key, one event per module when a unit header is
+    -- selected), equivalent to @ghc-client $project TARGET@. The target is always @unitName:moduleName@; the
+    -- 'm' key dispatches the same event constructor but with an @unitName:metadata@ target instead, as computed
+    -- by 'TaskTree.selectedCompileTargets'\/'TaskTree.selectedMetadataTarget'.
     TriggerBuild WorkerId Text.Text
   | -- | Trigger execution of all modules in a unit (the 'x' key). Only fires when a unit header is selected in
     -- the project view, as computed by 'TaskTree.selectedUnitForExecute'. The target text is a bare unit name.
@@ -152,7 +153,7 @@ drawUI State{..} =
                   session
           , modifyDefAttr (`V.withStyle` V.italic) $
               str
-                " q:quit   Tab:switch pane   Enter:expand/details   b:build   x:execute   r:trigger rebuild   d:debug   o:options   s:sessions   S:start server   t:sort bytecode   e:evict bytecode"
+          " q:quit   Tab:switch pane   Enter:expand/details   b:build   m:metadata   x:execute   r:trigger rebuild   d:debug   o:options   s:sessions   S:start server   t:sort bytecode   e:evict bytecode"
           ]
        ]
  where
@@ -308,7 +309,13 @@ handleEvent (VtyEvent evt) = do
       V.EvKey (V.KChar 'b') [] -> do
         mtree <- preuse (currentSession . Session.taskTree)
         mfirst <- firstWorker
-        case (mtree >>= TaskTree.selectedTarget, mfirst) of
+        case (mtree >>= TaskTree.selectedCompileTargets, mfirst) of
+          (Just targets, Just (wid, _)) -> for_ targets \target -> handleEvent (AppEvent (TriggerBuild wid target))
+          _ -> beep
+      V.EvKey (V.KChar 'm') [] -> do
+        mtree <- preuse (currentSession . Session.taskTree)
+        mfirst <- firstWorker
+        case (mtree >>= TaskTree.selectedMetadataTarget, mfirst) of
           (Just target, Just (wid, _)) -> handleEvent (AppEvent (TriggerBuild wid target))
           _ -> beep
       V.EvKey (V.KChar 'x') [] -> do
