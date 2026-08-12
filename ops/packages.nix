@@ -341,6 +341,7 @@
           "process"
           "stm"
           "text"
+          "time"
           "transformers"
         ];
       };

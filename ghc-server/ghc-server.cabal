@@ -101,6 +101,7 @@ library
     process,
     stm,
     text,
+    time,
     transformers
 
 executable ghc-server

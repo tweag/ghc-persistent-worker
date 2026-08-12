@@ -15,6 +15,7 @@ executable instrument
     UI.ActiveTasks
     UI.BytecodeBrowser
     UI.GhcDebug
+    UI.LogViewer
     UI.Session
     UI.SessionSelector
     UI.TaskTree

@@ -7,6 +7,7 @@ import GhcServer.Cache (buildDepPlans, writeUnitCache)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (BuildEvent (..), logEvent)
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
+import GhcServer.Log (instrumentLogger)
 import GhcServer.Path (fp, osPath)
 import Internal.Metadata (computeMetadata)
 import Prelude hiding (log)
@@ -86,7 +87,7 @@ runMetadata buildEnv name = do
   logEvent buildEnv.events (MetadataRan name)
   case Map.lookup name buildEnv.project.units of
     Nothing -> pure ([(name, "Unit not found in project")], [])
-    Just unit -> withExtDeps unit buildEnv.log
+    Just unit -> withExtDeps unit (instrumentLogger buildEnv.instrChan (name.string ++ ":metadata") buildEnv.log)
   where
     withExtDeps unit logger
       | null unit.extDeps = run unit logger

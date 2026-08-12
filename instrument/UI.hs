@@ -48,6 +48,7 @@ import Types.Target (TargetSpec)
 import UI.ActiveTasks qualified as ActiveTasks
 import UI.BytecodeBrowser qualified as BytecodeBrowser
 import UI.GhcDebug (debug)
+import UI.LogViewer qualified as LogViewer
 import UI.Session qualified as Session
 import UI.SessionSelector qualified as SessionSelector
 import UI.TaskTree qualified as TaskTree
@@ -142,6 +143,7 @@ drawUI State{..} =
       OptionsEditor -> [drawOptionsEditor _options]
       ServeOptions -> [drawServeEditor _serveForm]
       TaskDetails -> let task = session >>= listSelectedElement . Session._activeTasks in maybe [] (pure . ActiveTasks.drawTaskDetails . snd) task
+      LogViewer -> maybe [] (pure . drawLogViewer . Session._logViewer) session
       _ -> []
   )
     ++ [ vBox $
@@ -153,7 +155,7 @@ drawUI State{..} =
                   session
           , modifyDefAttr (`V.withStyle` V.italic) $
               str
-          " q:quit   Tab:switch pane   Enter:expand/details   b:build   m:metadata   x:execute   r:trigger rebuild   d:debug   o:options   s:sessions   S:start server   t:sort bytecode   e:evict bytecode"
+          " q:quit   Tab:switch pane   Enter:expand/details   b:build   m:metadata   x:execute   r:trigger rebuild   d:debug   o:options   s:sessions   S:start server   t:sort bytecode   e:evict bytecode   L:log"
           ]
        ]
  where
@@ -170,6 +172,9 @@ drawServeEditor form =
       , str " "
       , str "Leaving the path empty starts ghc-server in the current directory."
       ]
+
+drawLogViewer :: LogViewer.State -> Widget Name
+drawLogViewer = popup 80 "Server Log" . LogViewer.draw LogViewer
 
 currentSession :: Traversal' State Session.State
 currentSession = sessions . listSelectedElementL . _2
@@ -290,6 +295,13 @@ handleEvent (VtyEvent evt) = do
         V.EvKey V.KEsc [] -> hide
         V.EvKey V.KEnter [] -> hide
         _ -> handleListEventOf (currentSession . Session.activeTasks) evt
+    LogViewer -> do
+      let hide = currentFocus .= TaskTree
+      case evt of
+        V.EvKey V.KEsc [] -> hide
+        V.EvKey (V.KChar 'q') [] -> hide
+        V.EvKey (V.KChar 'L') [] -> hide
+        _ -> handleListEventOf (currentSession . Session.logViewer . LogViewer.rowsLens) evt
     _ -> case evt of
       V.EvKey V.KEsc [] -> halt
       V.EvKey (V.KChar 'q') [] -> halt
@@ -299,6 +311,8 @@ handleEvent (VtyEvent evt) = do
         currentFocus .= OptionsEditor
       V.EvKey (V.KChar 'S') [] -> do
         currentFocus .= ServeOptions
+      V.EvKey (V.KChar 'L') [] -> do
+        currentFocus .= LogViewer
       V.EvKey (V.KChar 'd') [] -> do
         withTarget $ \_wid target ->
           suspendAndResume' $

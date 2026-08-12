@@ -13,7 +13,7 @@ import GhcServer.Build.Propagate (emitTaskEnd, emitTaskStart)
 import GhcServer.Cache (loadHomeUnitCache)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
-import GhcServer.Log (withBuildLog)
+import GhcServer.Log (instrumentLogger, withBuildLog)
 import GhcServer.Path (fp)
 import GhcServer.Scheduler (TaskResult (..))
 import Internal.Evaluate (executeMain)
@@ -42,8 +42,9 @@ executeModule buildEnv name unit modBaseName = do
     modTmpDir = buildEnv.tmpDir </> toOsPath name.string </> toOsPath (modBaseName ++ "-execute")
   createDirectoryIfMissing True modTmpDir
   cachedUnit <- loadHomeUnitCache unit.cache
-  withBuildLog \ logger -> do
+  withBuildLog \ rawLogger -> do
     let
+      logger = instrumentLogger buildEnv.instrChan (name.string ++ ":" ++ modBaseName ++ ":execute") rawLogger
       args = buildEnv.baseArgs {tempDir = Just modTmpDir, homeUnit = cachedUnit}
       env = Env {log = logger, state = buildEnv.stateVar, args}
       target = moduleTarget name modName

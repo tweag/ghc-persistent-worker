@@ -14,6 +14,7 @@ data Name
   | ServeOptions
   | SOPath
   | SOExtraOptions
+  | LogViewer
   deriving stock (Eq, Ord, Show)
 
 newtype WorkerId = WorkerId { unWorkerId :: Text }

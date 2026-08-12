@@ -20,6 +20,11 @@ data Event
   -- | The project's units and modules, sent once when a client connects to the Instrument service. Populates the
   -- @instrument@ app's task tree view immediately, ahead of any build activity.
   | ProjectStructure { units :: [UnitSummary] }
+  -- | A single log message captured from the server's 'Types.Log.Logger' (debug\/info\/fatal messages and GHC's
+  -- own diagnostic output), tagged with the unit\/module target that was active when it was emitted and a
+  -- millisecond epoch timestamp. Only emitted when the @instrument@ feature is enabled (see
+  -- @GhcServer.Log.instrumentLogger@).
+  | LogMessage { target :: String, level :: String, message :: String, timestampMs :: Integer }
   | Halt
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary)

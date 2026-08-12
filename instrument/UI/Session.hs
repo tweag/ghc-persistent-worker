@@ -14,6 +14,7 @@ import Types.Instrument qualified as Instr
 import Types.Target (TargetSpec (..))
 import UI.ActiveTasks qualified as ActiveTasks
 import UI.BytecodeBrowser qualified as BytecodeBrowser
+import UI.LogViewer qualified as LogViewer
 import UI.TaskTree qualified as TaskTree
 import UI.Types (Name, WorkerId)
 import UI.Utils (formatBytes, formatPs, stripEscSeqs)
@@ -26,6 +27,7 @@ data State = Session
   , _workers :: [Worker]
   , _activeTasks :: ActiveTasks.State
   , _taskTree :: TaskTree.State
+  , _logViewer :: LogViewer.State
   , _sesStartTime :: UTCTime
   , _sesEndTime :: Maybe UTCTime
   , _finishedWorkerStats :: Stats
@@ -61,6 +63,7 @@ mkSession _title _startTime =
     , _workers = []
     , _activeTasks = ActiveTasks.initialState
     , _taskTree = TaskTree.initialState
+    , _logViewer = LogViewer.initialState
     , _sesStartTime = _startTime
     , _sesEndTime = Nothing
     , _finishedWorkerStats = mempty
@@ -129,6 +132,15 @@ handleEvent (InstrEvent wid evt) =
             | u <- units
             ]
     Instr.Halt -> pure ()
+    Instr.LogMessage {..} ->
+      modifying logViewer $
+        LogViewer.addEntry
+          LogViewer.Entry
+            { target = Text.pack target
+            , level = Text.pack level
+            , message = Text.pack message
+            , timestampMs
+            }
 
 removeWorker :: WorkerId -> EventM Name State ()
 removeWorker wid = do
