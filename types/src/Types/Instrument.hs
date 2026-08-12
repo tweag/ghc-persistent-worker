@@ -15,7 +15,7 @@ data UnitSummary
 
 data Event
   = CompileStart { target :: String, canDebug :: Bool }
-  | CompileEnd { target :: String, exitCode :: Int, stderr :: String }
+  | CompileEnd { target :: String, exitCode :: Int, stderr :: String, result :: Maybe String }
   | Stats { memory :: Map String Int, cpuNs :: Int, gcCpuNs :: Int }
   -- | The project's units and modules, sent once when a client connects to the Instrument service. Populates the
   -- @instrument@ app's task tree view immediately, ahead of any build activity.

@@ -1,5 +1,5 @@
 module M1 where
 
-main :: IO ()
+main :: IO String
 main =
-  putStrLn "M1 main"
+  pure "M1 main success"

@@ -18,9 +18,11 @@ type State = GenericList Name Seq.Seq Task
 initialState :: State
 initialState = list ActiveTasks Seq.empty 1
 
--- | The outcome of a task, once it has finished. A task with no outcome yet is still running.
+-- | The outcome of a task, once it has finished. A task with no outcome yet is still running. A successful
+-- execute task (see 'Types.Instrument.Event'\'s @CompileEnd@ @result@ field) carries the exfiltrated @main@
+-- return value, when one was available; compile\/metadata tasks always carry 'Nothing' here.
 data Outcome
-  = Succeeded
+  = Succeeded (Maybe String)
   | Failed String
 
 data Task = Task
@@ -37,7 +39,7 @@ stateMarker :: Task -> (String, AttrName)
 stateMarker Task{_outcome} =
   case _outcome of
     Nothing -> ("\9203", taskRunningAttr) -- \x23F3 hourglass
-    Just Succeeded -> ("\9989", taskSucceededAttr) -- \x2705 check mark
+    Just (Succeeded _) -> ("\9989", taskSucceededAttr) -- \x2705 check mark
     Just (Failed _) -> ("\10060", taskFailedAttr) -- \x274C cross mark
 
 draw :: Name -> UTCTime -> State -> Widget Name
@@ -48,7 +50,7 @@ draw current now = renderList drawTask (current == ActiveTasks)
         elapsed = nominalDiffTimeToSeconds (max 0 (diffUTCTime (fromMaybe now _taskEndTime) _taskStartTime))
         status = case _outcome of
           Nothing -> formatPico elapsed
-          Just Succeeded -> formatPico elapsed
+          Just (Succeeded mres) -> formatPico elapsed ++ maybe "" (\r -> " => " ++ truncateResult r) mres
           Just (Failed _) -> "Failure"
      in (if _canDebug then withAttr canDebugAttr else id) $
           withAttr attr $
@@ -59,11 +61,20 @@ draw current now = renderList drawTask (current == ActiveTasks)
             -- 'HorizText' constructor with an explicit display width of 2, bypassing wcwidth entirely.
             wideStr 2 emoji <+> str " " <+> padRight Max (str (renderTargetSpec name)) <+> str status
 
+-- | Squash a result string to a single line and cap its length, so it doesn't overwhelm the fixed-width
+-- 'ActiveTasks' row it's appended to; the full value remains available in 'drawTaskDetails'.
+truncateResult :: String -> String
+truncateResult s =
+  case take 41 (takeWhile (/= '\n') s) of
+    short | length short < 41 -> short
+    short -> take 40 short ++ "\8230"
+
 drawTaskDetails :: Task -> Widget Name
 drawTaskDetails Task{_taskTarget = name, ..} =
   popup 70 (renderTargetSpec name) $
     strWrap $ case _outcome of
       Just (Failed content) -> content
+      Just (Succeeded (Just result)) -> "Result: " ++ result
       _ -> ""
 
 addTask :: TargetSpec -> WorkerId -> Bool -> EventM Name State ()

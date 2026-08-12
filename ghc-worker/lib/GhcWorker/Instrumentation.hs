@@ -73,13 +73,15 @@ messageCompileStart _args target =
     , canDebug = True
     }
 
--- | Construct a grapesy message for a "compilation finished" event.
+-- | Construct a grapesy message for a "compilation finished" event. @ghc-worker@ has no execute-task result
+-- exfiltration story (see @kb-instrument-ui@\/@GhcServer.Build.Execute@), so @result@ is always 'Nothing' here.
 messageCompileEnd :: Maybe TargetSpec -> Int32 -> [String] -> Event
 messageCompileEnd target exitCode output =
   CompileEnd
     { target = maybe "" renderTargetSpec target
     , exitCode = fromIntegral exitCode
     , stderr = unlines output
+    , result = Nothing
     }
 
 -- | Run a 'GrpcHandler' with instrumentation enabled.

@@ -8,6 +8,7 @@ import Control.Exception (SomeException, bracket, catch)
 import Network.Socket (Family (AF_UNIX), SockAddr (SockAddrUnix), SocketType (Stream), close, connect, socket)
 import System.Directory (findExecutable, getCurrentDirectory)
 import System.Exit (die)
+import System.IO (Handle)
 import System.Process (CreateProcess (..), StdStream (..), createProcess, proc)
 
 -- | Check whether something is listening on the given Unix socket, by attempting an actual @connect(2)@.
@@ -38,10 +39,12 @@ waitForServer sock n
 
 -- | Spawn @ghc-server@ as a detached daemon process rooted at the given project directory, with the @instrument@
 -- feature enabled so it opens an Instrument gRPC socket, plus any extra CLI options given by the caller (e.g. from
--- the UI's start-server popup).
-spawnGhcServer :: FilePath -> FilePath -> [String] -> IO ()
+-- the UI's start-server popup). Returns the process's stdout\/stderr read handles (piped rather than inherited),
+-- so the caller can stream the server's real output into its own logging instead of leaving it invisible (a
+-- detached, @new_session@'d process has no attached terminal of its own).
+spawnGhcServer :: FilePath -> FilePath -> [String] -> IO (Handle, Handle)
 spawnGhcServer exe projectRoot extraArgs = do
-  _ <-
+  (_, mout, merr, _) <-
     createProcess
       (proc exe (projectRoot : "--enable" : "instrument" : extraArgs))
         { std_in = NoStream
@@ -49,7 +52,9 @@ spawnGhcServer exe projectRoot extraArgs = do
         , std_err = CreatePipe
         , new_session = True
         }
-  pure ()
+  case (mout, merr) of
+    (Just out, Just err) -> pure (out, err)
+    _ -> die "ghc-server: expected stdout/stderr pipes from createProcess, got Nothing"
 
 -- | Resolve the @ghc-server@ executable to use: the explicit path given via @--server-exe@ if present, otherwise a
 -- @PATH@ lookup.
@@ -62,19 +67,20 @@ resolveServerExe = \case
 
 -- | Ensure a @ghc-server@ instance is running for the given project directory (defaulting to the current directory
 -- when 'Nothing'), starting one as a daemon subprocess if none is listening yet. Returns the path to its Instrument
--- gRPC socket.
+-- gRPC socket, plus the spawned process's stdout\/stderr handles when a new process was actually started (as
+-- opposed to reusing one that was already up, whose stdio the caller never had a handle to in the first place).
 --
 -- If @serverExe@ is @Nothing@, the executable is looked up on @PATH@ (see 'resolveServerExe').
-ensureGhcServer :: Maybe FilePath -> Maybe FilePath -> [String] -> IO FilePath
+ensureGhcServer :: Maybe FilePath -> Maybe FilePath -> [String] -> IO (FilePath, Maybe (Handle, Handle))
 ensureGhcServer serverExe explicitRoot extraArgs = do
   projectRoot <- maybe getCurrentDirectory pure explicitRoot
   let sock = defaultSocketPath projectRoot
   up <- isServerUp sock
   if up
-    then pure sock
+    then pure (sock, Nothing)
     else do
       exe <- resolveServerExe serverExe
-      spawnGhcServer exe projectRoot extraArgs
+      handles <- spawnGhcServer exe projectRoot extraArgs
       waitForServer sock 30
-      pure sock
+      pure (sock, Just handles)
 

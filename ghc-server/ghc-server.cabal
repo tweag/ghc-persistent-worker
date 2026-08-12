@@ -99,7 +99,6 @@ library
     grapesy ^>=1.0.1,
     optparse-applicative,
     process,
-    silently,
     stm,
     text,
     time,

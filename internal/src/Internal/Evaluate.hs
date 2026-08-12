@@ -16,6 +16,9 @@ import GHC (
   setInteractiveDynFlags,
   setSession,
   )
+import GHC.Builtin.Types (boolTy, charTy, doubleTy, floatTy, integerTy, intTy, stringTy)
+import GHC.Core.Type (Type)
+import GHC.Core.TyCo.Compare (eqType)
 import GHC.Data.Bag (emptyBag)
 import GHC.Driver.Env (hsc_home_unit, hscInterp, runInteractiveHsc, hscSetActiveUnitId)
 import GHC.Driver.Env.Types (HscEnv (hsc_IC), hsc_mod_graph)
@@ -28,12 +31,15 @@ import GHC.Runtime.Context (
   )
 import GHC.Runtime.Eval (
   execOptions,
+  exprType,
   setContext,
   )
 import GHC.Runtime.Eval.Types (
   IcGlobalRdrEnv (..),
   )
+import GHC.Tc.Module (TcRnExprMode (TM_Inst))
 import GHC.Tc.Utils.Env (lookupGlobal)
+import GHC.Tc.Utils.TcType (tcSplitIOType_maybe)
 import GHC.Types.Avail (AvailInfo (..))
 import GHC.Types.Name (nameOccName)
 import GHC.Types.Name.Reader (
@@ -157,12 +163,42 @@ evaluate env mHomeUnit target@(ModuleTarget modu) imports expr = do
           FoundMultiple _ -> logDebugD env.log (text "Found Multiple") >> pure False
           NotFound {} -> logDebugD env.log (text "Not Found") >> pure False
 
+-- | Classifies a module's @main@ result type for return-value propagation. 'IO a' where @a@ is a stringly or
+-- numeric type has its value surfaced (via 'ResultString'/'ResultShowable', see 'executeMain'); any other result
+-- type (in particular, the common @main :: IO ()@) is not, and evaluation falls back to running @main@ bare with
+-- its result discarded, as before this feature was added.
+data MainResultKind
+  = -- | @main :: IO String@ -- printed directly (no quoting/escaping) via @putStr@.
+    ResultString
+  | -- | @main :: IO a@ for another stringly/numeric @a@ (currently: 'Int', 'Integer', 'Double', 'Float', 'Char',
+    -- 'Bool') -- printed via @print@ (i.e. its 'Show' instance).
+    ResultShowable
+
+-- | Inspect a type of the shape @IO a@ (as returned by 'GHC.Runtime.Eval.exprType') and classify @a@ per
+-- 'MainResultKind', or 'Nothing' if the type isn't @IO@-shaped at all or @a@ isn't one of the small set of
+-- wired-in stringly/numeric types checked here. Deliberately does not attempt to support arbitrary
+-- user-defined 'Show' instances (e.g. custom result records) -- that would require a real type-directed dispatch
+-- mechanism (dictionary-passing), not just an equality check against wired-in types, which is a substantially
+-- larger feature.
+classifyMainResultType :: Type -> Maybe MainResultKind
+classifyMainResultType ty = do
+  (_ioTyCon, resTy) <- tcSplitIOType_maybe ty
+  if eqType resTy stringTy
+    then Just ResultString
+    else if any (eqType resTy) ([intTy, integerTy, doubleTy, floatTy, charTy, boolTy] :: [Type])
+      then Just ResultShowable
+      else Nothing
+
 -- | Execute a module's exported @main@ binding via GHC's statement-evaluation machinery, mirroring the worker's
--- @--expr@ mode (see 'GhcWorker.GhcHandler.dispatch'\'s @ModeEval@ branch), but without interpreting the
--- evaluated value's runtime representation (unlike 'evaluate', which unsafely coerces the result to @(Int, Int)@
--- for its test-harness use case). Returns 'Nothing' if the module does not export a binding named @main@
--- (skipped, not an error); 'Just' the execution's success flag otherwise.
-executeMain :: Env -> Maybe String -> ModuleTarget -> Ghc (Maybe Bool)
+-- @--expr@ mode (see 'GhcWorker.GhcHandler.dispatch'\'s @ModeEval@ branch). Unlike 'evaluate' (which unsafely
+-- coerces its statement's bound value to a fixed test-harness type, @(Int, Int)@), this coerces to 'String' --
+-- see 'classifyMainResultType' for how the statement text is chosen so that the bound value's runtime
+-- representation actually is a 'String' whenever a result is exfiltrated at all. Returns 'Nothing' if the module
+-- does not export a binding named @main@ (skipped, not an error); otherwise 'Just' a pair of the execution's
+-- success flag and, when @main@'s result type was recognized by 'classifyMainResultType', its value rendered as
+-- a 'String' (via @main@ directly for 'ResultString', or via @fmap show main@ for 'ResultShowable' -- letting
+-- GHC's own typechecker perform the 'Show' dispatch rather than reflecting on the runtime value ourselves).
+executeMain :: Env -> Maybe String -> ModuleTarget -> Ghc (Maybe (Bool, Maybe String))
 executeMain env mHomeUnit target@(ModuleTarget modu) = do
   logTimed env.log "executeMain is called" do
     hsc_env0 <- GHC.getSession
@@ -194,10 +230,31 @@ executeMain env mHomeUnit target@(ModuleTarget modu) = do
               then pure Nothing
               else do
                 setContext [IIModule modname]
-                r <- evalStmtCustom "main" execOptions
+                -- Inspect @main@'s result type (post-typecheck, via GHC's own @:type@-style machinery) to decide
+                -- whether its return value can be usefully exfiltrated. Only a small set of wired-in
+                -- stringly/numeric types is recognized (see 'classifyMainResultType'); anything else (in
+                -- particular the ordinary @main :: IO ()@) falls back to running @main@ bare, discarding its
+                -- result as before. When a result type is recognized, the statement text is chosen so that the
+                -- statement's own bound value already has runtime representation 'String' (either @main@ itself,
+                -- for 'ResultString', or @fmap show main@, for 'ResultShowable' -- 'show' is dispatched by GHC's
+                -- typechecker while type-checking this very statement, not by us), letting the bound
+                -- 'ForeignHValue' be unsafely coerced directly to 'String' rather than printed.
+                mty <- exprType TM_Inst "main"
+                let mkind = classifyMainResultType mty
+                    stmtText = case mkind of
+                      Just ResultShowable -> "fmap show main"
+                      _ -> "main"
+                r <- evalStmtCustom stmtText execOptions
                 case r of
-                  EvalComplete _ (EvalSuccess _) -> pure (Just True)
-                  _ -> pure (Just False)
+                  EvalComplete _ (EvalSuccess (fhv : _)) -> do
+                    mResultStr <- case mkind of
+                      Nothing -> pure Nothing
+                      Just _ -> do
+                        let Just interp = hsc_interp hsc_env
+                        hv <- liftIO $ wormhole interp fhv
+                        pure (Just (unsafeCoerce hv :: String))
+                    pure (Just (True, mResultStr))
+                  _ -> pure (Just (False, Nothing))
           NoPackage _ -> logDebugD env.log (text "No Package") >> pure Nothing
           FoundMultiple _ -> logDebugD env.log (text "Found Multiple") >> pure Nothing
           NotFound {} -> logDebugD env.log (text "Not Found") >> pure Nothing

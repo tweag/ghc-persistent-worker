@@ -107,7 +107,6 @@ newBuildEnv tp stateVar = do
   log <- newLogger False
   events <- newBuildEvents
   extDepsDb <- newMVar Nothing
-  stdioLock <- newMVar ()
   pure (BuildEnv {
     baseArgs = emptyArgs Map.empty,
     projectRoot = tp.rootOs,
@@ -118,8 +117,7 @@ newBuildEnv tp stateVar = do
     log,
     events,
     instrChan = Nothing,
-    extDepsDb,
-    stdioLock
+    extDepsDb
   }, events)
 
 -- ---------------------------------------------------------------------------
@@ -1279,13 +1277,53 @@ test_executeAfterCompile =
     mresult <- liftIO (executeModule buildEnv name unit "Main")
     annotate ("executeModule result: " ++ show mresult)
     case mresult of
-      Just TaskSuccess -> pure ()
-      other -> fail ("Expected Just TaskSuccess, got " ++ show other)
+      Just (TaskSuccess, Nothing) -> pure ()
+      other -> fail ("Expected Just (TaskSuccess, Nothing), got " ++ show other)
+
+-- | Project with a single unit whose module's @main@ has type @IO String@, used to regression-test
+-- 'Internal.Evaluate.classifyMainResultType'\'s 'ResultString' branch and 'GhcServer.Build.Execute.executeModule'\'s
+-- propagation of the returned string as a build-task result.
+createExecStringProject :: FilePath -> IO ()
+createExecStringProject root = do
+  createDirectoryIfMissing True (root ++ "/unit0")
+  writeUnitConfig root "unit0" UnitConfig {deps = [], args = baseGhcArgs}
+  writeProjectFile root "unit0/Main.hs" $ unlines
+    [ "module Main where"
+    , ""
+    , "main :: IO String"
+    , "main = pure \"hello from IO String main\""
+    ]
+
+execStringProjectTest :: TestName -> (TestProject -> TestT IO ()) -> TestTree
+execStringProjectTest =
+  projectTest "ghc-server-exec-string" createExecStringProject
+
+-- | Exercises 'Internal.Evaluate.classifyMainResultType'\'s 'ResultString' branch end-to-end: a module whose
+-- @main :: IO String@ is compiled then executed, and its return value must be exfiltrated verbatim as the
+-- companion 'String' returned by 'executeModule' (rather than merely succeeding, which the ordinary
+-- @main :: IO ()@ case would also do).
+test_executeStringMain :: TestTree
+test_executeStringMain =
+  execStringProjectTest "execute module with main :: IO String succeeds" \ tp -> do
+    (result, _) <- runFreshAll tp
+    assertSuccess "compile" result
+    stateVar <- liftIO newBuildState
+    (buildEnv, _) <- liftIO (newBuildEnv tp stateVar)
+    let name = UnitName "unit0"
+    unit <- case Map.lookup name buildEnv.project.units of
+      Just u -> pure u
+      Nothing -> fail "unit0 not found in discovered project"
+    mresult <- liftIO (executeModule buildEnv name unit "Main")
+    annotate ("executeModule result: " ++ show mresult)
+    case mresult of
+      Just (TaskSuccess, Just "hello from IO String main") -> pure ()
+      other -> fail ("Expected Just (TaskSuccess, Just \"hello from IO String main\"), got " ++ show other)
 
 test_executeModule :: TestTree
 test_executeModule =
   dependentTestGroup "Execute module" AllFinish
     [ test_executeAfterCompile
+    , test_executeStringMain
     ]
 
 test_serverBuild :: TestTree

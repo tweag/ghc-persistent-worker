@@ -7,7 +7,7 @@
 module GhcServer.Build.Execute where
 
 import Control.Concurrent.Async (forConcurrently_)
-import Control.Concurrent.MVar (withMVar)
+import qualified Data.Map.Strict as Map
 import GHC (mkModuleName)
 import GhcServer.Build.Compile (moduleTarget)
 import GhcServer.Build.Propagate (emitTaskEnd, emitTaskStart)
@@ -23,23 +23,22 @@ import Internal.Session (withGhcMakeModule)
 import Prelude hiding (log)
 import System.Directory.OsPath (createDirectoryIfMissing)
 import System.FilePath (takeBaseName)
-import System.IO (stderr, stdout)
-import System.IO.Silently (hCapture)
 import System.OsPath ((</>))
 import System.OsPath.Extra (fromOsPath, toOsPath)
 import Types.Args (Args (..))
 import Types.BuckArgs (IsInterpreted (..))
 import Types.Env (Env (..))
 import Types.Log (Logger (..))
-import qualified Data.Map.Strict as Map
 
 -- | Run a single module's @main@ via 'Internal.Evaluate.executeMain'.
 --
 -- Returns 'Nothing' if the module has no @main@ (skipped) OR if 'withGhcMakeModule' itself failed to set up a
 -- session for the target (e.g. an exception during module loading) -- these two cases are indistinguishable
--- through 'withGhcMakeModule'\'s single-'Maybe' result type. Otherwise returns 'Just' a 'TaskResult' reflecting
--- success or failure (including captured diagnostics on failure).
-executeModule :: BuildEnv -> UnitName -> Unit -> String -> IO (Maybe (TaskResult String))
+-- through 'withGhcMakeModule'\'s single-'Maybe' result type. Otherwise returns 'Just' a pair of a 'TaskResult'
+-- reflecting success or failure (including captured diagnostics on failure) and, on success, @main@'s
+-- exfiltrated return value as 'String' (see 'Internal.Evaluate.classifyMainResultType'), when its type was one
+-- of the small set recognized there.
+executeModule :: BuildEnv -> UnitName -> Unit -> String -> IO (Maybe (TaskResult String, Maybe String))
 executeModule buildEnv name unit modBaseName = do
   let
     modName = mkModuleName modBaseName
@@ -52,36 +51,31 @@ executeModule buildEnv name unit modBaseName = do
       args = buildEnv.baseArgs {tempDir = Just modTmpDir, homeUnit = cachedUnit}
       env = Env {log = logger, state = buildEnv.stateVar, args}
       target = moduleTarget name modName
-    result <- withMVar buildEnv.stdioLock \ _ ->
-      hCapture [stdout, stderr] $
-        withGhcMakeModule Interpreted target env \ targetSpec -> do
-          -- The module must be (re)compiled to bytecode before 'executeMain's 'setContext' call: any prior HPT
-          -- entry for this module (e.g. from a plain compile-to-object-code request) has an object-code linkable,
-          -- which GHC's interactive context machinery rejects with "not interpreted". 'compileModuleWithDepsInHpt'
-          -- with the 'TargetModuleInterp' spec ('targetSpec' here, since 'interp = Interpreted') compiles via
-          -- 'mkTargetAsInterpreted' (bytecode backend) and inserts the resulting 'HomeModInfo' into the HPT,
-          -- overwriting any stale object-code entry.
-          _ <- compileModuleWithDepsInHpt logger targetSpec
-          executeMain env (fromOsPath <$> args.homeUnit) target
-    let (capturedOutput, ghcResult) = result
+    ghcResult <-
+      withGhcMakeModule Interpreted target env \ targetSpec -> do
+        -- The module must be (re)compiled to bytecode before 'executeMain's 'setContext' call: any prior HPT
+        -- entry for this module (e.g. from a plain compile-to-object-code request) has an object-code linkable,
+        -- which GHC's interactive context machinery rejects with "not interpreted". 'compileModuleWithDepsInHpt'
+        -- with the 'TargetModuleInterp' spec ('targetSpec' here, since 'interp = Interpreted') compiles via
+        -- 'mkTargetAsInterpreted' (bytecode backend) and inserts the resulting 'HomeModInfo' into the HPT,
+        -- overwriting any stale object-code entry.
+        _ <- compileModuleWithDepsInHpt logger targetSpec
+        executeMain env (fromOsPath <$> args.homeUnit) target
     captured <- logger.flush
     logger.debug ("executeModule: " ++ name.string ++ ":" ++ modBaseName ++ " GHC result=" ++ show ghcResult)
-    -- 'hCapture' redirects the process-wide stdout\/stderr handles for the duration of the action, so any
-    -- output the executed @main@ writes via 'System.IO.putStrLn'\/'System.IO.hPutStrLn' \'stderr\' etc. ends up
-    -- here rather than on the real handles (which, for a backgrounded 'ghc-server' process, nobody would see
-    -- anyway). It is logged through 'instrumentLogger' so it reaches the \'L\'-key server-log viewer in
-    -- \'instrument\', tagged with the same target as the compile/execute events.
-    if not (null capturedOutput)
-      then logger.info ("executeModule: " ++ name.string ++ ":" ++ modBaseName ++ " stdout/stderr:\n" ++ capturedOutput)
-      else pure ()
+    -- The executed @main@'s real stdout\/stderr output goes to the actual process handles (this is a
+    -- backgrounded @ghc-server@ process, not an in-process capture), which the @instrument@ client streams and
+    -- logs itself (see 'ServeGhcServer.spawnGhcServer'); this function no longer redirects\/captures them.
     pure $ case ghcResult of
-      Just True -> Just TaskSuccess
-      Just False -> Just (TaskFailed ("Execution failed:\n" ++ unlines captured ++ capturedOutput))
+      Just (True, mResultStr) -> Just (TaskSuccess, mResultStr)
+      Just (False, _) -> Just (TaskFailed ("Execution failed:\n" ++ unlines captured), Nothing)
       Nothing -> Nothing
 
 -- | Execute all modules of a unit in parallel, emitting a 'CompileStart'\/'CompileEnd' instrumentation event
 -- pair (target text @unitName:moduleName:execute@) around each module that actually has a @main@ to run.
 -- Modules without @main@ produce no event, matching the skip semantics used elsewhere in the build pipeline.
+-- A successful execution's exfiltrated return value (if any) is attached to the 'CompileEnd' event, so it can be
+-- displayed by the @instrument@ UI under the task's row.
 executeUnit :: BuildEnv -> UnitName -> IO ()
 executeUnit buildEnv name =
   case Map.lookup name buildEnv.project.units of
@@ -95,9 +89,9 @@ executeUnit buildEnv name =
         mresult <- executeModule buildEnv name unit modBaseName
         case mresult of
           Nothing -> buildEnv.log.debug ("executeUnit: " ++ target ++ " skipped (no main, or session setup failed)")
-          Just result -> do
-            buildEnv.log.debug ("executeUnit: " ++ target ++ " finished: " ++ show result)
+          Just (result, mResultStr) -> do
+            buildEnv.log.debug ("executeUnit: " ++ target ++ " finished: " ++ show result ++ ", result=" ++ show mResultStr)
             emitTaskStart buildEnv target
-            emitTaskEnd buildEnv target result
+            emitTaskEnd buildEnv target result mResultStr
   where
     moduleNames unit = [takeBaseName (fp src) | src <- unit.sources]

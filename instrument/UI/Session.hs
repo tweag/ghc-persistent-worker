@@ -114,7 +114,7 @@ handleEvent (InstrEvent wid evt) =
           target' = TargetUnknown rawTarget
       if exitCode == 0
         then do
-          zoom activeTasks $ ActiveTasks.completeTask target' ActiveTasks.Succeeded
+          zoom activeTasks $ ActiveTasks.completeTask target' (ActiveTasks.Succeeded result)
           zoom taskTree $ TaskTree.handleEvent $ TaskTree.MarkBuilt (Text.pack rawTarget)
         else zoom activeTasks $ ActiveTasks.completeTask target' (ActiveTasks.Failed content)
     Instr.Stats {..} -> do

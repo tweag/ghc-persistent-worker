@@ -68,9 +68,10 @@ emitTaskStart :: BuildEnv -> String -> IO ()
 emitTaskStart env target = emitEvent env CompileStart {target, canDebug = False}
 
 -- | Send a 'CompileEnd' event for a metadata or compile task that just finished, deriving the exit code and
--- stderr content from the task's 'TaskResult'.
-emitTaskEnd :: BuildEnv -> String -> TaskResult String -> IO ()
-emitTaskEnd env target result =
+-- stderr content from the task's 'TaskResult'. @mResultStr@ carries an execute task's exfiltrated @main@ return
+-- value (see 'GhcServer.Build.Execute.executeModule'); metadata\/compile tasks always pass 'Nothing'.
+emitTaskEnd :: BuildEnv -> String -> TaskResult String -> Maybe String -> IO ()
+emitTaskEnd env target result mResultStr =
   emitEvent env CompileEnd {
     target,
     exitCode = case result of
@@ -78,7 +79,8 @@ emitTaskEnd env target result =
       TaskFailed _ -> 1,
     stderr = case result of
       TaskSuccess -> ""
-      TaskFailed msg -> msg
+      TaskFailed msg -> msg,
+    result = mResultStr
   }
 
 -- | Run an instrumented task: emits 'CompileStart' before and 'CompileEnd' after, deriving the target's
@@ -87,7 +89,7 @@ withTaskEvents :: BuildEnv -> String -> IO (TaskResult String) -> IO (TaskResult
 withTaskEvents env target action = do
   emitTaskStart env target
   result <- action
-  emitTaskEnd env target result
+  emitTaskEnd env target result Nothing
   pure result
 
 -- | Skip metadata for a cached unit.

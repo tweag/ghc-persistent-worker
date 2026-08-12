@@ -28,11 +28,5 @@ data BuildEnv =
     instrChan :: Maybe (Chan Event),
     -- | Memoized result of building the project's external Cabal dependencies into the store, shared by
     -- all units so the build only runs once per server lifetime. 'Nothing' until first requested.
-    extDepsDb :: MVar (Maybe (Either String FilePath)),
-    -- | Serializes capture of the process-wide stdout\/stderr handles (see 'GhcServer.Build.Execute.executeModule').
-    -- Redirecting these handles (via @silently@'s 'System.IO.Silently.hCapture') is a global, process-wide effect,
-    -- not scoped to a thread; concurrent executions (e.g. 'GhcServer.Build.Execute.executeUnit's
-    -- 'Control.Concurrent.Async.forConcurrently_' fan-out) would otherwise race for the same redirected handle and
-    -- interleave or lose output. Held for the duration of a single module's capture.
-    stdioLock :: MVar ()
+    extDepsDb :: MVar (Maybe (Either String FilePath))
   }

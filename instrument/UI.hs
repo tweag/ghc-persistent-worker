@@ -87,6 +87,10 @@ data Event
     -- Carries the user-entered project path (empty means "use the current directory") and extra CLI options to
     -- pass to @ghc-server@.
     RequestServe Text.Text Text.Text
+  | -- | A line of stdout\/stderr read from a @ghc-server@ subprocess spawned by this client (see
+    -- 'ServeGhcServer.spawnGhcServer'). Carries the stream name (@"stdout"@\/@"stderr"@) and the line text;
+    -- dispatched into the current session's server-log viewer via 'logClient'.
+    ProcessLog Text.Text Text.Text
 
 -- | Input fields for the "start ghc-server" popup (the capital-@S@ key binding).
 data ServeInput = ServeInput
@@ -286,6 +290,8 @@ handleEvent (AppEvent (SessionSelectorEvent evt)) =
 handleEvent (AppEvent (RequestServe path opts)) = do
   action <- use startServer
   liftIO $ action path (words (Text.unpack opts))
+handleEvent (AppEvent (ProcessLog stream line)) =
+  logClient (Text.pack "info") (stream <> Text.pack ": " <> line)
 handleEvent (VtyEvent evt) = do
   current <- use currentFocus
   case current of

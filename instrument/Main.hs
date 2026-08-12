@@ -8,6 +8,7 @@ import Control.Exception (SomeException, catch, try, IOException)
 import Control.Monad (filterM, forever, void, when)
 import Data.Binary (decode)
 import Data.ByteString (fromStrict)
+import Data.Foldable (for_)
 import Data.List (isInfixOf)
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Text qualified as Text
@@ -39,6 +40,8 @@ import System.Directory (doesPathExist, getModificationTime, listDirectory, crea
 import System.Environment (lookupEnv)
 import System.FilePath ((</>))
 import System.FSNotify (Event (..), EventIsDirectory (..), watchDir, withManager)
+import System.IO (Handle)
+import System.IO qualified as IO
 import UI qualified
 import UI.Session qualified as Session
 import UI.SessionSelector qualified as SS
@@ -103,8 +106,27 @@ listen eventChan instrPath = do
 startServer :: Maybe FilePath -> BChan UI.Event -> Text.Text -> [String] -> IO ()
 startServer serverExe eventChan path extraOpts = do
   let explicitRoot = if Text.null path then Nothing else Just (Text.unpack path)
-  sock <- ensureGhcServer serverExe explicitRoot extraOpts
+  (sock, mHandles) <- ensureGhcServer serverExe explicitRoot extraOpts
+  for_ mHandles \ (out, err) -> do
+    void $ forkIO $ streamLines eventChan (Text.pack "stdout") out
+    void $ forkIO $ streamLines eventChan (Text.pack "stderr") err
   listen eventChan sock
+
+-- | Read lines from a spawned ghc-server's stdout\/stderr handle until it closes (EOF or the process exits),
+-- dispatching each as a 'UI.ProcessLog' event tagged with the given stream name. Runs in its own thread so the
+-- two streams (stdout, stderr) can be read concurrently without blocking each other.
+streamLines :: BChan UI.Event -> Text.Text -> Handle -> IO ()
+streamLines eventChan streamName h =
+  catch @SomeException loop (const (pure ()))
+  where
+    loop = do
+      eof <- IO.hIsEOF h
+      if eof
+        then pure ()
+        else do
+          line <- IO.hGetLine h
+          writeBChan eventChan (UI.ProcessLog streamName (Text.pack line))
+          loop
 
 main :: IO ()
 main = do
