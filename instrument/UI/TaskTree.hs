@@ -28,10 +28,13 @@ data Entry = Entry
   }
   deriving stock (Eq, Show)
 
--- | A row in the displayed tree: a collapsible unit header (carrying its own expanded state for rendering), or a
--- module leaf tagged with whether it is the last child of its unit (to draw the correct L-shaped connector).
+-- | A row in the displayed tree: the project-root node (selectable, but not collapsible -- unlike unit headers,
+-- "expanding" it doesn't hide/reveal anything, since its children are simply the existing top-level unit
+-- headers), a collapsible unit header (carrying its own expanded state for rendering), or a module leaf tagged
+-- with whether it is the last child of its unit (to draw the correct L-shaped connector).
 data Row
-  = Header Text Bool
+  = Root
+  | Header Text Bool
   | ModuleRow Text Text Bool
   deriving stock (Eq, Show)
 
@@ -58,15 +61,19 @@ initialState =
     , built = Set.empty
     }
 
--- | The unit name owning a row, whether it's the header itself or one of its module children.
+-- | The unit name owning a row, whether it's the header itself or one of its module children. The project-root
+-- row has no owning unit; it maps to the empty string, which never matches a real unit name (used only by
+-- 'handleEvent's 'ToggleExpand', for which selecting the root is a harmless no-op).
 rowUnit :: Row -> Text
+rowUnit Root = Text.empty
 rowUnit (Header uid _) = uid
 rowUnit (ModuleRow uid _ _) = uid
 
--- | Arrange units into a flat row sequence: a header per unit, followed by its module rows when expanded.
+-- | Arrange units into a flat row sequence: the project-root node, followed by a header per unit and its module
+-- rows when expanded.
 buildRows :: Set Text -> [Entry] -> Seq.Seq Row
 buildRows expanded units =
-  Seq.fromList (concatMap renderUnit units)
+  Seq.fromList (Root : concatMap renderUnit units)
  where
   renderUnit Entry{unitName, modules} =
     Header unitName (Set.member unitName expanded)
@@ -103,41 +110,53 @@ handleEvent (MarkBuilt target) =
   modify \s -> s{built = Set.insert target s.built}
 
 -- | The compile targets for the currently selected row, used by the 'b' build action (changed: no longer
--- includes metadata, see 'selectedMetadataTarget' for that).
+-- includes metadata, see 'selectedMetadataTargets' for that).
 --
+-- Selecting the project-root node schedules a compile job for every module of every unit in the project.
 -- Selecting a unit header schedules a compile job for every one of its modules (@unitName:moduleName@ for each);
 -- selecting one of its module children targets only that module's compilation.
 selectedCompileTargets :: State -> Maybe [Text]
 selectedCompileTargets State{rows, units} = do
   (_, row) <- listSelectedElement rows
   case row of
+    Root -> pure [unitName e <> ":" <> m | e <- units, m <- modules e]
     Header uid _ -> do
       entry <- List.find ((== uid) . unitName) units
       pure [uid <> ":" <> m | m <- modules entry]
     ModuleRow uid m _ -> Just [uid <> ":" <> m]
 
--- | The metadata target for the currently selected row, used by the 'm' key (added alongside the 'b' key's
--- change to schedule per-module compiles instead of metadata). Always targets the owning unit's metadata step,
--- regardless of whether a header or module row is selected.
-selectedMetadataTarget :: State -> Maybe Text
-selectedMetadataTarget State{rows} = mkTarget . snd <$> listSelectedElement rows
- where
-  mkTarget row = rowUnit row <> ":metadata"
-
--- | The unit name for the 'x' execute action, which only applies at unit granularity: 'Nothing' unless a unit
--- header row is currently selected (execution runs all of a unit's modules in parallel; selecting an individual
--- module row does not narrow that down).
-selectedUnitForExecute :: State -> Maybe Text
-selectedUnitForExecute State{rows} = do
+-- | The metadata targets for the currently selected row, used by the 'm' key (added alongside the 'b' key's
+-- change to schedule per-module compiles instead of metadata). Selecting the project-root node targets every
+-- unit's metadata step; selecting a header or module row always targets just the owning unit's metadata step,
+-- regardless of which kind of row is selected.
+selectedMetadataTargets :: State -> Maybe [Text]
+selectedMetadataTargets State{rows, units} = do
   (_, row) <- listSelectedElement rows
   case row of
+    Root -> pure [unitName e <> ":metadata" | e <- units]
+    _ -> pure [rowUnit row <> ":metadata"]
+
+-- | The target text for the 'x' execute action, used verbatim as the @triggerExecute@ RPC's target field (see
+-- 'GhcServer.Grpc.triggerExecute'):
+--
+-- * Project-root node selected -- the sentinel @"*"@, requesting execution of every module of every unit.
+-- * Unit header row selected -- the bare unit name, requesting execution of every module of that unit.
+-- * Module row selected -- @unitName:moduleName@, requesting execution of only that module (satisfying the
+--   requirement that triggering execution on a module executes only that module).
+selectedExecuteTarget :: State -> Maybe Text
+selectedExecuteTarget State{rows} = do
+  (_, row) <- listSelectedElement rows
+  case row of
+    Root -> Just (Text.pack "*")
     Header uid _ -> Just uid
-    ModuleRow {} -> Nothing
+    ModuleRow uid m _ -> Just (uid <> ":" <> m)
 
 draw :: Name -> State -> Widget Name
 draw current State{rows, built} = renderList drawRow (current == TaskTree) rows
  where
   drawRow isSel row = (if isSel then withAttr disabledAttr else id) (drawRow' row)
+  drawRow' Root =
+    str "\9632 <project>"
   drawRow' (Header uid expanded') =
     str ((if expanded' then "\9662 " else "\9656 ") ++ Text.unpack uid) <+> mark (uid <> ":metadata")
   drawRow' (ModuleRow uid m isLast) =

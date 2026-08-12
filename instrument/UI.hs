@@ -78,7 +78,8 @@ data Event
     -- by 'TaskTree.selectedCompileTargets'\/'TaskTree.selectedMetadataTarget'.
     TriggerBuild WorkerId Text.Text
   | -- | Trigger execution of all modules in a unit (the 'x' key). Only fires when a unit header is selected in
-    -- the project view, as computed by 'TaskTree.selectedUnitForExecute'. The target text is a bare unit name.
+  -- the project view, as computed by 'TaskTree.selectedExecuteTarget'. The target text is a bare unit name,
+  -- @unitName:moduleName@ for a single module, or the sentinel @"*"@ for the whole project.
     TriggerExecute WorkerId Text.Text
   | BytecodeBrowserEvent BytecodeBrowser.Event
   | FetchBytecodeState
@@ -359,18 +360,18 @@ handleEvent (VtyEvent evt) = do
       V.EvKey (V.KChar 'm') [] -> do
         mtree <- preuse (currentSession . Session.taskTree)
         mfirst <- firstWorker
-        case (mtree >>= TaskTree.selectedMetadataTarget, mfirst) of
-          (Just target, Just (wid, _)) -> handleEvent (AppEvent (TriggerBuild wid target))
+        case (mtree >>= TaskTree.selectedMetadataTargets, mfirst) of
+          (Just targets, Just (wid, _)) -> for_ targets \target -> handleEvent (AppEvent (TriggerBuild wid target))
           _ -> beep
       V.EvKey (V.KChar 'x') [] -> do
         mtree <- preuse (currentSession . Session.taskTree)
         mfirst <- firstWorker
-        case (mtree >>= TaskTree.selectedUnitForExecute, mfirst) of
+        case (mtree >>= TaskTree.selectedExecuteTarget, mfirst) of
           (Just target, Just (wid, _)) -> do
-            logClient (Text.pack "debug") (Text.pack ("x key: selected unit=" ++ Text.unpack target ++ ", worker=" ++ show wid))
+            logClient (Text.pack "debug") (Text.pack ("x key: selected target=" ++ Text.unpack target ++ ", worker=" ++ show wid))
             handleEvent (AppEvent (TriggerExecute wid target))
           (Nothing, _) -> do
-            logClient (Text.pack "debug") (Text.pack "x key: no unit header row selected (execute only applies at unit granularity)")
+            logClient (Text.pack "debug") (Text.pack "x key: no row selected")
             beep
           (_, Nothing) -> do
             logClient (Text.pack "debug") (Text.pack "x key: no worker available")

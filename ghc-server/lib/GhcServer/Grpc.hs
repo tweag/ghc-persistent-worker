@@ -14,9 +14,9 @@ import Data.ByteString (toStrict)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as Text
 import GhcServer.Build (Build, scheduleBatch)
-import GhcServer.Build.Execute (executeUnit)
+import GhcServer.Build.Execute (executeProject, executeUnit, executeUnitModule)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
-import GhcServer.Data.Request (ScheduleRequest (..))
+import GhcServer.Data.Request (ScheduleRequest (..), UnitRequest (..))
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
 import GhcServer.Handler (parseTarget)
 import GhcServer.Path (fp)
@@ -68,6 +68,11 @@ notifyMe project stateVar chan callback = do
 -- (@unitName@, @unitName:metadata@, @unitName:modules@, @unitName:ModuleName@). Fire-and-forget: does not wait for
 -- completion, matching the semantics of the worker's own 'triggerRebuild'.
 --
+-- The sentinel unit name @"*"@ (used by the instrument UI's project-root task-tree node) requests the same
+-- scope -- @"*:metadata"@ or bare @"*"@\/@"*:modules"@ -- for every unit in the project at once, expanding to one
+-- schedule step per unit rather than being resolved by 'parseTarget' (which knows nothing about multi-unit
+-- targets).
+--
 -- Always forces @rebuild = True@: unlike a scheduled build implicitly triggered by another target's dependency
 -- resolution, this is always an explicit user request (from the instrument UI's 'b'/'r' keys, or 'ghc-client'
 -- without flags), so metadata must actually be recomputed rather than silently skipped because the unit's cache
@@ -78,23 +83,44 @@ triggerRebuild ::
   Proto Instr.RebuildRequest ->
   IO (Proto Instr.Empty)
 triggerRebuild build project req = do
-  case parseTarget project (Text.unpack req.target) of
-    Left _ -> pure ()
-    Right (name, unitReq) ->
-      scheduleBatch build ScheduleRequest {steps = [(name, unitReq)], recompile = True, rebuild = True}
+  let targetText = Text.unpack req.target
+  case break (== ':') targetText of
+    ("*", suffix) -> do
+      let unitReq = case suffix of
+            ':' : "metadata" -> UnitMetadata
+            _ -> UnitAll
+      scheduleBatch build ScheduleRequest
+        { steps = [(name, unitReq) | name <- Map.keys project.units]
+        , recompile = True
+        , rebuild = True
+        }
+    _ ->
+      case parseTarget project targetText of
+        Left _ -> pure ()
+        Right (name, unitReq) ->
+          scheduleBatch build ScheduleRequest {steps = [(name, unitReq)], recompile = True, rebuild = True}
   pure defMessage
 
--- | Trigger execution of all modules in the given unit (target text is a bare unit name; any @:suffix@ is
--- ignored). Fire-and-forget, like 'triggerRebuild'. Runs on 'GhcServer.Build.Execute.executeUnit', which fans
--- out in parallel and skips modules without @main@.
+-- | Trigger execution of @main@ for the given target. Target text syntax (computed by
+-- 'UI.TaskTree.selectedExecuteTarget'):
+--
+-- * @"*"@ (project-root node selected) -- execute every module of every unit in the project ('executeProject').
+-- * @unitName@ (unit header row selected) -- execute every module of that unit ('executeUnit').
+-- * @unitName:moduleName@ (module row selected) -- execute only that module ('executeUnitModule'), satisfying
+--   the requirement that selecting a module executes only that module.
+--
+-- Fire-and-forget, like 'triggerRebuild'.
 triggerExecute ::
   BuildEnv ->
   Proto Instr.RebuildRequest ->
   IO (Proto Instr.Empty)
 triggerExecute buildEnv req = do
-  let unitText = takeWhile (/= ':') (Text.unpack req.target)
-  buildEnv.log.debug ("triggerExecute: received target=" ++ Text.unpack req.target ++ ", resolved unit=" ++ unitText)
-  _ <- forkIO (executeUnit buildEnv (UnitName unitText))
+  let targetText = Text.unpack req.target
+  buildEnv.log.debug ("triggerExecute: received target=" ++ targetText)
+  _ <- forkIO $ case break (== ':') targetText of
+    ("*", _) -> executeProject buildEnv
+    (unitText, ':' : modText) -> executeUnitModule buildEnv (UnitName unitText) modText
+    (unitText, _) -> executeUnit buildEnv (UnitName unitText)
   pure defMessage
 
 -- | A grapesy server that streams instrumentation data and serves the bytecode-cache browser RPCs, backed by

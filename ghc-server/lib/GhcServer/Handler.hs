@@ -22,7 +22,8 @@ import Network.GRPC.Server.StreamType (Methods)
 import Prelude hiding (log)
 import Proto.Worker (Worker)
 import System.OsPath ((</>))
-import Types.Args (Args (..), emptyArgs)
+import qualified Types.Args as Args
+import Types.Args (emptyArgs)
 import Types.FeatureFlags (FeatureFlags (..))
 import Types.Grpc (RequestArgs (..))
 import Types.Instrument (Event)
@@ -160,7 +161,7 @@ serverContext config = do
   extDepsDb <- newMVar Nothing
   let
     env = BuildEnv {
-      baseArgs = (emptyArgs Map.empty) {features = config.features},
+      baseArgs = (emptyArgs Map.empty) {Args.features = config.features},
       projectRoot = config.projectRoot,
       outputDir,
       tmpDir,

@@ -40,8 +40,9 @@ triggerRebuild :: Connection -> TargetSpec -> IO ()
 triggerRebuild conn target =
   triggerRebuildText conn (Text.pack (renderTargetSpec target))
 
--- | Send a bare unit-name target to the server's @triggerExecute@ RPC, requesting execution of @main@ for
--- every module in that unit (in parallel, skipping modules without @main@). Fire-and-forget, mirroring
+-- | Send a raw target-text 'RebuildRequest' to the server's @triggerExecute@ RPC, requesting execution of
+-- @main@ for a single module, a whole unit, or (via the sentinel target @"*"@) the entire project -- see
+-- 'GhcServer.Grpc.triggerExecute' and 'UI.TaskTree.selectedExecuteTarget'. Fire-and-forget, mirroring
 -- 'triggerRebuildText'.
 triggerExecuteText :: Connection -> Text.Text -> IO ()
 triggerExecuteText conn targetText =

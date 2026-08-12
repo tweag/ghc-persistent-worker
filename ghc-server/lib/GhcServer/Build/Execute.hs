@@ -29,6 +29,7 @@ import Types.Args (Args (..))
 import Types.BuckArgs (IsInterpreted (..))
 import Types.Env (Env (..))
 import Types.Log (Logger (..))
+import Types.Target (TargetSpec (TargetModule))
 
 -- | Run a single module's @main@ via 'Internal.Evaluate.executeMain'.
 --
@@ -53,12 +54,18 @@ executeModule buildEnv name unit modBaseName = do
       target = moduleTarget name modName
     ghcResult <-
       withGhcMakeModule Interpreted target env \ targetSpec -> do
+        -- Build the module the regular (object-code) way first, exactly like 'GhcServer.Build.Compile.compileSingleModule'
+        -- does. This ensures the module (and, via GHC's downsweep-driven summary lookup, its dependencies) actually
+        -- has real interface\/object artifacts on disk before we ask for a bytecode recompile -- see the
+        -- 'kb-instrument-ui' "known limitation" this addresses: a metadata-only build has no compiled interfaces at
+        -- all, so 'executeMain' silently fails to find any module's @main@.
+        _ <- compileModuleWithDepsInHpt logger (TargetModule target)
         -- The module must be (re)compiled to bytecode before 'executeMain's 'setContext' call: any prior HPT
-        -- entry for this module (e.g. from a plain compile-to-object-code request) has an object-code linkable,
-        -- which GHC's interactive context machinery rejects with "not interpreted". 'compileModuleWithDepsInHpt'
-        -- with the 'TargetModuleInterp' spec ('targetSpec' here, since 'interp = Interpreted') compiles via
-        -- 'mkTargetAsInterpreted' (bytecode backend) and inserts the resulting 'HomeModInfo' into the HPT,
-        -- overwriting any stale object-code entry.
+        -- entry for this module (e.g. from the regular compile just above, or an earlier plain compile-to-object-
+        -- code request) has an object-code linkable, which GHC's interactive context machinery rejects with "not
+        -- interpreted". 'compileModuleWithDepsInHpt' with the 'TargetModuleInterp' spec ('targetSpec' here, since
+        -- 'interp = Interpreted') compiles via 'mkTargetAsInterpreted' (bytecode backend) and inserts the
+        -- resulting 'HomeModInfo' into the HPT, overwriting the object-code entry just inserted above.
         _ <- compileModuleWithDepsInHpt logger targetSpec
         executeMain env (fromOsPath <$> args.homeUnit) target
     captured <- logger.flush
@@ -71,11 +78,29 @@ executeModule buildEnv name unit modBaseName = do
       Just (False, _) -> Just (TaskFailed ("Execution failed:\n" ++ unlines captured), Nothing)
       Nothing -> Nothing
 
--- | Execute all modules of a unit in parallel, emitting a 'CompileStart'\/'CompileEnd' instrumentation event
--- pair (target text @unitName:moduleName:execute@) around each module that actually has a @main@ to run.
--- Modules without @main@ produce no event, matching the skip semantics used elsewhere in the build pipeline.
--- A successful execution's exfiltrated return value (if any) is attached to the 'CompileEnd' event, so it can be
--- displayed by the @instrument@ UI under the task's row.
+-- | Execute a single named module of a unit, emitting a 'CompileStart'\/'CompileEnd' instrumentation event pair
+-- (target text @unitName:moduleName:execute@) if the module actually has a @main@ to run. Produces no event if the
+-- module has none, matching the skip semantics used elsewhere in the build pipeline. This is the sole entry point
+-- for module-granularity execution (the instrument UI's 'x' key on a selected module row): it never touches any
+-- other module of the unit.
+executeUnitModule :: BuildEnv -> UnitName -> String -> IO ()
+executeUnitModule buildEnv name modBaseName =
+  case Map.lookup name buildEnv.project.units of
+    Nothing -> buildEnv.log.debug ("executeUnitModule: unknown unit " ++ name.string)
+    Just unit -> do
+      let target = name.string ++ ":" ++ modBaseName ++ ":execute"
+      buildEnv.log.debug ("executeUnitModule: dispatching " ++ target)
+      mresult <- executeModule buildEnv name unit modBaseName
+      case mresult of
+        Nothing -> buildEnv.log.debug ("executeUnitModule: " ++ target ++ " skipped (no main, or session setup failed)")
+        Just (result, mResultStr) -> do
+          buildEnv.log.debug ("executeUnitModule: " ++ target ++ " finished: " ++ show result ++ ", result=" ++ show mResultStr)
+          emitTaskStart buildEnv target
+          emitTaskEnd buildEnv target result mResultStr
+
+-- | Execute all modules of a unit in parallel, delegating to 'executeUnitModule' for each. A successful
+-- execution's exfiltrated return value (if any) is attached to the 'CompileEnd' event, so it can be displayed by
+-- the @instrument@ UI under the task's row.
 executeUnit :: BuildEnv -> UnitName -> IO ()
 executeUnit buildEnv name =
   case Map.lookup name buildEnv.project.units of
@@ -83,15 +108,12 @@ executeUnit buildEnv name =
     Just unit -> do
       let modules = moduleNames unit
       buildEnv.log.debug ("executeUnit: running " ++ show (length modules) ++ " module(s) in unit " ++ name.string ++ ": " ++ show modules)
-      forConcurrently_ modules \ modBaseName -> do
-        let target = name.string ++ ":" ++ modBaseName ++ ":execute"
-        buildEnv.log.debug ("executeUnit: dispatching " ++ target)
-        mresult <- executeModule buildEnv name unit modBaseName
-        case mresult of
-          Nothing -> buildEnv.log.debug ("executeUnit: " ++ target ++ " skipped (no main, or session setup failed)")
-          Just (result, mResultStr) -> do
-            buildEnv.log.debug ("executeUnit: " ++ target ++ " finished: " ++ show result ++ ", result=" ++ show mResultStr)
-            emitTaskStart buildEnv target
-            emitTaskEnd buildEnv target result mResultStr
+      forConcurrently_ modules (executeUnitModule buildEnv name)
   where
     moduleNames unit = [takeBaseName (fp src) | src <- unit.sources]
+
+-- | Execute every module of every unit in the project in parallel, delegating to 'executeUnit' per unit. This
+-- backs the project-root node's 'x' execute action in the @instrument@ UI's task tree.
+executeProject :: BuildEnv -> IO ()
+executeProject buildEnv =
+  forConcurrently_ (Map.keys buildEnv.project.units) (executeUnit buildEnv)
