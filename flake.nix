@@ -37,8 +37,8 @@
         version = "9.10.1";
         flavour = "release+split_sections+ipe";
         # branch: wip/torsten.schmits/mwb-26-07/abstract-linkables
-        rev = "43fc929d05dfc825e89d8e2671cca022acdd3689";
-        hash = "sha256-lrVkAYiWeTINMKSGE66cqfjprNxBx5PTt27vjVPxUTc=";
+        rev = "1767fddbc7220c5535652838a4e2782efe0cd13c";
+        hash = "sha256-dmnVJ8d8nNNt4sSKszl0arzOCReWzgtTmxDBQtYVEaU=";
       };
 
       ghc914.nixpkgs = "ghc914";
