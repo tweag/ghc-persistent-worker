@@ -57,6 +57,7 @@ import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
+import Data.Text (Text)
 import Data.Void (Void)
 import System.Timeout (timeout)
 
@@ -71,8 +72,11 @@ type OrdKey :: (Phase -> Type) -> Constraint
 type OrdKey key = (Ord (key 'Pending), Ord (key 'Resolved))
 
 -- | Result of executing a build task.
+--
+-- The success case carries an optional exfiltrated result payload (e.g. an execute task's @main@ return value);
+-- tasks with no payload to report (metadata, compile) use 'Nothing'.
 data TaskResult f =
-  TaskSuccess
+  TaskSuccess (Maybe Text)
   |
   TaskFailed f
   deriving stock (Eq, Show)
@@ -224,7 +228,7 @@ recordResult key result =
       state {
         completed = Set.insert key state.completed,
         failures = case result of
-          TaskSuccess -> state.failures
+          TaskSuccess _ -> state.failures
           TaskFailed f -> Map.insert key f state.failures,
         unsatisfied = Map.map (fmap (Set.delete key)) state.unsatisfied,
         activeCount = state.activeCount - 1

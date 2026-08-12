@@ -83,7 +83,7 @@ runScheduler env initialState = do
     wrapDispatch _ext task = do
       result <- runDispatch env.dispatch task.value
       pure $ case result of
-        RequestSuccess -> C.TaskSuccess
+        RequestSuccess -> C.TaskSuccess Nothing
         RequestFailure f -> C.TaskFailed f
 
     handlers = C.Handlers {

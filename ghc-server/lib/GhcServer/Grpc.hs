@@ -8,20 +8,18 @@ module GhcServer.Grpc where
 import Common.Grpc ()
 import Control.Concurrent.Chan (Chan)
 import Control.Concurrent.MVar (MVar)
-import Control.Concurrent (forkIO)
 import Data.Binary (encode)
 import Data.ByteString (toStrict)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as Text
 import GhcServer.Build (Build, scheduleBatch)
-import GhcServer.Build.Execute (executeProject, executeUnit, executeUnitModule)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.Request (ScheduleRequest (..), UnitRequest (..))
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
 import GhcServer.Handler (parseTarget)
 import GhcServer.Path (fp)
-import GhcWorker.Grpc (evictBytecode, getBytecodeState, setOptions)
 import GhcWorker.Grpc qualified as Worker
+import GhcWorker.Grpc (evictBytecode, getBytecodeState, setOptions)
 import Network.GRPC.Common (NextElem (NextElem))
 import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
 import Network.GRPC.Server.Protobuf (ProtobufMethodsOf)
@@ -31,7 +29,6 @@ import Proto.Instrument (Instrument)
 import Proto.Instrument_Fields qualified as Instr
 import System.FilePath (takeBaseName)
 import Types.Instrument (Event (..), UnitSummary (..))
-import Types.Log (Logger (..))
 import Types.State (WorkerState)
 
 -- | Build a snapshot of the project's units and modules for the instrument UI's task tree, from the units
@@ -96,31 +93,45 @@ triggerRebuild build project req = do
         }
     _ ->
       case parseTarget project targetText of
-        Left _ -> pure ()
+        Left _ -> error "TODO bad target string"
         Right (name, unitReq) ->
           scheduleBatch build ScheduleRequest {steps = [(name, unitReq)], recompile = True, rebuild = True}
   pure defMessage
 
--- | Trigger execution of @main@ for the given target. Target text syntax (computed by
--- 'UI.TaskTree.selectedExecuteTarget'):
+-- | Trigger execution of @main@ for the given target, using the same target grammar as 'triggerRebuild'\/
+-- 'parseTarget', with an added @:execute@ selector\/\@"*"@ sentinel:
 --
--- * @"*"@ (project-root node selected) -- execute every module of every unit in the project ('executeProject').
--- * @unitName@ (unit header row selected) -- execute every module of that unit ('executeUnit').
--- * @unitName:moduleName@ (module row selected) -- execute only that module ('executeUnitModule'), satisfying
---   the requirement that selecting a module executes only that module.
+-- * @"*"@ (project-root node selected) -- execute every module of every unit in the project.
+-- * @unitName@ or @unitName:execute@ (unit header row selected) -- execute every module of that unit.
+-- * @unitName:moduleName@ (module row selected) -- execute only that module.
 --
--- Fire-and-forget, like 'triggerRebuild'.
+-- Dispatched as an ordinary scheduler batch ('GhcServer.Build.Schedule.ExecuteModule' tasks, depending on their
+-- module's compile task), rather than a raw 'forkIO'\/'Control.Concurrent.Async.forConcurrently_' fan-out.
+-- Fire-and-forget, like 'triggerRebuild': does not await completion.
 triggerExecute ::
-  BuildEnv ->
+  Build ->
+  Project ->
   Proto Instr.RebuildRequest ->
   IO (Proto Instr.Empty)
-triggerExecute buildEnv req = do
+triggerExecute build project req = do
   let targetText = Text.unpack req.target
-  buildEnv.log.debug ("triggerExecute: received target=" ++ targetText)
-  _ <- forkIO $ case break (== ':') targetText of
-    ("*", _) -> executeProject buildEnv
-    (unitText, ':' : modText) -> executeUnitModule buildEnv (UnitName unitText) modText
-    (unitText, _) -> executeUnit buildEnv (UnitName unitText)
+  case break (== ':') targetText of
+    ("*", _) ->
+      scheduleBatch build ScheduleRequest
+        { steps = [(name, UnitExecute) | name <- Map.keys project.units]
+        , recompile = True
+        , rebuild = True
+        }
+    _ ->
+      case parseTarget project targetText of
+        Left _ -> pure ()
+        Right (name, unitReq) ->
+          let
+            execReq = case unitReq of
+              UnitModules mods -> UnitExecuteModules mods
+              _ -> UnitExecute
+          in
+            scheduleBatch build ScheduleRequest {steps = [(name, execReq)], recompile = True, rebuild = True}
   pure defMessage
 
 -- | A grapesy server that streams instrumentation data and serves the bytecode-cache browser RPCs, backed by
@@ -132,11 +143,11 @@ instrumentMethods ::
   Project ->
   BuildEnv ->
   Methods IO (ProtobufMethodsOf Instrument)
-instrumentMethods chan stateVar build project buildEnv =
+instrumentMethods chan stateVar build project _buildEnv =
   simpleMethods
     (mkNonStreaming (evictBytecode stateVar))
     (mkNonStreaming (getBytecodeState stateVar))
     (mkServerStreaming (const (notifyMe project stateVar chan)))
     (mkNonStreaming (setOptions stateVar))
-    (mkNonStreaming (triggerExecute buildEnv))
+    (mkNonStreaming (triggerExecute build project))
     (mkNonStreaming (triggerRebuild build project))

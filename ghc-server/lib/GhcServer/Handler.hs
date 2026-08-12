@@ -44,6 +44,14 @@ validateUnit project name req =
     Nothing -> Left ("Unknown unit: " ++ name.string)
 
 -- | Parse a single target specification.
+--
+-- Grammar:
+--   - @unitName@ - 'UnitAll'
+--   - @unitName:metadata@ - 'UnitMetadata'
+--   - @unitName:modules@ - 'UnitModulesOnly'
+--   - @unitName:ModuleName@ - 'UnitModules' (single module)
+--   - @unitName:execute@ - 'UnitExecute' (compile + execute every module)
+--   - @unitName:ModuleName:execute@ - 'UnitExecuteModules' (compile + execute a single module)
 parseTarget :: Project -> String -> Either String (UnitName, UnitRequest)
 parseTarget project spec =
   parse (break (== ':') spec)
@@ -58,8 +66,13 @@ parseTarget project spec =
         Right UnitMetadata
       ":modules" ->
         Right UnitModulesOnly
-      ':' : moduleName ->
-        Right (UnitModules [ClientModule moduleName])
+      ":execute" ->
+        Right UnitExecute
+      ':' : rest ->
+        case break (== ':') rest of
+          (moduleName, ":execute") -> Right (UnitExecuteModules [ClientModule moduleName])
+          (moduleName, "") -> Right (UnitModules [ClientModule moduleName])
+          _ -> Left ("Invalid target: " ++ spec)
       _ ->
         Left ("Invalid target: " ++ spec)
 

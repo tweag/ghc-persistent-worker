@@ -1,4 +1,5 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE OverloadedStrings #-}
 -- | End-to-end tests for the standalone GHC server build pipeline.
 --
 -- Creates synthetic multi-unit projects in temporary directories and builds
@@ -35,7 +36,8 @@ import GhcServer.Data.BuildEvent (BuildEvent (..), BuildEvents, newBuildEvents, 
 import GhcServer.Data.Request (ScheduleRequest (..), UnitRequest (..))
 import GhcServer.Data.Unit (ClientModule (..), Project (..), Unit (..), UnitCache (..), UnitName (..))
 import GhcServer.Data.UnitConfig (UnitConfig (..))
-import GhcServer.Build.Execute (executeModule)
+import GhcServer.Build.Execute (executeModuleTask)
+import GhcServer.Build.Schedule (emptyBuildExt)
 import GhcServer.Scheduler (TaskResult (..))
 import GhcServer.Log (newLogger)
 import GhcServer.Path (osPath)
@@ -1271,14 +1273,11 @@ test_executeAfterCompile =
     stateVar <- liftIO newBuildState
     (buildEnv, _) <- liftIO (newBuildEnv tp stateVar)
     let name = UnitName "unit0"
-    unit <- case Map.lookup name buildEnv.project.units of
-      Just u -> pure u
-      Nothing -> fail "unit0 not found in discovered project"
-    mresult <- liftIO (executeModule buildEnv name unit "Main")
-    annotate ("executeModule result: " ++ show mresult)
+    mresult <- liftIO (executeModuleTask buildEnv emptyBuildExt name (mkModuleName "Main"))
+    annotate ("executeModuleTask result: " ++ show mresult)
     case mresult of
-      Just (TaskSuccess, Nothing) -> pure ()
-      other -> fail ("Expected Just (TaskSuccess, Nothing), got " ++ show other)
+      Just (TaskSuccess Nothing) -> pure ()
+      other -> fail ("Expected Just (TaskSuccess Nothing), got " ++ show other)
 
 -- | Project with a single unit whose module's @main@ has type @IO String@, used to regression-test
 -- 'Internal.Evaluate.classifyMainResultType'\'s 'ResultString' branch and 'GhcServer.Build.Execute.executeModule'\'s
@@ -1310,14 +1309,11 @@ test_executeStringMain =
     stateVar <- liftIO newBuildState
     (buildEnv, _) <- liftIO (newBuildEnv tp stateVar)
     let name = UnitName "unit0"
-    unit <- case Map.lookup name buildEnv.project.units of
-      Just u -> pure u
-      Nothing -> fail "unit0 not found in discovered project"
-    mresult <- liftIO (executeModule buildEnv name unit "Main")
-    annotate ("executeModule result: " ++ show mresult)
+    mresult <- liftIO (executeModuleTask buildEnv emptyBuildExt name (mkModuleName "Main"))
+    annotate ("executeModuleTask result: " ++ show mresult)
     case mresult of
-      Just (TaskSuccess, Just "hello from IO String main") -> pure ()
-      other -> fail ("Expected Just (TaskSuccess, Just \"hello from IO String main\"), got " ++ show other)
+      Just (TaskSuccess (Just "hello from IO String main")) -> pure ()
+      other -> fail ("Expected Just (TaskSuccess (Just \"hello from IO String main\")), got " ++ show other)
 
 test_executeModule :: TestTree
 test_executeModule =

@@ -24,12 +24,10 @@ import Data.Set (Set)
 import Data.Void (Void)
 import GhcServer.Build.Classify (BuildResult (..), classifyBuildRequest, collectBuildResult)
 import GhcServer.Build.Propagate (
-  BuildExt (..),
   dispatchTask,
-  emptyBuildExt,
   propagateCompletion,
   )
-import GhcServer.Build.Schedule (BuildStatus, TaskKey (..))
+import GhcServer.Build.Schedule (BuildExt (..), BuildStatus, TaskKey (..), emptyBuildExt)
 import GhcServer.Cache (mkBuildCache)
 import GhcServer.Data.BuildCache (BuildCache (..))
 import GhcServer.Data.BuildEnv (BuildEnv (..))

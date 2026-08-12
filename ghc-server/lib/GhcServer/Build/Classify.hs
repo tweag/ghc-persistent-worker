@@ -18,6 +18,7 @@ import GhcServer.Build.Schedule (
   BuildStatus,
   TaskKey (..),
   compileTasksFromSources,
+  executeTasksFromSources,
   metadataTasks,
   )
 import GhcServer.Data.BuildEnv (BuildEnv (..))
@@ -28,8 +29,11 @@ import GhcServer.Data.Request (
   effectiveIsCompile,
   effectiveUnitName,
   )
-import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
+import GhcServer.Data.Unit (ClientModule (..), Project (..), Unit (..), UnitName (..))
+import GhcServer.Path (fp)
 import GhcServer.Scheduler (Phase (..), Task (..))
+import System.FilePath (takeBaseName)
+import System.OsPath (OsPath)
 
 -- | Determine the effective request for each unit, expanding an empty 'ScheduleRequest'
 -- to 'UnitAll' for every unit and adding transitive deps.
@@ -74,7 +78,7 @@ classifyBuildRequest cachedUnits env request =
 
     metaTasks = metadataTasks env.project cachedUnits request.rebuild (map effectiveUnitName reqs)
 
-    pendingTasks = concatMap unitCompileTasks reqs
+    pendingTasks = concatMap unitCompileTasks reqs ++ concatMap unitExecuteTasks reqs
 
     unitCompileTasks eu =
       case Map.lookup (effectiveUnitName eu) env.project.units of
@@ -85,6 +89,20 @@ classifyBuildRequest cachedUnits env request =
             (effectiveIsCompile rebuild eu)
             unit.sources
         Nothing -> []
+
+    -- | Execute tasks are only produced for units explicitly requested with 'UnitExecute'\/
+    -- 'UnitExecuteModules' -- implicit transitive deps and other request kinds never trigger execution.
+    unitExecuteTasks eu =
+      case (eu, Map.lookup (effectiveUnitName eu) env.project.units) of
+        (Explicit name UnitExecute, Just unit) ->
+          executeTasksFromSources name rebuild unit.sources
+        (Explicit name (UnitExecuteModules mods), Just unit) ->
+          executeTasksFromSources name rebuild (selectedSources unit mods)
+        _ -> []
+
+    selectedSources :: Unit -> [ClientModule] -> [OsPath]
+    selectedSources unit mods =
+      [src | src <- unit.sources, takeBaseName (fp src) `elem` map (.string) mods]
 
 -- | Collect a 'BuildResult' from the scheduler's completed and failure sets.
 collectBuildResult :: Set (TaskKey 'Resolved) -> Map (TaskKey 'Resolved) String -> BuildResult

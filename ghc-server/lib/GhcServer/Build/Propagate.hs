@@ -13,12 +13,15 @@ import Control.Concurrent.Chan (writeChan)
 import Control.Monad.Extra (ifM)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
+import qualified Data.Text as Text
 import GHC (ModuleName, moduleNameString)
 import qualified GHC.Utils.Outputable as O
 import GHC.Utils.Outputable (ppr, (<+>))
 import GhcServer.Build.Compile (compileSingleModule)
+import GhcServer.Build.Execute (executeModuleTask)
 import GhcServer.Build.Metadata (runMetadata)
 import GhcServer.Build.Schedule (
+  BuildExt (..),
   BuildStatus (..),
   ModuleInfo (..),
   ModuleKey (..),
@@ -35,28 +38,11 @@ import GhcServer.Scheduler (Phase (..), SchedulerState (..), Task (..), TaskResu
 import Types.Instrument (Event (..))
 import Types.Log (Logger (..))
 
--- | Extension state threaded through the scheduler's @ext@ parameter.
---
--- Accumulates the module map across metadata completion events so that later
--- units can resolve cross-unit dependencies against earlier units' modules.
--- Each entry maps a 'ModuleKey' to its scheduler identity (@'TaskKey' 'Pending'@),
--- direct deps, and @.dyn_hi@ path.
-data BuildExt =
-  BuildExt {
-    -- | Unified module map: scheduler identity, direct deps, and interface path per module.
-    -- Built incrementally as each unit's resolutions are computed.
-    moduleMap :: Map ModuleKey ModuleInfo
-  }
-
--- | Initial (empty) 'BuildExt'.
-emptyBuildExt :: BuildExt
-emptyBuildExt =
-  BuildExt {moduleMap = Map.empty}
 
 -- | Convert a list of error messages to a 'TaskResult'.
 taskResultFromErrors :: [(a, String)] -> TaskResult String
 taskResultFromErrors = \case
-  [] -> TaskSuccess
+  [] -> TaskSuccess Nothing
   (_, msg) : _ -> TaskFailed msg
 
 -- | Push an instrumentation event to the UI's channel, if instrumentation is enabled.
@@ -67,20 +53,22 @@ emitEvent env evt = maybe (pure ()) (`writeChan` evt) env.instrChan
 emitTaskStart :: BuildEnv -> String -> IO ()
 emitTaskStart env target = emitEvent env CompileStart {target, canDebug = False}
 
--- | Send a 'CompileEnd' event for a metadata or compile task that just finished, deriving the exit code and
--- stderr content from the task's 'TaskResult'. @mResultStr@ carries an execute task's exfiltrated @main@ return
--- value (see 'GhcServer.Build.Execute.executeModule'); metadata\/compile tasks always pass 'Nothing'.
-emitTaskEnd :: BuildEnv -> String -> TaskResult String -> Maybe String -> IO ()
-emitTaskEnd env target result mResultStr =
+-- | Send a 'CompileEnd' event for a metadata or compile task that just finished, deriving the exit code,
+-- stderr content, and any exfiltrated result payload from the task's 'TaskResult' (see
+-- 'GhcServer.Build.Execute.executeModuleTask' for the only task kind that ever produces a payload).
+emitTaskEnd :: BuildEnv -> String -> TaskResult String -> IO ()
+emitTaskEnd env target result =
   emitEvent env CompileEnd {
     target,
     exitCode = case result of
-      TaskSuccess -> 0
+      TaskSuccess _ -> 0
       TaskFailed _ -> 1,
     stderr = case result of
-      TaskSuccess -> ""
+      TaskSuccess _ -> ""
       TaskFailed msg -> msg,
-    result = mResultStr
+    result = case result of
+      TaskSuccess mResultStr -> Text.unpack <$> mResultStr
+      TaskFailed _ -> Nothing
   }
 
 -- | Run an instrumented task: emits 'CompileStart' before and 'CompileEnd' after, deriving the target's
@@ -89,7 +77,7 @@ withTaskEvents :: BuildEnv -> String -> IO (TaskResult String) -> IO (TaskResult
 withTaskEvents env target action = do
   emitTaskStart env target
   result <- action
-  emitTaskEnd env target result Nothing
+  emitTaskEnd env target result
   pure result
 
 -- | Skip metadata for a cached unit.
@@ -97,7 +85,7 @@ skipMetadata :: BuildEnv -> UnitName -> IO (TaskResult String)
 skipMetadata env name = do
   env.log.debug ("Skipping metadata (cached): " ++ name.string)
   logEvent env.events (MetadataSkipped name)
-  pure TaskSuccess
+  pure (TaskSuccess Nothing)
 
 -- | Attempt to skip compilation for a module that was not directly requested.
 --
@@ -113,7 +101,7 @@ skipCompileIfCached cache ext env unit moduleName =
     skip = do
       env.log.debugD ("Skipping compile (cached):" <+> ppr unit O.<> ":" O.<> ppr moduleName)
       logEvent env.events (CompileSkipped unit moduleName)
-      pure TaskSuccess
+      pure (TaskSuccess Nothing)
 
 -- | Compile a single module.
 --
@@ -145,6 +133,15 @@ dispatchTask cache env ext task = case task.key of
     | otherwise -> withTaskEvents env (name.string ++ ":" ++ moduleNameString modName) (compile ext env name modName)
     where
       shouldSkipCompile = not task.value.rebuild && not task.enabled
+  ExecuteModule name modName ->
+    executeModuleTask env ext name modName >>= \case
+      Nothing -> pure (TaskSuccess Nothing)
+      Just result -> do
+        emitTaskStart env target
+        emitTaskEnd env target result
+        pure result
+    where
+      target = name.string ++ ":" ++ moduleNameString modName ++ ":execute"
 
 -- | Compute the resolution map for a unit's compile tasks.
 --
@@ -182,7 +179,7 @@ propagateCompletion ::
   TaskResult String ->
   SchedulerState TaskKey BuildStatus String BuildExt ->
   IO (SchedulerState TaskKey BuildStatus String BuildExt)
-propagateCompletion cache env (MetaTask name) TaskSuccess state =
+propagateCompletion cache env (MetaTask name) (TaskSuccess _) state =
   computeResolutions cache env name state >>= \case
     Left err -> do
       env.log.debug ("Cache decode failure during propagation: " ++ err)
