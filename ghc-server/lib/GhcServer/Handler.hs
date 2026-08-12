@@ -158,6 +158,7 @@ serverContext config = do
   events <- newBuildEvents
   instrChan <- if config.features.instrument then Just <$> newChan else pure Nothing
   extDepsDb <- newMVar Nothing
+  stdioLock <- newMVar ()
   let
     env = BuildEnv {
       baseArgs = (emptyArgs Map.empty) {features = config.features},
@@ -169,7 +170,8 @@ serverContext config = do
       log,
       events,
       instrChan,
-      extDepsDb
+      extDepsDb,
+      stdioLock
     }
   build <- newBuild config.maxJobs 300 env
   let

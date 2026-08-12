@@ -339,6 +339,7 @@
           "grapesy"
           "optparse-applicative"
           "process"
+          "silently"
           "stm"
           "text"
           "time"

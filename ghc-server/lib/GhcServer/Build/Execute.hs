@@ -7,6 +7,7 @@
 module GhcServer.Build.Execute where
 
 import Control.Concurrent.Async (forConcurrently_)
+import Control.Concurrent.MVar (withMVar)
 import GHC (mkModuleName)
 import GhcServer.Build.Compile (moduleTarget)
 import GhcServer.Build.Propagate (emitTaskEnd, emitTaskStart)
@@ -22,6 +23,8 @@ import Internal.Session (withGhcMakeModule)
 import Prelude hiding (log)
 import System.Directory.OsPath (createDirectoryIfMissing)
 import System.FilePath (takeBaseName)
+import System.IO (stderr, stdout)
+import System.IO.Silently (hCapture)
 import System.OsPath ((</>))
 import System.OsPath.Extra (fromOsPath, toOsPath)
 import Types.Args (Args (..))
@@ -49,20 +52,31 @@ executeModule buildEnv name unit modBaseName = do
       args = buildEnv.baseArgs {tempDir = Just modTmpDir, homeUnit = cachedUnit}
       env = Env {log = logger, state = buildEnv.stateVar, args}
       target = moduleTarget name modName
-    result <- withGhcMakeModule Interpreted target env \ targetSpec -> do
-      -- The module must be (re)compiled to bytecode before 'executeMain's 'setContext' call: any prior HPT
-      -- entry for this module (e.g. from a plain compile-to-object-code request) has an object-code linkable,
-      -- which GHC's interactive context machinery rejects with "not interpreted". 'compileModuleWithDepsInHpt'
-      -- with the 'TargetModuleInterp' spec ('targetSpec' here, since 'interp = Interpreted') compiles via
-      -- 'mkTargetAsInterpreted' (bytecode backend) and inserts the resulting 'HomeModInfo' into the HPT,
-      -- overwriting any stale object-code entry.
-      _ <- compileModuleWithDepsInHpt logger targetSpec
-      executeMain env (fromOsPath <$> args.homeUnit) target
+    result <- withMVar buildEnv.stdioLock \ _ ->
+      hCapture [stdout, stderr] $
+        withGhcMakeModule Interpreted target env \ targetSpec -> do
+          -- The module must be (re)compiled to bytecode before 'executeMain's 'setContext' call: any prior HPT
+          -- entry for this module (e.g. from a plain compile-to-object-code request) has an object-code linkable,
+          -- which GHC's interactive context machinery rejects with "not interpreted". 'compileModuleWithDepsInHpt'
+          -- with the 'TargetModuleInterp' spec ('targetSpec' here, since 'interp = Interpreted') compiles via
+          -- 'mkTargetAsInterpreted' (bytecode backend) and inserts the resulting 'HomeModInfo' into the HPT,
+          -- overwriting any stale object-code entry.
+          _ <- compileModuleWithDepsInHpt logger targetSpec
+          executeMain env (fromOsPath <$> args.homeUnit) target
+    let (capturedOutput, ghcResult) = result
     captured <- logger.flush
-    logger.debug ("executeModule: " ++ name.string ++ ":" ++ modBaseName ++ " GHC result=" ++ show result)
-    pure $ case result of
+    logger.debug ("executeModule: " ++ name.string ++ ":" ++ modBaseName ++ " GHC result=" ++ show ghcResult)
+    -- 'hCapture' redirects the process-wide stdout\/stderr handles for the duration of the action, so any
+    -- output the executed @main@ writes via 'System.IO.putStrLn'\/'System.IO.hPutStrLn' \'stderr\' etc. ends up
+    -- here rather than on the real handles (which, for a backgrounded 'ghc-server' process, nobody would see
+    -- anyway). It is logged through 'instrumentLogger' so it reaches the \'L\'-key server-log viewer in
+    -- \'instrument\', tagged with the same target as the compile/execute events.
+    if not (null capturedOutput)
+      then logger.info ("executeModule: " ++ name.string ++ ":" ++ modBaseName ++ " stdout/stderr:\n" ++ capturedOutput)
+      else pure ()
+    pure $ case ghcResult of
       Just True -> Just TaskSuccess
-      Just False -> Just (TaskFailed ("Execution failed:\n" ++ unlines captured))
+      Just False -> Just (TaskFailed ("Execution failed:\n" ++ unlines captured ++ capturedOutput))
       Nothing -> Nothing
 
 -- | Execute all modules of a unit in parallel, emitting a 'CompileStart'\/'CompileEnd' instrumentation event

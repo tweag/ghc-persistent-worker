@@ -20,6 +20,7 @@ import Data.Foldable (for_)
 import Data.Monoid (First (..))
 import Data.Text qualified as Text
 import Data.Time (UTCTime (..), fromGregorian)
+import Data.Time.Clock.POSIX (getPOSIXTime)
 import Graphics.Vty qualified as V
 import Graphics.Vty.Attributes.Color
 import Grpc (evictBytecode, getBytecodeState, sendOptions, triggerExecuteText, triggerRebuild, triggerRebuildText)
@@ -36,6 +37,7 @@ import Lens.Micro.Platform (
   preuse,
   use,
   zoom,
+  (%=),
   (.=),
   (^.),
   )
@@ -43,7 +45,6 @@ import Network.GRPC.Client (Connection)
 import Network.GRPC.Common.Protobuf (Proto)
 import Proto.Instrument qualified as Instr
 import Proto.Instrument_Fields qualified as InstrF
-import System.IO (hPutStrLn, stderr)
 import Types.State (Options (..), defaultOptions)
 import Types.Target (TargetSpec)
 import UI.ActiveTasks qualified as ActiveTasks
@@ -53,7 +54,17 @@ import UI.LogViewer qualified as LogViewer
 import UI.Session qualified as Session
 import UI.SessionSelector qualified as SessionSelector
 import UI.TaskTree qualified as TaskTree
-import UI.Types (Name (..), WorkerId, canDebugAttr, disabledAttr, evictedAttr, pendingEvictionAttr, taskFailedAttr, taskRunningAttr, taskSucceededAttr)
+import UI.Types (
+  Name (..),
+  WorkerId,
+  canDebugAttr,
+  disabledAttr,
+  evictedAttr,
+  pendingEvictionAttr,
+  taskFailedAttr,
+  taskRunningAttr,
+  taskSucceededAttr,
+  )
 import UI.Utils (handleListEventOf, popup)
 
 data Event
@@ -180,6 +191,15 @@ drawLogViewer = popup 80 "Server Log" . LogViewer.draw LogViewer
 currentSession :: Traversal' State Session.State
 currentSession = sessions . listSelectedElementL . _2
 
+-- | Append an entry to the current session's server-log viewer, tagged as coming from the client (as opposed to
+-- entries pushed by the server via 'Instr.LogMessage'). Used to replace ad hoc @hPutStrLn stderr@ debug prints,
+-- which corrupt a running Brick app's terminal rendering.
+logClient :: Text.Text -> Text.Text -> EventM Name State ()
+logClient level message = do
+  ms <- liftIO $ round . (* 1000) <$> getPOSIXTime
+  currentSession . Session.logViewer %=
+    LogViewer.addEntry LogViewer.Entry {target = Text.pack "client", level, message, timestampMs = ms}
+
 beep :: EventM Name State ()
 beep = do
   vty <- getVtyHandle
@@ -244,9 +264,9 @@ handleEvent (AppEvent (TriggerBuild wid target)) = do
 handleEvent (AppEvent (TriggerExecute wid target)) = do
   mworker <- preuse (currentSession . Session.workers . each . filtered (\w -> Session._workerId w == wid))
   case mworker of
-    Nothing -> liftIO $ hPutStrLn stderr ("TriggerExecute: no worker found for " ++ show wid ++ " (target=" ++ Text.unpack target ++ ")")
+    Nothing -> logClient (Text.pack "debug") (Text.pack ("TriggerExecute: no worker found for " ++ show wid ++ " (target=" ++ Text.unpack target ++ ")"))
     Just worker -> do
-      liftIO $ hPutStrLn stderr ("TriggerExecute: dispatching target=" ++ Text.unpack target ++ " to worker=" ++ show wid)
+      logClient (Text.pack "debug") (Text.pack ("TriggerExecute: dispatching target=" ++ Text.unpack target ++ " to worker=" ++ show wid))
       liftIO $ triggerExecuteText (Session._connection worker) target
 handleEvent (AppEvent (BytecodeBrowserEvent evt)) =
   zoom bcoBrowser (BytecodeBrowser.handleEvent evt)
@@ -341,13 +361,13 @@ handleEvent (VtyEvent evt) = do
         mfirst <- firstWorker
         case (mtree >>= TaskTree.selectedUnitForExecute, mfirst) of
           (Just target, Just (wid, _)) -> do
-            liftIO $ hPutStrLn stderr ("x key: selected unit=" ++ Text.unpack target ++ ", worker=" ++ show wid)
+            logClient (Text.pack "debug") (Text.pack ("x key: selected unit=" ++ Text.unpack target ++ ", worker=" ++ show wid))
             handleEvent (AppEvent (TriggerExecute wid target))
           (Nothing, _) -> do
-            liftIO $ hPutStrLn stderr "x key: no unit header row selected (execute only applies at unit granularity)"
+            logClient (Text.pack "debug") (Text.pack "x key: no unit header row selected (execute only applies at unit granularity)")
             beep
           (_, Nothing) -> do
-            liftIO $ hPutStrLn stderr "x key: no worker available"
+            logClient (Text.pack "debug") (Text.pack "x key: no worker available")
             beep
       V.EvKey (V.KChar 't') [] | current == BytecodeBrowser ->
         handleEvent (AppEvent (BytecodeBrowserEvent BytecodeBrowser.ToggleSort))

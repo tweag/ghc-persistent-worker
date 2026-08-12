@@ -107,6 +107,7 @@ newBuildEnv tp stateVar = do
   log <- newLogger False
   events <- newBuildEvents
   extDepsDb <- newMVar Nothing
+  stdioLock <- newMVar ()
   pure (BuildEnv {
     baseArgs = emptyArgs Map.empty,
     projectRoot = tp.rootOs,
@@ -117,7 +118,8 @@ newBuildEnv tp stateVar = do
     log,
     events,
     instrChan = Nothing,
-    extDepsDb
+    extDepsDb,
+    stdioLock
   }, events)
 
 -- ---------------------------------------------------------------------------
