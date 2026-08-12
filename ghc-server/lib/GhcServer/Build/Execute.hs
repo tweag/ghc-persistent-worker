@@ -51,6 +51,7 @@ executeModule buildEnv name unit modBaseName = do
     result <- withGhcMakeModule Interpreted target env \ _targetSpec ->
       executeMain env (fromOsPath <$> args.homeUnit) target
     captured <- logger.flush
+    logger.debug ("executeModule: " ++ name.string ++ ":" ++ modBaseName ++ " GHC result=" ++ show result)
     pure $ case result of
       Just True -> Just TaskSuccess
       Just False -> Just (TaskFailed ("Execution failed:\n" ++ unlines captured))
@@ -63,13 +64,17 @@ executeUnit :: BuildEnv -> UnitName -> IO ()
 executeUnit buildEnv name =
   case Map.lookup name buildEnv.project.units of
     Nothing -> buildEnv.log.debug ("executeUnit: unknown unit " ++ name.string)
-    Just unit ->
-      forConcurrently_ (moduleNames unit) \ modBaseName -> do
+    Just unit -> do
+      let modules = moduleNames unit
+      buildEnv.log.debug ("executeUnit: running " ++ show (length modules) ++ " module(s) in unit " ++ name.string ++ ": " ++ show modules)
+      forConcurrently_ modules \ modBaseName -> do
         let target = name.string ++ ":" ++ modBaseName ++ ":execute"
+        buildEnv.log.debug ("executeUnit: dispatching " ++ target)
         mresult <- executeModule buildEnv name unit modBaseName
         case mresult of
-          Nothing -> pure ()
+          Nothing -> buildEnv.log.debug ("executeUnit: " ++ target ++ " skipped (no main, or session setup failed)")
           Just result -> do
+            buildEnv.log.debug ("executeUnit: " ++ target ++ " finished: " ++ show result)
             emitTaskStart buildEnv target
             emitTaskEnd buildEnv target result
   where

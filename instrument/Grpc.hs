@@ -5,6 +5,7 @@ import Control.Concurrent (forkIO)
 import Control.Monad (void)
 import Data.Text qualified as Text
 import Network.GRPC.Client (rpc, Connection)
+import System.IO (hPutStrLn, stderr)
 import Network.GRPC.Client.StreamType.IO (nonStreaming)
 import Network.GRPC.Common.Protobuf (Proto, Protobuf, defMessage, (&), (.~))
 import Proto.Instrument qualified as Instr
@@ -44,7 +45,8 @@ triggerRebuild conn target =
 -- every module in that unit (in parallel, skipping modules without @main@). Fire-and-forget, mirroring
 -- 'triggerRebuildText'.
 triggerExecuteText :: Connection -> Text.Text -> IO ()
-triggerExecuteText conn targetText =
+triggerExecuteText conn targetText = do
+  hPutStrLn stderr ("triggerExecuteText: sending target=" ++ Text.unpack targetText)
   void $ forkIO $ void $
     nonStreaming conn (rpc @(Protobuf Instrument "triggerExecute")) $
       defMessage

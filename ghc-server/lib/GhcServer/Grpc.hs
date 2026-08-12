@@ -93,6 +93,7 @@ triggerExecute ::
   IO (Proto Instr.Empty)
 triggerExecute buildEnv req = do
   let unitText = takeWhile (/= ':') (Text.unpack req.target)
+  buildEnv.log.debug ("triggerExecute: received target=" ++ Text.unpack req.target ++ ", resolved unit=" ++ unitText)
   _ <- forkIO (executeUnit buildEnv (UnitName unitText))
   pure defMessage
 

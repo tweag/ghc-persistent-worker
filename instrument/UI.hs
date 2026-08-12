@@ -43,6 +43,7 @@ import Network.GRPC.Client (Connection)
 import Network.GRPC.Common.Protobuf (Proto)
 import Proto.Instrument qualified as Instr
 import Proto.Instrument_Fields qualified as InstrF
+import System.IO (hPutStrLn, stderr)
 import Types.State (Options (..), defaultOptions)
 import Types.Target (TargetSpec)
 import UI.ActiveTasks qualified as ActiveTasks
@@ -242,8 +243,11 @@ handleEvent (AppEvent (TriggerBuild wid target)) = do
     liftIO $ triggerRebuildText (Session._connection worker) target
 handleEvent (AppEvent (TriggerExecute wid target)) = do
   mworker <- preuse (currentSession . Session.workers . each . filtered (\w -> Session._workerId w == wid))
-  for_ mworker $ \worker -> do
-    liftIO $ triggerExecuteText (Session._connection worker) target
+  case mworker of
+    Nothing -> liftIO $ hPutStrLn stderr ("TriggerExecute: no worker found for " ++ show wid ++ " (target=" ++ Text.unpack target ++ ")")
+    Just worker -> do
+      liftIO $ hPutStrLn stderr ("TriggerExecute: dispatching target=" ++ Text.unpack target ++ " to worker=" ++ show wid)
+      liftIO $ triggerExecuteText (Session._connection worker) target
 handleEvent (AppEvent (BytecodeBrowserEvent evt)) =
   zoom bcoBrowser (BytecodeBrowser.handleEvent evt)
 handleEvent (AppEvent FetchBytecodeState) = do
@@ -336,8 +340,15 @@ handleEvent (VtyEvent evt) = do
         mtree <- preuse (currentSession . Session.taskTree)
         mfirst <- firstWorker
         case (mtree >>= TaskTree.selectedUnitForExecute, mfirst) of
-          (Just target, Just (wid, _)) -> handleEvent (AppEvent (TriggerExecute wid target))
-          _ -> beep
+          (Just target, Just (wid, _)) -> do
+            liftIO $ hPutStrLn stderr ("x key: selected unit=" ++ Text.unpack target ++ ", worker=" ++ show wid)
+            handleEvent (AppEvent (TriggerExecute wid target))
+          (Nothing, _) -> do
+            liftIO $ hPutStrLn stderr "x key: no unit header row selected (execute only applies at unit granularity)"
+            beep
+          (_, Nothing) -> do
+            liftIO $ hPutStrLn stderr "x key: no worker available"
+            beep
       V.EvKey (V.KChar 't') [] | current == BytecodeBrowser ->
         handleEvent (AppEvent (BytecodeBrowserEvent BytecodeBrowser.ToggleSort))
       V.EvKey (V.KChar 'e') [] | current == BytecodeBrowser -> do

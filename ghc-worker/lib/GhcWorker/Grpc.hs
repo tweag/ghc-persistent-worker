@@ -17,6 +17,7 @@ import Network.GRPC.Common (NextElem (..))
 import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
 import Network.GRPC.Server.Protobuf (ProtobufMethodsOf)
 import Network.GRPC.Server.StreamType (Methods (..), mkNonStreaming, mkServerStreaming, simpleMethods)
+import System.IO qualified as IO (hPutStrLn, stderr)
 import qualified Proto.Instrument as Instr
 import Proto.Instrument (Instrument)
 import Proto.Instrument_Fields qualified as Instr
@@ -87,10 +88,14 @@ triggerRebuild stateVar recompile target = do
 
 -- | Stub for the persistent-worker protocol: 'GhcWorker' has no unit\/module-oriented project model to execute a
 -- unit's modules against (see 'GhcServer.Grpc.triggerExecute' for the real implementation, used by @ghc-server@).
+-- Logs to stderr on invocation since this handler has no 'Types.Log.Logger' in scope and otherwise silently
+-- no-ops, which would be indistinguishable from the request never reaching the server at all.
 triggerExecute ::
   Proto Instr.RebuildRequest ->
   IO (Proto Instr.Empty)
-triggerExecute _ = pure defMessage
+triggerExecute req = do
+  IO.hPutStrLn IO.stderr ("triggerExecute: stub invoked (ghc-worker has no execute support), target=" ++ Text.unpack req.target)
+  pure defMessage
 
 -- | Snapshot the historic lazily-loaded bytecode cache for the instrumentation UI: every module that has ever been
 -- tracked in 'MakeState.bcoHistory' (current residents and past evictees alike), decorated with whether it's
