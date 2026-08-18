@@ -9,15 +9,17 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
 import Data.Bifunctor (first)
 import Data.Text (pack, unpack)
+import GhcServer.Build.Process (runProcessEval)
 import GhcServer.Cabal.Setup (cabalSetup)
 import GhcServer.Data.Config (ServerConfig (..))
+import GhcServer.Data.ProcessEval (ProcessEvalOptions (..))
 import GhcServer.Grpc (serverMethods)
 import GhcServer.Handler (serverContext)
+import GhcServer.Optparse (readPath)
 import GhcServer.Path (socketDirName, socketPath)
 import Options.Applicative (
   Parser,
   ParserInfo,
-  argument,
   auto,
   command,
   eitherReader,
@@ -32,7 +34,6 @@ import Options.Applicative (
   option,
   progDesc,
   short,
-  str,
   strArgument,
   subparser,
   switch,
@@ -44,7 +45,7 @@ import System.Directory.OsPath (canonicalizePath, createDirectoryIfMissing, getC
 import System.Exit (die)
 import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
 import System.OsPath (OsPath, (</>))
-import System.OsPath.Extra (fromOsPath, toOsPath)
+import System.OsPath.Extra (fromOsPath)
 import Types.FeatureFlags (parseFeatureFlag)
 import Types.Settings (Settings (..), defaultSettings, parseByteSize, setFeature)
 
@@ -81,13 +82,15 @@ data ExecMode =
   ExecServer RawServerConfig
   |
   ExecCabalSetup [String]
+  |
+  ExecEvaluate ProcessEvalOptions
   deriving stock (Show)
 
 -- | Server CLI config prior to resolving the project root, which defaults to the current directory when not given
 -- explicitly (see 'resolveServerConfig').
 data RawServerConfig =
   RawServerConfig {
-    projectRootArg :: Maybe OsPath,
+    projectRoot :: Maybe OsPath,
     maxJobs :: Int,
     verbose :: Bool,
     jsonConfig :: Bool,
@@ -98,7 +101,7 @@ data RawServerConfig =
 -- | CLI argument parser for the server.
 serverConfigParser :: Parser RawServerConfig
 serverConfigParser = do
-  projectRootArg <- optional (argument (toOsPath <$> str) (metavar "PROJECT_ROOT" <> help "Path to the project root directory (defaults to the current directory)"))
+  projectRoot <- optional (option readPath (long "root" <> metavar "PROJECT_ROOT" <> help "Path to the project directory"))
   maxJobs <- option auto (long "jobs" <> short 'j' <> metavar "N" <> help "Maximum concurrent jobs" <> value 4)
   verbose <- switch (long "verbose" <> short 'v' <> help "Print the build log on success")
   jsonConfig <- switch (long "json-config" <> help "Force unit.json-based project discovery even if a .cabal file is present")
@@ -116,7 +119,7 @@ resolveServerConfig raw = do
   -- for the same file, causing cache entries written by one invocation to silently fail to resolve pending
   -- compile tasks submitted to another -- such an unresolved pending task is never promoted, dispatched, or
   -- reported as a failure, so the request completes as a silent, incorrect "success".
-  projectRoot <- maybe getCurrentDirectory pure raw.projectRootArg >>= canonicalizePath
+  projectRoot <- canonicalizePath =<< maybe getCurrentDirectory pure raw.projectRoot
   pure ServerConfig {
     projectRoot,
     maxJobs = raw.maxJobs,
@@ -125,31 +128,44 @@ resolveServerConfig raw = do
     settings = raw.settings
   }
 
-cabalSetupParser :: Parser [String]
-cabalSetupParser =
-  subparser $
-  command "act-as-setup" (info (many (strArgument mempty)) (allPositional <> progDesc "cabal act-as-setup proxy"))
+cabalSetupInfo :: ParserInfo ExecMode
+cabalSetupInfo =
+  ExecCabalSetup <$> info (many (strArgument mempty)) (allPositional <> progDesc "cabal act-as-setup proxy")
+
+evaluateParser :: Parser ProcessEvalOptions
+evaluateParser = do
+  configFile <- optional (option readPath (long "config" <> help "JSON file containing the evaluation config"))
+  pure ProcessEvalOptions {..}
+
+evaluateInfo :: ParserInfo ExecMode
+evaluateInfo =
+  ExecEvaluate <$> info evaluateParser (allPositional <> progDesc "Evaluate an expression")
 
 execModeParser :: Parser ExecMode
 execModeParser =
-  (ExecCabalSetup <$> cabalSetupParser)
+  subparser (command "act-as-setup" cabalSetupInfo <> command "eval" evaluateInfo)
   <|>
   (ExecServer <$> serverConfigParser)
 
 serverParserInfo :: ParserInfo ExecMode
 serverParserInfo =
-  info (execModeParser <**> helper)
-    (fullDesc <> progDesc "Standalone GHC build server" <> header "ghc-server")
+  info (execModeParser <**> helper) (fullDesc <> progDesc "GHC build server" <> header "ghc-server")
 
 -- | Run the server: parse CLI args, start the single gRPC service ('GhcServer.Grpc.serverMethods') on a Unix
 -- socket.
+--
+-- Checks for 'GhcServer.Build.Process.evalProcessFlag' before running the normal 'optparse-applicative' parser:
+-- a self-relaunched execute-task child process (see 'GhcServer.Build.Process') is a distinct, much simpler
+-- entry point that never starts the gRPC server, so it must be dispatched before argument parsing that assumes
+-- a 'RawServerConfig' shape.
 runServer :: IO ()
 runServer = do
   hSetBuffering stdout LineBuffering
   hSetBuffering stderr LineBuffering
   execParser serverParserInfo >>= \case
     ExecServer raw -> either die pure =<< runExceptT (server =<< lift (resolveServerConfig raw))
-    ExecCabalSetup args -> cabalSetup args
+    ExecCabalSetup cabalArgs -> cabalSetup cabalArgs
+    ExecEvaluate options -> runProcessEval options
   where
     server :: ServerConfig -> ExceptT String IO ()
     server config =

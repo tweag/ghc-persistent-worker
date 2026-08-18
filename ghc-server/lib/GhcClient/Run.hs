@@ -1,17 +1,17 @@
 {-# LANGUAGE ApplicativeDo #-}
-{-# LANGUAGE LambdaCase #-}
 
 module GhcClient.Run where
 
 import BuckWorkerProto ()
+import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
 import Control.Exception (throwIO, try)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT, runExceptT, throwE)
-import Data.Bifunctor (first)
 import Data.Text qualified as Text
 import Data.Text.Encoding (encodeUtf8)
 import GhcServer.Data.Config (ClientConfig (..))
+import GhcServer.Optparse (readPath)
 import GhcServer.Path (socketPath)
 import Internal.Log (dbg)
 import Network.GRPC.Client (Server (..), recvNextOutput, sendFinalInput, withConnection, withRPC)
@@ -20,9 +20,8 @@ import Network.GRPC.Common.Protobuf (Proto, Protobuf, defMessage, (&), (.~))
 import Options.Applicative (
   Parser,
   ParserInfo,
-  argument,
-  eitherReader,
   execParser,
+  flag,
   fullDesc,
   header,
   help,
@@ -31,31 +30,40 @@ import Options.Applicative (
   long,
   many,
   metavar,
+  option,
+  optional,
   progDesc,
   short,
+  str,
   strArgument,
   switch,
   (<**>),
   )
 import Proto.GhcServer (ExecuteCommand, ExecuteResponse, GhcServer)
 import Proto.GhcServer_Fields qualified as Fields
+import System.Directory.OsPath (getCurrentDirectory)
 import System.Exit (die)
 import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
-import System.OsPath (OsPath, encodeUtf)
+import System.OsPath (OsPath)
 import System.OsPath.Extra (fromOsPath)
 
 -- | CLI argument parser for the client.
 clientConfigParser :: Parser ClientConfig
 clientConfigParser = do
-  projectRoot <- argument readOsPath (metavar "PROJECT_ROOT" <> help "Path to the project root directory")
+  projectRoot <- optional (option readPath (long "root" <> metavar "PROJECT_ROOT" <> help "Path to the project directory"))
   wait <- switch (long "wait" <> short 'w' <> help "Wait for the build to complete before returning")
   recompile <- switch (long "recompile" <> help "Recompile modules even when cached artifacts exist")
   rebuild <- switch (long "rebuild" <> help "Recompute metadata and recompile even when cached")
+  executor <- executorParser
   targets <- many (strArgument (metavar "TARGETS..." <> help "Schedule targets (e.g. unit1 unit2:metadata unit2:Module)"))
   pure ClientConfig {..}
-  where
-    readOsPath =
-      eitherReader (first show <$> encodeUtf)
+
+-- | @--executor ID@ selects a persistent executor subprocess; @--process@ is shorthand for @--executor default@.
+executorParser :: Parser (Maybe String)
+executorParser =
+  Just <$> option str (long "executor" <> metavar "ID" <> help "Run execute tasks in the persistent executor subprocess ID")
+  <|>
+  flag Nothing (Just "default") (long "process" <> help "Run execute tasks in the persistent executor subprocess 'default'")
 
 clientParserInfo :: ParserInfo ClientConfig
 clientParserInfo =
@@ -94,6 +102,7 @@ waitPoll socketP =
 -- | Wait for the server to come online, then send a gRPC request to schedule jobs.
 client :: ClientConfig -> ExceptT String IO ()
 client config = do
+  socket <- socketPath <$> liftIO (maybe getCurrentDirectory pure config.projectRoot)
   liftIO do
     hPutStrLn stderr ("Connecting to ghc-server at " ++ fromOsPath socket)
     waitPoll socket
@@ -112,8 +121,7 @@ client config = do
       ["--wait" | config.wait]
       ++ ["--recompile" | config.recompile]
       ++ ["--rebuild" | config.rebuild]
-
-    socket = socketPath config.projectRoot
+      ++ maybe [] (\ eid -> ["--executor", encodeUtf8 (Text.pack eid)]) config.executor
 
 -- | Parse CLI args and run the client command.
 runClient :: IO ()

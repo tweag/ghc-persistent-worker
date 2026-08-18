@@ -160,7 +160,8 @@ data Flags =
   Flags {
     wait :: Bool,
     recompile :: Bool,
-    rebuild :: Bool
+    rebuild :: Bool,
+    process :: Bool
   }
 
 -- | Parse schedule arguments from the client's command line.
@@ -188,18 +189,19 @@ parseScheduleArgs project = \case
       recompile = flags.recompile || flags.rebuild
       rebuild = flags.rebuild
     Right ScheduleCommand {
-      request = ScheduleRequest {steps, recompile, rebuild},
+      request = ScheduleRequest {steps, recompile, rebuild, process = flags.process},
       scheduleWait = flags.wait
     }
   other ->
     Left ("Unknown command: " ++ unwords other)
   where
-    extractFlags = go Flags {wait = False, recompile = False, rebuild = False}
+    extractFlags = go Flags {wait = False, recompile = False, rebuild = False, process = False}
 
     go acc = \case
       "--wait" : ts -> go (acc {wait = True} :: Flags) ts
       "--recompile" : ts -> go (acc {recompile = True} :: Flags) ts
       "--rebuild" : ts -> go (acc {rebuild = True} :: Flags) ts
+      "--process" : ts -> go (acc {process = True} :: Flags) ts
       ts -> (acc, ts)
 
 -- | Format a build result as a human-readable report.
@@ -213,6 +215,8 @@ formatResult result
     ["  metadata " ++ Text.unpack u.text ++ ": " ++ msg | (u, msg) <- result.metadataErrors]
     ++
     ["  compile " ++ Text.unpack u.text ++ ":" ++ moduleNameString modName ++ ": " ++ msg | (u, modName, msg) <- result.compileErrors]
+    ++
+    ["  execute " ++ Text.unpack u.text ++ ":" ++ moduleNameString modName ++ ": " ++ msg | (u, modName, msg) <- result.executeErrors]
 
 buildEnv ::
   ServerConfig ->
@@ -231,6 +235,7 @@ buildEnv config outputDir tmpDir project log = do
     else pure Nothing
   diff <- newMVar Map.empty
   requestIdCounter <- newIORef 0
+  processUnits <- newMVar Set.empty
   pure BuildEnv {
     baseArgs = (emptyArgs Map.empty) {Args.settings = config.settings},
     projectRoot = config.projectRoot,
@@ -243,7 +248,8 @@ buildEnv config outputDir tmpDir project log = do
     instrChan,
     extDepsDb,
     diff,
-    requestIdCounter
+    requestIdCounter,
+    processUnits
   }
 
 -- | Everything created at server boot that is needed to serve both the GhcServer protocol and (optionally) the

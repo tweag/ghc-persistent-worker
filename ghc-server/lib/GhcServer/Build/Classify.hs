@@ -97,12 +97,25 @@ classifyBuildRequest ::
 classifyBuildRequest env request = do
   diffs <- Map.fromList <$> traverse unitDiff reqs.resolved
   modifyMVar_ env.diff (pure . Map.union diffs)
+  modifyMVar_ env.processUnits (const (pure processRequestUnits))
   let
     runMeta name = maybe True (.runMeta) (Map.lookup name diffs)
     metaTasks = metadataTasks runMeta metaSpecs
   pure (metaTasks, pendingTasks)
   where
     reqs = effectiveRequests env.project request
+
+    -- Units whose execute tasks should run in a subprocess for this batch (see
+    -- 'GhcServer.Data.BuildEnv.BuildEnv.processUnits'). Only meaningful together with an execute request --
+    -- @--process@ on a plain compile/metadata request has nothing to apply to.
+    processRequestUnits
+      | request.process = Set.fromList [eu.unit.name | eu <- reqs.resolved, isExecuteScope eu.scope]
+      | otherwise = Set.empty
+
+    isExecuteScope = \case
+      Explicit UnitExecute -> True
+      Explicit (UnitExecuteModules _) -> True
+      _ -> False
 
     -- Unknown unit names still get a metadata task, which fails at dispatch with a diagnostic
     -- naming the unit; they have no dependencies to order against.
@@ -173,14 +186,17 @@ selectedSources unit mods =
 collectBuildResult :: Map (TaskKey 'Resolved) String -> BuildResult
 collectBuildResult failures =
   BuildResult {
-    success = null metaErrs && null compErrs,
+    success = null metaErrs && null compErrs && null execErrs,
     metadataErrors = metaErrs,
-    compileErrors = compErrs
+    compileErrors = compErrs,
+    executeErrors = execErrs
   }
   where
     metaErrs = [(name, msg) | (MetaTask name, msg) <- Map.toList failures]
 
     compErrs = [(name, modName, msg) | (ResolvedModule name modName, msg) <- Map.toList failures]
+
+    execErrs = [(name, modName, msg) | (ExecuteModule name modName, msg) <- Map.toList failures]
 
 -- | Compute the transitive closure of unit dependencies from a set of root unit names.
 transitiveDeps :: Project -> [UnitName] -> Set UnitName
@@ -198,6 +214,7 @@ data BuildResult =
   BuildResult {
     success :: Bool,
     metadataErrors :: [(UnitName, String)],
-    compileErrors :: [(UnitName, ModuleName, String)]
+    compileErrors :: [(UnitName, ModuleName, String)],
+    executeErrors :: [(UnitName, ModuleName, String)]
   }
   deriving stock (Show)

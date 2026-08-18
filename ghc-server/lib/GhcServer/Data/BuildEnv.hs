@@ -5,6 +5,7 @@ import Control.Concurrent.Chan (Chan)
 import Control.Concurrent.MVar (MVar)
 import Data.IORef (IORef)
 import Data.Map.Strict (Map)
+import Data.Set (Set)
 import GhcServer.Build.Diff (UnitDiff)
 import GhcServer.Data.BuildEvent (BuildEvents)
 import GhcServer.Data.Unit (Project)
@@ -39,5 +40,13 @@ data BuildEnv =
     -- instance (see 'GhcServer.Build.Propagate.nextRequestId'), included in the 'CompileStart'\/'CompileEnd'\/
     -- 'PhaseStart'\/'PhaseEnd' events a task emits, so the @instrument@ UI can match events to the exact task
     -- instance instead of matching by target text.
-    requestIdCounter :: IORef Int
+    requestIdCounter :: IORef Int,
+    -- | Units whose @execute@ tasks should run in a fresh child process (spawned via
+    -- 'GhcServer.Build.Process.executeModuleTaskProcess') rather than in-process, for the batch currently being
+    -- dispatched. Written by 'GhcServer.Build.Classify.classifyBuildRequest' from the request's @--process@ flag
+    -- and read by 'GhcServer.Build.Propagate.dispatchTask'. Like 'diff', this is request-scoped bookkeeping
+    -- threaded outside the scheduler's own 'BuildExt'/'TaskKey' machinery, since a task's resolved 'BuildStatus'
+    -- is entirely recomputed at promotion time (see 'GhcServer.Build.Schedule.resolutionsFromModuleMap') and has
+    -- no way to carry a value chosen at classification time through to dispatch.
+    processUnits :: MVar (Set UnitName)
   }

@@ -191,7 +191,7 @@ ensureServerOnSocket path socket config@ServerConfig {root, options} =
           attachSubprocess config socket handles
 
     startFailed err = do
-      trySendEvent $ ServerStopped {failedPath = Just root, stderr = err}
+      trySendEvent $ ServerStopped {failedPath = Just root, stderr = "Resolving executable failed: " <> err}
       pure (withStatus ServerInactive)
 
     withStatus status =
