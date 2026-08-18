@@ -245,7 +245,7 @@
           "exceptions"
           "extra"
           "filepath"
-          "ghc"
+"ghc"
           "ghc-paths"
           "os-string"
           "process"
@@ -347,18 +347,21 @@
           "file-io"
           "filepath"
           "ghc"
+          "ghc-compact"
           "ghc-paths"
           "ghc-worker"
           "ghc-worker-test-common"
+          "ghci"
           "grapesy"
           "optparse-applicative"
           "parsec"
-          "process"
           "silently"
           "stm"
           "text"
           "time"
           "transformers"
+          "typed-process"
+          "unix"
         ];
       };
 
@@ -381,6 +384,7 @@
           "directory"
           "filepath"
           "ghc"
+          "ghc-compact"
           "ghc-server"
           "ghc-worker-test-common"
           "hedgehog"
@@ -388,6 +392,7 @@
           "tasty-hedgehog"
           "temporary"
           "text"
+          "unix"
         ];
         source-dirs = "test";
         component = {

@@ -48,7 +48,13 @@ renderGhcLogEvent flags msg_class srcSpan msg =
 newLogger :: Bool -> IO Logger
 newLogger verbose = do
   logVar <- newIORef emptyTestLog
-  let base = testLogger logVar
+  let
+    base = testLogger logVar
+
+    debug message = do
+      base.debug message
+      when verbose do
+        hPutStrLn IO.stderr message
   pure base {
     debug,
     debugD = debug . showPprUnsafe,
@@ -60,10 +66,6 @@ newLogger verbose = do
       when verbose do
         traverse_ (debug . snd) =<< renderGhcLogEvent flags msg_class srcSpan msg
   }
-  where
-    debug message =
-      when verbose do
-        hPutStrLn IO.stderr message
 
 -- | Create a task logger that captures GHC messages and pass it to the given action.
 --

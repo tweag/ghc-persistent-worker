@@ -32,7 +32,10 @@ data ScheduleRequest =
     -- | Force recompilation of modules even when cached artifacts exist.
     recompile :: Bool,
     -- | Recompute metadata and recompile even when cached.
-    rebuild :: Bool
+    rebuild :: Bool,
+    -- | Run this request's @execute@ tasks in a fresh child process instead of in-process (see
+    -- @kb-process-isolation@ and 'GhcServer.Build.Process').
+    process :: Bool
   }
   deriving stock (Show, Eq)
 

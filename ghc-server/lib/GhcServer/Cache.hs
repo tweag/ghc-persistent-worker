@@ -167,15 +167,31 @@ cachedUnitsForProject project =
     existing unit =
       whenMaybeM (cacheExists unit.cache) (pure unit.name)
 
+-- | Load a 'CachedUnit' from an arbitrary @cached_unit.json@ path, if it exists.
+--
+-- Shared by 'loadCachedUnit' (which derives the path from a 'UnitCache') and by callers that only
+-- have a path from another unit's @dep_units@ list (e.g.\ resolving a dependency unit's own
+-- @cached_unit.json@ when reconstructing a full transitive module map, see
+-- 'GhcServer.Build.Process.evalConfig').
+loadCachedUnitAt :: OsPath -> ExceptT Text IO (Maybe CachedUnit)
+loadCachedUnitAt path =
+  whenMaybeM (liftIO (OsPath.doesFileExist path)) do
+    ExceptT (first decodeError <$> eitherDecodeFileStrict' (fromOsPath path))
+  where
+    decodeError err = Text.pack ("Failed to decode cached unit " ++ fromOsPath path ++ ": " ++ err)
+
 -- | Load the 'CachedUnit' from @cached_unit.json@, if it exists.
 loadCachedUnit :: UnitCache -> ExceptT Text IO (Maybe CachedUnit)
 loadCachedUnit unitCache =
-  whenMaybeM (liftIO (OsPath.doesFileExist unitCache.cachedUnitPath)) do
-    ExceptT (first decodeError <$> eitherDecodeFileStrict' path)
-  where
-    decodeError err = Text.pack ("Failed to decode cached unit " ++ path ++ ": " ++ err)
+  loadCachedUnitAt unitCache.cachedUnitPath
 
-    path = fromOsPath unitCache.cachedUnitPath
+-- | Load a unit's @dep_units.json@ ('CachedBuildPlans'), if it exists.
+loadDepUnitPlans :: OsPath -> ExceptT Text IO (Maybe CachedBuildPlans)
+loadDepUnitPlans path =
+  whenMaybeM (liftIO (OsPath.doesFileExist path)) do
+    ExceptT (first decodeError <$> eitherDecodeFileStrict' (fromOsPath path))
+  where
+    decodeError err = Text.pack ("Failed to decode dep units " ++ fromOsPath path ++ ": " ++ err)
 
 -- | Construct a 'BuildCache' from a 'Project' and output directory.
 mkBuildCache :: OsPath -> Project -> BuildCache

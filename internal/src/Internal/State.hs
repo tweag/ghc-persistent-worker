@@ -48,7 +48,8 @@ newState settings = do
       bcoCache = M.empty,
       bcoAccessCounter = 0,
       pendingEvictions = mempty,
-      bcoHistory = M.empty
+      bcoHistory = M.empty,
+      bytecodeImport = M.empty
     }
   }
 

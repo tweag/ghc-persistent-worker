@@ -2,30 +2,38 @@
 -- 'Internal.Evaluate.executeMain'), mirroring the worker's @--expr@ mode.
 --
 -- Runs as an ordinary scheduler task ('GhcServer.Build.Schedule.ExecuteModule'), depending on the module's own
--- compile task ('GhcServer.Build.Schedule.ResolvedModule'). Because the scheduler guarantees that dependency ran
--- (or was cache-skipped) first, this only needs the interpreted (bytecode) recompile immediately before
--- 'executeMain' -- an object-code 'HomeModInfo' already in the HPT from the compile task is rejected by GHC's
--- interactive-context machinery ("not interpreted").
+-- compile task ('GhcServer.Build.Schedule.ResolvedModule'). The module's own compile task already produced an
+-- object-code\/bytecode-dual 'HomeModInfo' (see @kb-state@), but its iface lacks @mi_top_env@ (that field is
+-- only populated by an interpreted compile). Rather than recompiling the module here purely to obtain it -- a
+-- redundant cost when running in the same process, and a genuine one when running in a fresh subprocess
+-- (see "GhcServer.Build.Process"), which would otherwise recompile the module from scratch, rerunning TH
+-- splices and codegen -- this restores the module's own cached interface\/bytecode into the HPT if it isn't
+-- already there ('GhcServer.Build.Schedule.buildModuleCachedDepsWithSelf'), then runs only the frontend's
+-- rename\/typecheck step to capture a real @mi_top_env@ and patch it onto the existing iface
+-- ('Internal.Compile.Make.ensureTopEnv'). 'GHC.Runtime.Eval.setContext' only inspects @mi_top_env@'s presence,
+-- not any backend\/linkable property of the 'HomeModInfo', so this is sufficient to make 'executeMain' work.
 module GhcServer.Build.Execute where
 
 import Control.Exception (Handler (..), catches)
+import Control.Monad.IO.Class (liftIO)
 import qualified Data.Text as Text
-import GHC (GhcException, ModuleName)
+import GHC (GhcException, ModuleName, getSession)
+import GHC.Driver.Env (HscEnv)
 import GHC.Types.SourceError (SourceError)
 import GhcServer.Build.Compile (withModuleSession)
-import GhcServer.Build.Schedule (BuildExt (..), ModuleKey (..), buildModuleCachedDeps)
+import GhcServer.Build.Schedule (BuildExt (..), ModuleKey (..), buildModuleCachedDepsWithSelf)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.Unit (Unit (..))
-import GhcServer.Log (emitEvent)
-import Test.Scheduler (TaskResult (..))
-import Internal.Compile.Make (compileModuleWithDepsInHpt)
+import Internal.Compile.Make (ensureTopEnv)
 import Internal.Evaluate (executeMain)
 import Internal.Session (withGhcMakeModule)
 import Prelude hiding (log)
 import System.OsPath.Extra (fromOsPath)
+import Test.Scheduler (TaskResult (..))
 import Types.Args (Args (..))
 import Types.BuckArgs (IsInterpreted (..))
 import Types.Env (Env (..))
+import Types.Target (TargetSpec (..))
 
 -- | Outcome of attempting to run a module's @main@, collapsing the layered result that
 -- 'Internal.Evaluate.executeMain' and its GHC session wrapper produce into one flat type.
@@ -50,12 +58,13 @@ data ExecOutcome =
 -- and a runtime failure via 'ExecRan False') from the deliberate no-@main@ skip ('ExecNoMain'). Only the
 -- failure modes are reported as a failed task ('TaskFailed'); 'ExecNoMain' is reported as 'Nothing' so the
 -- caller ('GhcServer.Build.Propagate.dispatchTask') can distinguish "skip" from "ran/failed".
-executeModuleTask :: BuildEnv -> BuildExt -> Unit -> ModuleName -> Int -> IO (Maybe (TaskResult String))
-executeModuleTask buildEnv ext unit modName requestId = do
+executeModuleTask :: BuildEnv -> BuildExt -> Unit -> ModuleName -> Int -> Maybe (HscEnv -> IO ()) -> IO (Maybe (TaskResult String))
+executeModuleTask buildEnv ext unit modName _requestId sharedBytecodeHook = do
   (outcome, captured) <- withModuleSession buildEnv unit modName (Just "execute") cachedDeps \ logger env target ->
     runGhcCatchingExceptions do
-      withGhcMakeModule Interpreted target env \ targetSpec -> do
-        _ <- compileModuleWithDepsInHpt logger (emitEvent buildEnv.instrChan) requestId targetSpec
+      withGhcMakeModule Interpreted target env sharedBytecodeHook \ _targetSpec -> do
+        hsc_env <- getSession
+        _ <- liftIO (ensureTopEnv logger hsc_env (TargetModule target))
         Just <$> executeMain env (fromOsPath <$> env.args.homeUnit) target
   pure $ case outcome of
     ExecSessionFailed reason -> Just (TaskFailed (reason ++ "\n" ++ unlines captured))
@@ -64,9 +73,9 @@ executeModuleTask buildEnv ext unit modName requestId = do
     ExecRan True mResultStr -> Just (TaskSuccess (Text.pack <$> mResultStr))
     ExecRan False _ -> Just (TaskFailed ("Execution failed:\n" ++ unlines captured))
   where
-    cachedDeps = buildModuleCachedDeps ext.moduleMap ModuleKey {unit = unit.name, name = modName}
+    cachedDeps = buildModuleCachedDepsWithSelf ext.moduleMap ModuleKey {unit = unit.name, name = modName}
 
--- | Run the GHC-interacting call chain ('Internal.Session.withGhcMakeModule', 'compileModuleWithDepsInHpt',
+-- | Run the GHC-interacting call chain ('Internal.Session.withGhcMakeModule', 'Internal.Compile.Make.ensureTopEnv',
 -- 'Internal.Evaluate.executeMain'), converting its layered result and any escaping GHC exception into a flat
 -- 'ExecOutcome'.
 --
