@@ -1,18 +1,35 @@
+{-# OPTIONS_GHC -Wno-orphans #-}
 -- | Unit and project types for the standalone GHC server.
+--
+-- The 'ToJSON'\/'FromJSON' instances for GHC's 'ModuleName' below are necessarily orphans (neither this module
+-- nor "GHC" itself), needed so 'Unit' can be serialized wholesale into a subprocess config (see
+-- "GhcServer.Build.Process") instead of the subprocess rediscovering it from disk.
 module GhcServer.Data.Unit where
 
+import Data.Aeson (FromJSON (..), ToJSON (..))
 import Data.Map.Strict (Map)
 import Data.String (IsString)
 import qualified Data.Text as Text
 import GHC (ModuleName, mkModuleName, moduleNameString)
 import GHC.Data.Graph.Directed qualified as Graph
 import GHC.Data.Graph.Directed (Graph)
+import GHC.Generics (Generic)
 import GHC.Unit (UnitId, stringToUnit)
 import GHC.Unit.Types (toUnitId, unitIdString)
 import GhcServer.Path (cacheDirName)
 import System.OsPath (OsPath, osp, (</>))
 import System.OsPath.Extra (toOsPath)
 import Types.Api (UnitName (..))
+
+-- | JSON codec for GHC's 'ModuleName', represented as its string form.
+--
+-- Needed so a 'Unit' can be serialized wholesale into a subprocess config (see
+-- "GhcServer.Build.Process"), rather than requiring the subprocess to rediscover it from disk.
+instance ToJSON ModuleName where
+  toJSON = toJSON . moduleNameString
+
+instance FromJSON ModuleName where
+  parseJSON v = mkModuleName <$> parseJSON v
 
 -- | Convert a 'UnitName' to a GHC 'UnitId'.
 unitId :: UnitName -> UnitId
@@ -35,7 +52,8 @@ data UnitCache =
     -- | Path to @source_hashes.json@ (current digests fed to the incremental metadata step).
     sourceHashesPath :: OsPath
   }
-  deriving stock (Show)
+  deriving stock (Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | Compute the absolute path to a module's @.dyn_hi@ file.
 --
@@ -64,7 +82,8 @@ data Unit =
     -- | Precomputed cache paths for this unit.
     cache :: UnitCache
   }
-  deriving stock (Show)
+  deriving stock (Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | The absolute paths of all source files belonging to a unit.
 unitSources :: Unit -> [OsPath]

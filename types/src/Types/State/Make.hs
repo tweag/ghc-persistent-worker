@@ -7,7 +7,7 @@ import Data.IntMap qualified as IM
 import Data.IntSet qualified as IS
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
-import GHC (ModuleGraph, ModuleName, emptyMG)
+import GHC (HscEnv, ModuleGraph, ModuleName, emptyMG)
 import GHC.Data.Graph.Directed (Node)
 import GHC.Linker.Types (Linkable)
 import GHC.Runtime.Interpreter (Interp)
@@ -137,7 +137,18 @@ data MakeState =
     -- 'bcoCache'.
     --
     -- TODO can't we just merge this into bcoCache and make the linkable Maybe
-    bcoHistory :: M.Map Module BcoHistoryEntry
+    bcoHistory :: M.Map Module BcoHistoryEntry,
+
+    -- | Bytecode made available from an external source (currently: 'GhcServer.Build.SharedBytecode', shared-memory
+    -- transfer from a parent process into an execute subprocess) that hasn't yet been consulted for any module.
+    -- Consulted by 'Internal.State.Linkables.addLazyByteCode' before falling back to reconstructing bytecode from
+    -- Core ('Internal.State.Linkables.lazyLoadByteCode'); a hit rehydrates the entry (the closure captures whatever
+    -- source-specific representation the caller built it from, e.g. a mirrored, 'Name'-free linkable) and removes it
+    -- from this map, since after insertion into the HPT the module's 'HomeModLinkable.homeMod_bytecode' is no longer
+    -- 'Nothing' and will never be looked up here again. Kept as a plain 'GHC.Linker.Types.Linkable'-producing
+    -- function (rather than an importer-specific type) so this module doesn't need to depend on whichever package
+    -- defines the external source.
+    bytecodeImport :: M.Map (UnitId, ModuleName) (HscEnv -> Module -> IO Linkable)
   }
 
 -- | Historic cache-tracking metadata for a module that has (or had) an entry in 'MakeState.bcoCache'. See

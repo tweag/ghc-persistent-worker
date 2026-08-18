@@ -35,7 +35,7 @@ import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..))
 import GHC.Unit.Home.PackageTable (addHomeModInfoToHpt)
 import GHC.Unit.Module.Location (ModLocation)
 import GHC.Unit.Module.ModIface (mi_module)
-import GHC.Unit.Types (toUnitId)
+import GHC.Unit.Types (moduleName, toUnitId)
 import GHC.Utils.Outputable (parens, ppr, text, (<+>))
 import Internal.Cache.Bytecode (touchBcoCache)
 import Internal.Cache.Hpt (loadCachedByteCodeFrom, reloadIfaceFromDisk)
@@ -106,17 +106,54 @@ lazyLoadByteCode logger stateVar hsc_env hmi = do
       requireLocation hsc_env module_ result
 
     insertBytecode state bytecode = do
-      let hm_iface = hmi.hm_iface
-          new = hmi {hm_iface, hm_linkable = hmi.hm_linkable {homeMod_bytecode = Just bytecode}}
-          unit = moduleUnitId (mi_module hm_iface)
-      traverse_ (insertIntoHpt new) (unitEnv_lookup_maybe unit state.make.hug)
-      pure (state, Just bytecode)
-
-    insertIntoHpt new hue = addHomeModInfoToHpt new (homeUnitEnv_hpt hue)
+      state' <- insertIntoHpt state hmi bytecode
+      pure (state', Just bytecode)
 
     homeUnit = hsc_home_unit hsc_env
 
     module_ = mi_module hmi.hm_iface
+
+-- | Overwrite a 'HomeModInfo''s bytecode with the given 'Linkable' and insert the updated entry into the HPT of
+-- whichever unit it belongs to, per the 'WorkerState''s currently persisted 'HomeUnitGraph'. Shared by
+-- 'lazyLoadByteCode' (Core-based reconstruction) and 'loadImportedByteCode' (externally supplied bytecode), both of
+-- which need to make a freshly obtained 'Linkable' visible to the rest of the HPT immediately.
+insertIntoHpt :: WorkerState -> HomeModInfo -> Linkable -> IO WorkerState
+insertIntoHpt state hmi bytecode = do
+  traverse_ insertOne (unitEnv_lookup_maybe unit state.make.hug)
+  pure state
+  where
+    new = hmi {hm_linkable = hmi.hm_linkable {homeMod_bytecode = Just bytecode}}
+    unit = moduleUnitId (mi_module hmi.hm_iface)
+    insertOne hue = addHomeModInfoToHpt new (homeUnitEnv_hpt hue)
+
+-- | Consult 'MakeState.bytecodeImport' for the given module's bytecode before reconstructing it from Core
+-- ('lazyLoadByteCode'). A hit rehydrates the entry via the closure the caller installed (e.g.
+-- 'GhcServer.Build.SharedBytecode', mirrored bytecode imported from a parent process over shared memory), inserts
+-- it into the HPT the same way 'lazyLoadByteCode' would, and removes the entry from the map -- once inserted, the
+-- module's 'HomeModLinkable.homeMod_bytecode' is no longer 'Nothing', so 'addLazyByteCode' will never look it up
+-- again. A miss falls through to 'lazyLoadByteCode' unchanged.
+loadImportedByteCode ::
+  Logger ->
+  MVar WorkerState ->
+  HscEnv ->
+  HomeModInfo ->
+  IO (Maybe Linkable)
+loadImportedByteCode logger stateVar hsc_env hmi = do
+  imported <- modifyMVar stateVar \ state ->
+    case M.lookup key state.make.bytecodeImport of
+      Nothing -> pure (state, Nothing)
+      Just rehydrate -> do
+        bytecode <- rehydrate hsc_env module_
+        state' <- insertIntoHpt state hmi bytecode
+        pure (state' {make = state'.make {bytecodeImport = M.delete key state'.make.bytecodeImport}}, Just bytecode)
+  case imported of
+    Just bytecode -> do
+      logger.debugD ("Restored imported bytecode for " <+> ppr module_)
+      pure (Just bytecode)
+    Nothing -> lazyLoadByteCode logger stateVar hsc_env hmi
+  where
+    module_ = mi_module hmi.hm_iface
+    key = (moduleUnitId module_, moduleName module_)
 
 loadDLL_ :: HscEnv -> Interp -> [FilePath] -> String -> IO ()
 loadDLL_ hsc_env interp lib_paths lib = do
@@ -147,7 +184,7 @@ addLazyByteCode ::
   IO LinkModule
 addLazyByteCode logger stateVar hsc_env = \case
   LinkHomeModule hmi@HomeModInfo {hm_linkable = HomeModLinkable {homeMod_bytecode = Nothing}} -> do
-    homeMod_bytecode <- lazyLoadByteCode logger stateVar hsc_env hmi
+    homeMod_bytecode <- loadImportedByteCode logger stateVar hsc_env hmi
     pure (LinkHomeModule hmi {hm_linkable = hmi.hm_linkable {homeMod_bytecode}})
   lm -> pure lm
 

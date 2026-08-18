@@ -123,9 +123,9 @@ triggerTask mchan build project TaskTrigger {target, task} = do
     steps = targetToUnitRequest project target task
 
     request = case task of
-      TaskKind.Metadata -> ScheduleRequest {steps, recompile = False, rebuild = False}
-      TaskKind.Build rebuild -> ScheduleRequest {steps, recompile = rebuild, rebuild}
-      Execute -> ScheduleRequest {steps = map toExecuteStep steps, recompile = False, rebuild = False}
+      TaskKind.Metadata -> ScheduleRequest {steps, recompile = False, rebuild = False, process = False}
+      TaskKind.Build rebuild -> ScheduleRequest {steps, recompile = rebuild, rebuild, process = False}
+      Execute -> ScheduleRequest {steps = map toExecuteStep steps, recompile = False, rebuild = False, process = False}
 
     toExecuteStep (name, unitReq) = (name, executeVariant unitReq)
 

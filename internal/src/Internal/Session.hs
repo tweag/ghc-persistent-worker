@@ -217,38 +217,45 @@ withGhcMakeModule ::
   IsInterpreted ->
   ModuleTarget ->
   Env ->
+  Maybe (HscEnv -> IO ()) ->
   (TargetSpec -> Ghc (Maybe a)) ->
   IO (Maybe a)
-withGhcMakeModule interp target =
-  withGhc \ env srcs run -> do
+withGhcMakeModule interp target env sharedBytecodeHook =
+  withGhc (\ env' srcs run -> do
     dflags0 <- getSessionDynFlags
     ensureNoArgs srcs
-    logDebugD env.log (text "Compiling module target" <+> ppr target)
-    withState env.log env.state (setup env dflags0) do
+    logDebugD env'.log (text "Compiling module target" <+> ppr target)
+    withState env'.log env'.state (setup env' dflags0) do
       initializeSessionPlugins
-      run (targetSpec target)
+      run (targetSpec target))
+    env
   where
-    setup env dflags0 (state0, hsc_env0) =
+    setup env' dflags0 (state0, hsc_env0) =
       foldM @[] (&) (state0, hsc_env0) [
-        restoreCachedHomeUnit env dflags0,
+        restoreCachedHomeUnit env' dflags0,
         setSessionModuleGraph,
         setActiveUnit,
-        restoreCachedModules env
+        restoreCachedModules env',
+        installSharedBytecode
       ]
 
-    restoreCachedHomeUnit env dflags0 =
-      maybeArg env.args.homeUnit $
-        loadHomeUnit env.log dflags0 (moduleUnitId target.module_)
+    installSharedBytecode (state, hsc_env) = do
+      traverse_ ($ hsc_env) sharedBytecodeHook
+      pure (state, hsc_env)
+
+    restoreCachedHomeUnit env' dflags0 =
+      maybeArg env'.args.homeUnit $
+        loadHomeUnit env'.log dflags0 (moduleUnitId target.module_)
 
     setSessionModuleGraph (state, hsc_env) = pure (state, hscSetModuleGraph state.make.moduleGraphState.moduleGraph hsc_env)
 
     setActiveUnit (state, hsc_env) = pure (state, hscSetActiveUnitId (moduleUnitId target.module_) hsc_env)
 
     -- When the dependency closure is not provided with --dep-modules, compute it from the module graph.
-    restoreCachedModules env (state, hsc_env) =
-      liftIO (loadCachedDeps env.log interp (state, hsc_env) deps)
+    restoreCachedModules env' (state, hsc_env) =
+      liftIO (loadCachedDeps env'.log interp (state, hsc_env) deps)
       where
-        deps = fromMaybe (depsFromModuleGraph state.make.moduleGraphNodes target.module_) env.args.cachedDeps
+        deps = fromMaybe (depsFromModuleGraph state.make.moduleGraphNodes target.module_) env'.args.cachedDeps
 
     maybeArg :: Maybe a -> (b -> a -> IO b) -> b -> IO b
     maybeArg arg f z = fromMaybe z <$> traverse (liftIO . f z) arg

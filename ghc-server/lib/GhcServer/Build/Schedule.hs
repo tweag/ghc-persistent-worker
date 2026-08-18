@@ -371,6 +371,17 @@ buildModuleCachedDeps allModules target =
         package = JsonFs (unitId key.unit)
       }
 
+-- | Like 'buildModuleCachedDeps', but also appends the target module itself as the final entry, so that a
+-- fresh session that never ran this module's own compile task (e.g. a subprocess evaluator, see
+-- "GhcServer.Build.Process") can restore its interface and bytecode from cache via the same mechanism used for
+-- its dependencies. Idempotent when the module is already present in the HPT (the ordinary in-process case): the
+-- cache-loading machinery only loads modules missing from the HPT.
+buildModuleCachedDepsWithSelf :: Map ModuleKey ModuleInfo -> ModuleKey -> CachedDeps
+buildModuleCachedDepsWithSelf allModules target =
+  CachedDeps (deps ++ [CachedDep {name = JsonFs target.name, package = JsonFs (unitId target.unit)}])
+  where
+    CachedDeps deps = buildModuleCachedDeps allModules target
+
 -- | Derive scheduler 'Resolutions' from a module map, restricted to the stale closure.
 --
 -- Compile resolutions are created only for modules in the @stale@ set (the Phase 2 closure result) --

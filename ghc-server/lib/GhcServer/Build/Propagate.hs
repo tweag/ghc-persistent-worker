@@ -26,6 +26,7 @@ import GhcServer.Build.Compile (compileSingleModule)
 import GhcServer.Build.Diff (UnitDiff (..), changedModuleKeys, moduleGraphDelta, staleClosure)
 import GhcServer.Build.Execute (executeModuleTask)
 import GhcServer.Build.Metadata (runMetadata)
+import GhcServer.Build.Process (executeModuleTaskProcess)
 import GhcServer.Build.Schedule (
   BuildExt (..),
   BuildStatus (..),
@@ -154,7 +155,11 @@ dispatchTask env ext task =
         withTaskEvents env requestId (moduleEventTarget name) (compile ext env unit name requestId)
       ExecuteModule _ name -> do
         requestId <- nextRequestId env
-        executeModuleTask env ext unit name requestId >>= \case
+        processUnits <- readMVar env.processUnits
+        let runExecute
+              | Set.member unitName processUnits = executeModuleTaskProcess env unit name
+              | otherwise = executeModuleTask env ext unit name requestId Nothing
+        runExecute >>= \case
           Nothing -> pure (TaskSuccess Nothing)
           Just result -> do
             emitTaskStart env requestId (moduleEventTarget name)

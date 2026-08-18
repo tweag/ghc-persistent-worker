@@ -63,7 +63,7 @@ startServerProcess exe root extraArgs =
   setStdout createPipe $
   setStderr createPipe $
   setCreateGroup True $
-  proc (fromOsPath exe) (fromOsPath root : "--enable" : "instrument" : fmap Text.unpack extraArgs)
+  proc (fromOsPath exe) ("--root" : fromOsPath root : "--enable" : "instrument" : fmap Text.unpack extraArgs)
 
 -- | 'stopProcess' sends TERM, and we send KILL if that doesn't manage to terminate the process within five seconds.
 killGhcServer ::

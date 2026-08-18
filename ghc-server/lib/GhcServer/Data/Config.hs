@@ -25,7 +25,7 @@ data ServerConfig =
 data ClientConfig =
   ClientConfig {
     -- | Absolute path to the project root directory.
-    projectRoot :: OsPath,
+    projectRoot :: Maybe OsPath,
     -- | Raw schedule arguments to send.
     targets :: [String],
     -- | Whether to wait for the build to complete before returning.
@@ -33,6 +33,8 @@ data ClientConfig =
     -- | Force recompilation of modules even when cached artifacts exist.
     recompile :: Bool,
     -- | Recompute metadata (and recompile) even when cached.
-    rebuild :: Bool
+    rebuild :: Bool,
+    -- | Run this request's execute tasks in a fresh child process instead of in-process.
+    process :: Bool
   }
   deriving stock (Show)

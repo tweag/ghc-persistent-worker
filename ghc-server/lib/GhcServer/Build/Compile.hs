@@ -82,7 +82,7 @@ compileSingleModule ::
   IO ([(UnitName, ModuleName, String)], [String])
 compileSingleModule buildEnv unit modName cachedDeps requestId = do
   (result, captured) <- withModuleSession buildEnv unit modName Nothing cachedDeps \ logger env target ->
-    withGhcMakeModule Compiled target env \ _targetSpec ->
+    withGhcMakeModule Compiled target env Nothing \ _targetSpec ->
       compileModuleWithDepsInHpt logger (emitEvent buildEnv.instrChan) requestId (TargetModule target)
   pure $ case result of
     Just _ -> ([], captured)

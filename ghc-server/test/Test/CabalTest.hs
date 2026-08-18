@@ -73,6 +73,7 @@ runCabalFresh tp steps = timedBuild do
   diffMVar <- newMVar Map.empty
   extDepsDb <- newMVar Nothing
   requestIdCounter <- newIORef 0
+  processUnits <- newMVar Set.empty
   let env = BuildEnv {
         baseArgs = emptyArgs Map.empty,
         projectRoot = tp.rootOs,
@@ -85,9 +86,10 @@ runCabalFresh tp steps = timedBuild do
         instrChan = Nothing,
         diff = diffMVar,
         extDepsDb,
-        requestIdCounter
+        requestIdCounter,
+        processUnits
       }
-  result <- runBuild 4 testTaskTimeout env ScheduleRequest {steps, recompile = False, rebuild = False}
+  result <- runBuild 4 testTaskTimeout env ScheduleRequest {steps, recompile = False, rebuild = False, process = False}
   evs <- readEvents events
   pure (evs, result)
 

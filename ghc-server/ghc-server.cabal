@@ -51,8 +51,11 @@ library
     GhcServer.Build.Diff
     GhcServer.Build.Execute
     GhcServer.Build.Metadata
+    GhcServer.Build.Process
     GhcServer.Build.Propagate
     GhcServer.Build.Schedule
+    GhcServer.Build.BytecodeMirror
+    GhcServer.Build.SharedBytecode
     GhcServer.Cabal
     GhcServer.Cabal.ExtDeps
     GhcServer.Cabal.Setup
@@ -61,6 +64,7 @@ library
     GhcServer.Data.BuildEvent
     GhcServer.Data.BuildSystem
     GhcServer.Data.Config
+    GhcServer.Data.ProcessEval
     GhcServer.Data.Request
     GhcServer.Data.Unit
     GhcServer.Data.UnitConfig
@@ -68,6 +72,7 @@ library
     GhcServer.Grpc
     GhcServer.Handler
     GhcServer.Log
+    GhcServer.Optparse
     GhcServer.Path
     GhcServer.Project
     GhcServer.Run
@@ -89,18 +94,20 @@ library
     file-io,
     filepath,
     ghc,
+    ghc-compact,
     ghc-paths,
     ghc-worker,
     ghc-worker-test-common,
     grapesy ^>=1.1,
     optparse-applicative,
     parsec,
-    process,
     silently,
     stm,
     text,
     time,
-    transformers
+    transformers,
+    typed-process,
+    unix
 
 executable ghc-server
   import: all
@@ -128,8 +135,12 @@ test-suite ghc-server-test
     Test.BuildTest
     Test.CabalTest
     Test.CacheTest
+    Test.CompactBytecodeTest
+    Test.ForkMetadataTest
+    Test.ForkTest
     Test.ScheduleTest
     Test.SchedulerTest
+    Test.SubprocessTest
   build-depends:
     aeson,
     async,
@@ -140,10 +151,12 @@ test-suite ghc-server-test
     directory,
     filepath,
     ghc,
+    ghc-compact,
     ghc-server,
     ghc-worker-test-common,
     hedgehog,
     tasty >= 1.5,
     tasty-hedgehog,
     temporary,
-    text
+    text,
+    unix

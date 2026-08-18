@@ -7,6 +7,7 @@ import Data.Aeson.TH (deriveJSON)
 import qualified Data.ByteString.Char8 as ByteString
 import Language.Haskell.TH.Syntax (lift)
 import M2 (payload)
+import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
 
 data Entity =
   Entity {
@@ -23,4 +24,8 @@ cached :: String
 cached = $(lift (ByteString.unpack payload))
 
 main :: IO String
-main = pure cached
+main = do
+  hSetBuffering stdout LineBuffering
+  hSetBuffering stderr LineBuffering
+  putStrLn "executing M1"
+  pure cached

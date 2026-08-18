@@ -119,7 +119,7 @@ dispatch hooks env args =
           env.log.setTarget (TargetModuleInterp target)
         else
           env.log.setTarget (TargetModule target)
-        withGhcMakeModule args.interp target env (withTarget compileHpt)
+        withGhcMakeModule args.interp target env Nothing (withTarget compileHpt)
       Nothing ->
         withGhcMakeSource env (withTarget compileHpt . TargetSource)
 
@@ -131,7 +131,7 @@ dispatch hooks env args =
         Just name -> env.log.setTarget (TargetUnknown name)
       (res_stdout, r) <-
         hCapture [stdout] $
-          withGhcMakeModule Interpreted modTarget env
+          withGhcMakeModule Interpreted modTarget env Nothing
             (\_ -> do
               isSuccessful <- Internal.Evaluate.evaluate env (fromOsPath <$> args.homeUnit) modTarget imports stmt
               pure (Just isSuccessful)

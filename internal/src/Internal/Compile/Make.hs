@@ -23,11 +23,11 @@ import GHC (
   )
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Driver.DynFlags (gopt_set)
-import GHC.Driver.Env (HscEnv (..), hscInsertHPT)
+import GHC.Driver.Env (HscEnv (..), hscInsertHPT, hscSetFlags, hsc_HPT)
 import GHC.Driver.Env.Types (Hsc (..))
 import GHC.Driver.Errors.Types (GhcMessage (..))
 import GHC.Driver.Hooks (Hooks (..))
-import GHC.Driver.Main (hscParse', tcRnModule')
+import GHC.Driver.Main (hscParse, hscParse', hscTypecheckRename, tcRnModule')
 import GHC.Driver.Make (summariseFile)
 import GHC.Driver.Pipeline (compileOne, runPhase)
 import GHC.Driver.Pipeline.Phases (PhaseHook (..), TPhase (..))
@@ -35,6 +35,7 @@ import GHC.Runtime.Loader (initializeSessionPlugins)
 import GHC.Tc.Types (FrontendResult (..))
 import GHC.Unit.Env (ue_unsafeHomeUnit)
 import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..))
+import GHC.Unit.Home.PackageTable (lookupHpt)
 import GHC.Utils.Monad (MonadIO (..))
 import GHC.Utils.Outputable (ppr, showPprUnsafe, text, (<+>))
 import GHC.Utils.Panic (throwGhcExceptionIO)
@@ -187,6 +188,49 @@ compileModuleWithDepsInHpt logger emitEvent requestId target =
           topEnv <- readIORef ref
           pure $ maybe hmi (\ env -> hmi {hm_iface = patchTopEnv env hmi.hm_iface}) topEnv
         Nothing -> pure hmi
+
+-- | Ensure a module's 'HomeModInfo' -- already present in the HPT from an earlier ordinary compile task in this
+-- session, or restored from the on-disk cache (see "GhcServer.Build.Schedule"'s
+-- @buildModuleCachedDepsWithSelf@/"Internal.Cache.Hpt"'s @loadCachedDep@) -- has a real @mi_top_env@, so that
+-- GHCi-style evaluation ('GHC.Runtime.Eval.setContext' with an 'GHC.Runtime.Context.IIModule') can resolve its
+-- top-level names.
+--
+-- Unlike 'compileModuleWithDepsInHpt' with a 'TargetModuleInterp' target, this never recompiles the module: it
+-- runs only the frontend's parse/rename/typecheck steps ('GHC.Driver.Main.hscParse'/'hscTypecheckRename', no
+-- codegen, no dependency recompilation) with 'Internal.Compile.TopEnv.withCaptureTopEnv' installed, and patches
+-- the captured environment onto the existing iface -- leaving whatever bytecode/object code the 'HomeModInfo'
+-- already carries untouched.
+--
+-- If the iface already has a real @mi_top_env@ (from an earlier call, or from an exports-only approximation
+-- synthesized by 'Internal.Cache.Hpt.loadCachedDep' when loading a cached module for an interpreted session),
+-- it is unconditionally recomputed and replaced, since the synthesized version lacks qualified-import and
+-- instance information that only a real rename/typecheck pass provides.
+--
+-- Returns 'Nothing' if the target module has no entry in the HPT at all -- the caller is responsible for
+-- ensuring it has been loaded first.
+ensureTopEnv :: Logger -> HscEnv -> TargetSpec -> IO (Maybe ModIface)
+ensureTopEnv logger hsc_env target =
+  case target of
+    TargetModule (ModuleTarget m) -> go (GHC.moduleName m)
+    TargetModuleInterp (ModuleTarget m) -> go (GHC.moduleName m)
+    _ -> pure Nothing
+  where
+    go modName = do
+      existing <- lookupHpt (hsc_HPT hsc_env) modName
+      case existing of
+        Nothing -> pure Nothing
+        Just hmi -> Just <$> refresh hmi
+
+    refresh hmi = do
+      summary <- ensureSummary logger hsc_env target
+      (hsc_env0, ref) <- withCaptureTopEnv hsc_env
+      let hsc_env' = hscSetFlags summary.ms_hspp_opts hsc_env0
+      hpm <- hscParse hsc_env' summary
+      _ <- hscTypecheckRename hsc_env' summary hpm
+      captured <- readIORef ref
+      let iface' = maybe hmi.hm_iface (\ env -> patchTopEnv env hmi.hm_iface) captured
+      hscInsertHPT hmi {hm_iface = iface'} hsc_env
+      pure iface'
 
 phaseLabel :: TPhase a -> Maybe String
 phaseLabel = \case

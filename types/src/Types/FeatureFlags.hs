@@ -23,6 +23,12 @@ data Feature =
   |
   -- | Load bytecode on demand when linking splices or evaluating tests.
   FeatureLazyByteCode
+  |
+  -- | Share already-compiled bytecode between the main @ghc-server@ process and its execute-subprocess child
+  -- via a @\/dev\/shm@-backed @mmap@ region (see 'GhcServer.Build.SharedBytecode'). When disabled, the
+  -- subprocess falls back to the basic approach of restoring cached interfaces\/objects and compiling Core
+  -- bindings to bytecode itself (see 'Internal.Cache.Hpt.loadCachedByteCode').
+  FeatureSharedMemory
   deriving stock (Eq, Show, Ord, Enum, Bounded, Generic)
   deriving anyclass (Binary, FromJSON, ToJSON)
 
@@ -37,4 +43,5 @@ parseFeatureFlag = \case
   "instrument" -> Right FeatureInstrument
   "incremental-build-plan" -> Right FeatureIncrementalBuildPlan
   "lazy-byte-code" -> Right FeatureLazyByteCode
+  "shared-memory" -> Right FeatureSharedMemory
   flag -> Left ("Invalid feature flag: " <> flag)
