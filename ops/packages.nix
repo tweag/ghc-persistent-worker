@@ -282,7 +282,6 @@
           "ghc-paths"
           "hashable"
           "hedgehog"
-          "lens"
           "monad-control"
           "mtl"
           "stm"
