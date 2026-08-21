@@ -9,7 +9,7 @@ import Types.State (WorkerState)
 
 #if defined(LINKABLES)
 
-import Control.Concurrent (modifyMVar)
+import Control.Concurrent (modifyMVar, modifyMVar_)
 import Control.Monad (foldM)
 import Data.Foldable (for_, traverse_)
 import Data.Map.Strict qualified as M
@@ -37,6 +37,7 @@ import GHC.Unit.Module.Location (ModLocation)
 import GHC.Unit.Module.ModIface (mi_module)
 import GHC.Unit.Types (toUnitId)
 import GHC.Utils.Outputable (parens, ppr, text, (<+>))
+import Internal.Cache.Bytecode (touchBcoCache)
 import Internal.Cache.Hpt (loadCachedByteCodeFrom)
 import Internal.Error (workerErrorIO)
 import Internal.State (modifyMakeState)
@@ -178,6 +179,20 @@ linkablesResolve logger stateVar hsc_env opts pls srcSpan mods = do
   ensureLibraries stateVar hsc_env (hscInterp hsc_env) neededWithLazy
   pure (loaded, neededWithLazy, allUnits, neededUnits)
 
+-- | Wrap the native 'selectLinkDeps' to update the BCO tracking metadata.
+linkablesSelect ::
+  MVar WorkerState ->
+  LinkDepsOpts ->
+  Interp ->
+  SrcSpan ->
+  ([Linkable], [LinkModule], UniqDSet UnitId, [UnitId]) ->
+  IO LinkDeps
+linkablesSelect stateVar opts interp srcSpan resolved = do
+  deps <- selectLinkDeps opts interp srcSpan resolved
+  modifyMVar_ stateVar \ state ->
+    pure state {make = touchBcoCache deps.ldAllLinkables state.make}
+  pure deps
+
 newLinkables ::
   Logger ->
   MVar WorkerState ->
@@ -187,7 +202,7 @@ newLinkables ::
 newLinkables logger stateVar hsc_env pls = do
   pure Linkables {
     linkablesResolve = linkablesResolve logger stateVar hsc_env (initLinkDepsOpts hsc_env) pls,
-    linkablesSelect = selectLinkDeps (initLinkDepsOpts hsc_env) (hscInterp hsc_env)
+    linkablesSelect = linkablesSelect stateVar (initLinkDepsOpts hsc_env) (hscInterp hsc_env)
   }
 
 #endif
