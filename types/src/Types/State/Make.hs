@@ -3,13 +3,14 @@
 module Types.State.Make where
 
 import Control.Concurrent.MVar (MVar)
+import Data.Map.Strict qualified as M
+import Data.Set qualified as S
 import GHC (ModuleGraph, ModuleName)
+import GHC.Linker.Types (Linkable)
 import GHC.Runtime.Interpreter (Interp)
 import GHC.Unit.Env (HomeUnitGraph)
 import GHC.Unit.Module.Graph (ModuleGraphNode, NodeKey)
-import GHC.Unit.Types (UnitId)
-import Data.Map.Strict qualified as M
-import Data.Set qualified as S
+import GHC.Unit.Types (Module, UnitId)
 
 #if defined(UNIT_INDEX)
 
@@ -36,6 +37,16 @@ emptyLibLoadState :: LibLoadState
 emptyLibLoadState = LibLoadState
   { requested = M.empty,
     loaded = S.empty
+  }
+
+-- | Loader state tracking metadata for a single linkable.
+data BcoCacheEntry =
+  BcoCacheEntry {
+    linkable :: Linkable,
+    -- | A measure for the age of this entry, representing the value of 'bcoAccessCounter' at the time it was last used.
+    lastAccess :: Int,
+    -- | The number of BCOs contained in the linkable, used as a proxy for size.
+    size :: Int
   }
 
 -- | Data extracted from 'HscEnv' for the purpose of persisting it across sessions.
@@ -68,5 +79,11 @@ data MakeState =
     bcoLoadState :: M.Map ModuleName (MVar ()),
 
     -- | Unit-level extra native library dependencies are loaded by checking in LibLoadState explicitly.
-    extraLib :: LibLoadState
+    extraLib :: LibLoadState,
+
+    -- | Track loader state entries for unloading.
+    bcoCache :: M.Map Module BcoCacheEntry,
+
+    -- | Monotonic counter bumped every time bytecode dependencies are loaded, used as the age of loader state entries.
+    bcoAccessCounter :: Int
   }

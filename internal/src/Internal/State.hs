@@ -37,7 +37,9 @@ newState = do
       interp = Nothing,
       unitIndex,
       bcoLoadState,
-      extraLib = emptyLibLoadState
+      extraLib = emptyLibLoadState,
+      bcoCache = M.empty,
+      bcoAccessCounter = 0
     },
     targetArgs = mempty
   }
