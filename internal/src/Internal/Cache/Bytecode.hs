@@ -1,7 +1,6 @@
 -- | LRU tracking and unloading of lazily-loaded bytecode (the @lazyByteCode@ feature, see 'Types.FeatureFlags').
 module Internal.Cache.Bytecode where
 
-import Control.Monad (unless)
 import Data.Bifunctor (bimap)
 import Data.Foldable (foldr', for_, traverse_)
 import qualified Data.List as List
@@ -88,7 +87,7 @@ evictBcoCache hsc_env limit make =
   where
     (_, evicted) = splitEvictions limit sorted
 
-    sorted = reverse (List.sortOn (lastAccess . snd) (Map.toList make.bcoCache))
+    sorted = reverse (List.sortOn ((.lastAccess) . snd) (Map.toList make.bcoCache))
 
 -- | Unconditionally evict the given set of modules from 'MakeState.bcoCache', regardless of recency or size, in
 -- response to an explicit eviction request from the instrumentation UI (see 'Internal.State.withState'). Modules not

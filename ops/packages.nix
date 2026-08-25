@@ -371,13 +371,6 @@
 
       executables.compare-eviction = {
         source-dirs = "app/compare-eviction";
-        component = {
-          ghc-options = [
-            "-threaded"
-            "-rtsopts"
-            ''"-with-rtsopts=-N -T"''
-          ];
-        };
       };
 
       tests.ghc-server-test = {

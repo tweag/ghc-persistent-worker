@@ -12,6 +12,7 @@ import GHC.Driver.Session (DynFlags (..), GhcMode (..))
 import GHC.Types.Error (diagnosticCodeNumber)
 import GHC.Unit (stringToUnit)
 import Internal.Compile.Make (compileModuleWithDepsInHpt)
+import qualified Internal.Evaluate as Evaluate
 import Internal.DynFlags (modifyGlobalFlags)
 import Internal.Metadata (computeMetadata)
 import Internal.Session (withGhcMakeModule)
@@ -41,7 +42,7 @@ import Test.Path (compileTmpDir, extDepName, moduleName, moduleSourcePath, unitD
 import Test.Scheduler (initScheduler, runScheduler)
 import qualified Types.Args as Args
 import Types.Args (Args (..))
-import Types.BuckArgs (IsInterpreted (Compiled))
+import Types.BuckArgs (IsInterpreted (Compiled, Interpreted))
 import Types.BuildPlan.Incremental (BuckHashesPath (..), BuildPlanPath (..))
 import Types.Env (Env (..))
 import Types.Target (ModuleTarget (..), TargetSpec (..))
@@ -96,6 +97,29 @@ compileTarget key =
   ModuleTarget {
     mod = mkModule (stringToUnit (unitName key.unit)) (mkModuleName (moduleName key))
   }
+
+-- | Execute an evaluate task: compile the target module as interpreted (making its bytecode available), then
+-- evaluate @expr@ in its context via 'Internal.Evaluate.evaluate'. Used by @compare-eviction@ to force bytecode
+-- (rather than object code) generation for a TH-splicing test module, exercising the interpreter's home-unit
+-- lookup and bytecode cache tracking paths.
+runEvaluate :: SessionEnv -> (ModuleKey -> (Args, Set Natural)) -> String -> ModuleKey -> IO RequestResult
+runEvaluate env mkArgs expr key = do
+  runBuildTask env "evaluate" (compileTmpDir key) codes \ taskEnv -> do
+    let compileEnv = taskEnv {args}
+        target = compileTarget key
+    result <- withGhcMakeModule Interpreted target compileEnv \ _targetSpec -> do
+      modifyGlobalFlags \ d -> d {ghcMode = CompManager}
+      iface <- compileModuleWithDepsInHpt compileEnv.log (TargetModuleInterp target)
+      case iface of
+        Nothing -> pure Nothing
+        Just _ -> do
+          -- The home unit is always already loaded in this session (just compiled above), so 'evaluate' takes the
+          -- short-circuiting path in 'Internal.Cache.Hpt.loadHomeUnit' and never reads this dummy path.
+          ok <- Evaluate.evaluate compileEnv (Just "") target [] expr
+          pure (if ok then iface else Nothing)
+    pure (isJust result)
+  where
+    (args, codes) = mkArgs key
 
 -- | Execute a compile task.
 runCompile :: SessionEnv -> (ModuleKey -> (Args, Set Natural)) ->  ModuleKey -> IO RequestResult
