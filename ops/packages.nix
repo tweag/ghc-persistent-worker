@@ -236,13 +236,14 @@
           "binary"
           "containers"
           "exceptions"
+          "extra"
           "filepath"
           "ghc"
           "ghc-paths"
           "os-string"
           "process"
           "silently"
-          "text"
+          "split"
           "text"
         ];
         source-dirs = "src";
