@@ -17,6 +17,7 @@ import Data.Aeson (
 import Data.Coerce (Coercible, coerce)
 import Data.Foldable (fold, toList)
 import Data.Functor.Contravariant (contramap)
+import Data.List.NonEmpty (NonEmpty)
 import Data.Map.Strict (Map)
 import Data.String (IsString (..))
 import Data.Text (Text)
@@ -78,7 +79,10 @@ instance Coercible a FastString => FromJSONKey (JsonFs a) where
 data CachedDep =
   CachedDep {
     name :: JsonFs ModuleName,
-    package :: JsonFs UnitId
+    package :: JsonFs UnitId,
+    -- | Interface file paths for this module (multiple in case of e.g. dynamic and static variants). The first
+    -- element is used by consumers that only need a single canonical path.
+    interfaces :: NonEmpty OsPath
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON)

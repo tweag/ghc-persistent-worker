@@ -150,7 +150,10 @@ moduleCache env key deps =
     mkCachedDep dc =
       CachedDep {
         name = jsonFsFromString (moduleName dc),
-        package = jsonFsFromString (unitName dc.unit)
+        package = jsonFsFromString (unitName dc.unit),
+        -- Unused by the test consumer ('Internal.Cache.Hpt.prepareDep' derives its own interface path from
+        -- 'DynFlags'), but a plausible location is provided regardless for consistency with production data.
+        interfaces = (env.tempDir </> moduleSourcePath dc) :| []
       }
 
     unitPath = env.tempDir </> cachedUnitPath key.unit

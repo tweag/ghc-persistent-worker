@@ -258,7 +258,7 @@ withGhcMakeModule interp target =
     restoreCachedModules env (state, hsc_env) =
       liftIO (loadCachedDeps env.log env.args.features interp (state, hsc_env) deps)
       where
-        deps = fromMaybe (depsFromModuleGraph state.make.moduleGraphNodes target.mod) env.args.cachedDeps
+        deps = fromMaybe (depsFromModuleGraph (hsc_dflags hsc_env) state.make.moduleGraphNodes target.mod) env.args.cachedDeps
 
     maybeArg :: Maybe a -> (b -> a -> IO b) -> b -> IO b
     maybeArg arg f z = fromMaybe z <$> traverse (liftIO . f z) arg

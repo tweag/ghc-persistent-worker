@@ -354,8 +354,8 @@ canonicalInterfacePath dflags name =
       | otherwise = Nothing
 
 -- | Compute the transitive dependency closure of a given module from the module graph, in dependency postorder.
-depsFromModuleGraph :: M.Map NodeKey ModuleGraphNode -> Module -> CachedDeps
-depsFromModuleGraph nodes target =
+depsFromModuleGraph :: DynFlags -> M.Map NodeKey ModuleGraphNode -> Module -> CachedDeps
+depsFromModuleGraph dflags nodes target =
   CachedDeps (reverse (snd (children (Set.singleton targetKey, []) targetKey)))
   where
     children acc key =
@@ -371,8 +371,10 @@ depsFromModuleGraph nodes target =
           in (seen', maybe deps' (: deps') (cachedDep key))
 
     cachedDep = \case
-      NodeKey_Module (ModNodeKeyWithUid (GWIB name isBoot) uid) ->
-        Just CachedDep {name = JsonFs (bootName isBoot name), package = JsonFs uid}
+      NodeKey_Module (ModNodeKeyWithUid (GWIB name isBoot) uid) -> do
+        let bname = bootName isBoot name
+        iface <- canonicalInterfacePath dflags bname
+        Just CachedDep {name = JsonFs bname, package = JsonFs uid, interfaces = iface :| []}
       _ ->
         Nothing
 
