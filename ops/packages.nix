@@ -36,6 +36,7 @@
           "optparse-applicative"
           "os-string"
           "process"
+          "silently"
           "text"
         ];
       };
@@ -234,8 +235,8 @@
           "filepath"
           "ghc"
           "ghc-paths"
-          "optparse-applicative"
           "os-string"
+          "process"
           "split"
           "text"
         ];
@@ -275,7 +276,6 @@
           "directory"
           "exceptions"
           "extra"
-          "exceptions"
           "file-io"
           "filepath"
           "generic-lens"
@@ -283,6 +283,7 @@
           "ghc-paths"
           "hashable"
           "hedgehog"
+          "lens"
           "monad-control"
           "mtl"
           "stm"
