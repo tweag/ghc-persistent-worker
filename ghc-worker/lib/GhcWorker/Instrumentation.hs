@@ -6,7 +6,7 @@ import Control.Concurrent.Chan (Chan, writeChan)
 import Control.Exception (bracket_)
 import Data.Foldable (traverse_)
 import Data.Int (Int32)
-import GhcWorker.Grpc (mkStats)
+import GhcWorker.Grpc (mkStats, pushBytecodeState)
 import Internal.Log (dbg)
 import Prelude hiding (log)
 import Types.BuckArgs (BuckArgs (..))
@@ -73,13 +73,15 @@ messageCompileStart _args target =
     , canDebug = True
     }
 
--- | Construct a grapesy message for a "compilation finished" event.
+-- | Construct a grapesy message for a "compilation finished" event. @ghc-worker@ has no execute-task result
+-- exfiltration story (see @GhcServer.Build.Execute@), so @result@ is always 'Nothing' here.
 messageCompileEnd :: Maybe TargetSpec -> Int32 -> [String] -> Event
 messageCompileEnd target exitCode output =
   CompileEnd
     { target = maybe "" renderTargetSpec target
     , exitCode = fromIntegral exitCode
     , stderr = unlines output
+    , result = Nothing
     }
 
 -- | Run a 'GrpcHandler' with instrumentation enabled.
@@ -96,11 +98,12 @@ withInstrumentation ::
   GrpcHandler
 withInstrumentation instrChan status stateVar handler =
   GrpcHandler \ commandEnv argv -> do
-    state <- readMVar stateVar
     bracket_ (startJob status) (finishJob status) do
       result <- (handler.create hooks).run commandEnv argv
+      state <- readMVar stateVar
       stats <- mkStats state
       writeChan instrChan stats
+      pushBytecodeState stateVar instrChan
       pure result
   where
     hooks = Hooks {

@@ -1,30 +1,31 @@
 module GhcWorker.Grpc where
 
 import Common.Grpc ()
-import Control.Concurrent.Chan (Chan, dupChan, readChan)
+import Control.Concurrent.Chan (Chan, dupChan, readChan, writeChan)
 import Control.Concurrent.MVar (MVar, modifyMVar_, readMVar)
 import Control.Monad (forever)
 import Data.Binary (encode)
 import Data.ByteString (toStrict)
 import Data.Foldable (for_)
 import Data.Map.Strict qualified as Map
+import Data.Set qualified as Set
 import Data.Text qualified as Text
+import GHC (moduleName, moduleNameString)
 import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats)
+import GHC.Unit.Types (moduleUnitId, unitIdString)
 import Network.GRPC.Common (NextElem (..))
 import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
 import Network.GRPC.Server.Protobuf (ProtobufMethodsOf)
-import Network.GRPC.Server.StreamType (
-  Methods (..),
-  mkNonStreaming,
-  mkServerStreaming,
-  simpleMethods,
-  )
+import Network.GRPC.Server.StreamType (Methods (..), mkNonStreaming, mkServerStreaming, simpleMethods)
+import System.IO qualified as IO (hPutStrLn, stderr)
 import qualified Proto.Instrument as Instr
 import Proto.Instrument (Instrument)
 import Proto.Instrument_Fields qualified as Instr
 import Types.Grpc (CommandEnv (..), RequestArgs (..))
 import Types.Instrument (Event (..))
-import Types.State (WorkerState (..), Options (..))
+import Types.Instrument qualified as Instrument
+import Types.State (Options (..), WorkerState (..))
+import Types.State.Make (BcoHistoryEntry (..), MakeState (..))
 import Types.Target (TargetSpec (..))
 
 -- | Fetch statistics about the current state of the RTS for instrumentation.
@@ -86,6 +87,79 @@ triggerRebuild stateVar recompile target = do
   for_ margs (uncurry recompile)
   pure defMessage
 
+-- | Stub for the persistent-worker protocol: 'GhcWorker' has no unit\/module-oriented project model to execute a
+-- unit's modules against (see 'GhcServer.Grpc.triggerExecute' for the real implementation, used by @ghc-server@).
+-- Logs to stderr on invocation since this handler has no 'Types.Log.Logger' in scope and otherwise silently
+-- no-ops, which would be indistinguishable from the request never reaching the server at all.
+triggerExecute ::
+  Proto Instr.RebuildRequest ->
+  IO (Proto Instr.Empty)
+triggerExecute req = do
+  IO.hPutStrLn IO.stderr ("triggerExecute: stub invoked (ghc-worker has no execute support), target=" ++ Text.unpack req.target)
+  pure defMessage
+
+-- | Compute cache-tracking info for every module ever tracked in 'MakeState.bcoHistory' (current residents and
+-- past evictees alike), decorated with whether it's currently resident in 'MakeState.bcoCache' and whether it has
+-- a pending eviction request. Shared by 'getBytecodeState' (RPC response) and 'pushBytecodeState' (pushed event).
+bytecodeEntries :: WorkerState -> [Instrument.BcoEntryInfo]
+bytecodeEntries state =
+  [ Instrument.BcoEntryInfo
+      { Instrument.unitId = unitIdString (moduleUnitId m)
+      , Instrument.moduleName = moduleNameString (moduleName m)
+      , Instrument.size = entry.size
+      , Instrument.lastAccess = entry.lastAccess
+      , Instrument.resident = Map.member m state.make.bcoCache
+      , Instrument.pendingEviction = Set.member m state.make.pendingEvictions
+      }
+  | (m, entry) <- Map.toList state.make.bcoHistory
+  ]
+
+-- | Snapshot the historic lazily-loaded bytecode cache for the instrumentation UI: every module that has ever been
+-- tracked in 'MakeState.bcoHistory' (current residents and past evictees alike), decorated with whether it's
+-- currently resident in 'MakeState.bcoCache' and whether it has a pending eviction request.
+getBytecodeState ::
+  MVar WorkerState ->
+  Proto Instr.Empty ->
+  IO (Proto Instr.BytecodeState)
+getBytecodeState stateVar _ = do
+  state <- readMVar stateVar
+  let entries =
+        [ defMessage
+            & Instr.unitId .~ Text.pack e.unitId
+            & Instr.moduleName .~ Text.pack e.moduleName
+            & Instr.size .~ fromIntegral e.size
+            & Instr.lastAccess .~ fromIntegral e.lastAccess
+            & Instr.resident .~ e.resident
+            & Instr.pendingEviction .~ e.pendingEviction
+        | e <- bytecodeEntries state
+        ]
+  pure (defMessage & Instr.entries .~ entries)
+
+-- | Push a snapshot of the bytecode cache (see 'bytecodeEntries') to the instrumentation channel, if enabled.
+-- Called whenever the cache may have changed: after a compile\/metadata\/execute task finishes and its session has
+-- been stored (see 'Internal.State.withState').
+pushBytecodeState :: MVar WorkerState -> Chan Event -> IO ()
+pushBytecodeState stateVar chan = do
+  state <- readMVar stateVar
+  writeChan chan (BytecodeSnapshot (bytecodeEntries state))
+
+-- | Request eviction of a module (or, if 'moduleName' is empty, an entire unit) from the lazily-loaded bytecode
+-- cache. Deferred until the next compile job's session is stored, since eviction requires a live 'HscEnv'/'Interp'
+-- (see 'Types.State.Make.pendingEvictions').
+evictBytecode ::
+  MVar WorkerState ->
+  Proto Instr.EvictBytecodeRequest ->
+  IO (Proto Instr.Empty)
+evictBytecode stateVar req = do
+  modifyMVar_ stateVar \ state -> do
+    let
+      matches m =
+        unitIdString (moduleUnitId m) == Text.unpack req.unitId
+        && (Text.null req.moduleName || moduleNameString (moduleName m) == Text.unpack req.moduleName)
+      targets = Set.filter matches (Map.keysSet state.make.bcoCache)
+    pure state {make = state.make {pendingEvictions = state.make.pendingEvictions <> targets}}
+  pure defMessage
+
 -- | A grapesy server that streams instrumentation data from the provided channel.
 instrumentMethods ::
   Chan Event ->
@@ -94,6 +168,9 @@ instrumentMethods ::
   Methods IO (ProtobufMethodsOf Instrument)
 instrumentMethods chan stateVar recompile =
   simpleMethods
+    (mkNonStreaming (evictBytecode stateVar))
+    (mkNonStreaming (getBytecodeState stateVar))
     (mkServerStreaming (const (notifyMe stateVar chan)))
     (mkNonStreaming (setOptions stateVar))
+    (mkNonStreaming triggerExecute)
     (mkNonStreaming (triggerRebuild stateVar recompile))

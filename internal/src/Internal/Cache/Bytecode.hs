@@ -6,6 +6,8 @@ import Data.Bifunctor (bimap)
 import Data.Foldable (foldr', for_, traverse_)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
+import Data.Set (Set)
+import qualified Data.Set as Set
 import GHC.ByteCode.Types (bc_bcos)
 import GHC.Data.FlatBag (sizeFlatBag)
 import GHC.Driver.Env (HscEnv, hscInterp)
@@ -15,7 +17,7 @@ import GHC.Unit.Home.Graph (HomeUnitEnv (..), UnitEnvGraph (..), unitEnv_lookup_
 import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..))
 import GHC.Unit.Home.PackageTable (addHomeModInfoToHpt, lookupHpt)
 import GHC.Unit.Types (Module, moduleName, moduleUnitId)
-import Types.State.Make (BcoCacheEntry (..), MakeState (..))
+import Types.State.Make (BcoCacheEntry (..), BcoHistoryEntry (..), MakeState (..))
 
 -- | Count the number of BCOs in a 'Linkable' as a coarse proxy measure for memory usage.
 -- Note: this ignores @LazyBCOs@.
@@ -23,11 +25,14 @@ linkableBcoCount :: Linkable -> Int
 linkableBcoCount lnk =
   sum (fromIntegral . sizeFlatBag . bc_bcos <$> linkableBCOs lnk)
 
--- | Increase the access counter and update the LRU cache entries for each 'Linkable'.
+-- | Increase the access counter and update the LRU cache entries for each 'Linkable'. Also refreshes the
+-- corresponding 'MakeState.bcoHistory' entries, which (unlike 'MakeState.bcoCache') are never removed, so the
+-- instrumentation UI's bytecode browser can still display modules after they've been evicted.
 touchBcoCache :: [Linkable] -> MakeState -> MakeState
 touchBcoCache linkables make =
   make {
     bcoCache = foldr' touch make.bcoCache withBcos,
+    bcoHistory = foldr' touchHistory make.bcoHistory withBcos,
     bcoAccessCounter
   }
   where
@@ -36,6 +41,10 @@ touchBcoCache linkables make =
     touch linkable = Map.insert linkable.linkableModule (newEntry linkable)
 
     newEntry linkable = BcoCacheEntry {linkable, lastAccess = bcoAccessCounter, size = linkableBcoCount linkable}
+
+    touchHistory linkable = Map.insert linkable.linkableModule (newHistEntry linkable)
+
+    newHistEntry linkable = BcoHistoryEntry {lastAccess = bcoAccessCounter, size = linkableBcoCount linkable}
 
     bcoAccessCounter = make.bcoAccessCounter + 1
 
@@ -58,17 +67,35 @@ splitEvictions limit entries =
   zip entries $
   scanl (+) 0 [entry.size | (_, entry) <- entries]
 
--- | If the tracked total size of 'bcoCache' exceeds the given limit, unload the least recently used excess entries:
---
--- - Clear the bytecode fields in the HPT for the affected modules
--- - Call 'unload' with the remaining modules (that function expects the kept modules, not the unloaded ones)
-evictBcoCache :: HscEnv -> Int -> MakeState -> IO MakeState
-evictBcoCache hsc_env limit make = do
-  unless (null evicted) do
-    traverse_ (dropFromHpt make.hug . fst) evicted
-    unload (hscInterp hsc_env) hsc_env (linkable . snd <$> kept)
-  pure make {bcoCache = Map.fromList kept}
+-- | Shared implementation for 'evictBcoCache' and 'evictSpecific': clear the bytecode fields in the HPT for the
+-- given evicted modules and inform the interpreter's loader that only the remaining ('MakeState.bcoCache' minus
+-- the evicted modules) linkables should stay live. No-ops if the evicted list is empty.
+unloadEvicted :: HscEnv -> [(Module, BcoCacheEntry)] -> MakeState -> IO MakeState
+unloadEvicted hsc_env evicted make
+  | null evicted = pure make
+  | otherwise = do
+      traverse_ (dropFromHpt make.hug . fst) evicted
+      unload (hscInterp hsc_env) hsc_env (linkable <$> Map.elems kept)
+      pure make {bcoCache = kept}
   where
-    (kept, evicted) = splitEvictions limit sorted
+    kept = Map.withoutKeys make.bcoCache (Set.fromList (fst <$> evicted))
+
+-- | If the tracked total size of 'MakeState.bcoCache' exceeds the given limit, unload the least recently used excess
+-- entries.
+evictBcoCache :: HscEnv -> Int -> MakeState -> IO MakeState
+evictBcoCache hsc_env limit make =
+  unloadEvicted hsc_env evicted make
+  where
+    (_, evicted) = splitEvictions limit sorted
 
     sorted = reverse (List.sortOn (lastAccess . snd) (Map.toList make.bcoCache))
+
+-- | Unconditionally evict the given set of modules from 'MakeState.bcoCache', regardless of recency or size, in
+-- response to an explicit eviction request from the instrumentation UI (see 'Internal.State.withState'). Modules not
+-- currently present in the cache are ignored.
+evictSpecific :: HscEnv -> Set Module -> MakeState -> IO MakeState
+evictSpecific hsc_env targets make
+  | Set.null targets = pure make
+  | otherwise = unloadEvicted hsc_env evicted make
+  where
+    evicted = Map.toList (Map.restrictKeys make.bcoCache targets)
