@@ -73,7 +73,8 @@ messageCompileStart _args target =
     , canDebug = True
     }
 
--- | Construct a grapesy message for a "compilation finished" event.
+-- | Construct a grapesy message for a "compilation finished" event. @ghc-worker@ has no execute-task result
+-- exfiltration story (see @GhcServer.Build.Execute@), so @result@ is always 'Nothing' here.
 messageCompileEnd :: Maybe TargetSpec -> Int32 -> [String] -> Event
 messageCompileEnd target exitCode output =
   CompileEnd
@@ -96,9 +97,9 @@ withInstrumentation ::
   GrpcHandler
 withInstrumentation instrChan status stateVar handler =
   GrpcHandler \ commandEnv argv -> do
-    state <- readMVar stateVar
     bracket_ (startJob status) (finishJob status) do
       result <- (handler.create hooks).run commandEnv argv
+      state <- readMVar stateVar
       stats <- mkStats state
       writeChan instrChan stats
       pure result
