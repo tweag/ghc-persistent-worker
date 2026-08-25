@@ -110,7 +110,6 @@ withInstrumentation ::
   GrpcHandler
 withInstrumentation instrChan status stateVar handler =
   GrpcHandler \ commandEnv argv -> do
-    state <- readMVar stateVar
     bracket_ (startJob status) (finishJob status) do
       requestId <- startRequest status
       let hooks = Hooks {
@@ -119,6 +118,7 @@ withInstrumentation instrChan status stateVar handler =
             events = eventsForRequest requestId (writeChan instrChan)
           }
       result <- (handler.create hooks).run commandEnv argv
+      state <- readMVar stateVar
       stats <- mkStats state
       writeChan instrChan stats
       pure result
