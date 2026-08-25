@@ -94,6 +94,7 @@ library
                       Internal.DynFlags.Update
                       Internal.Env
                       Internal.Error
+                      Internal.Evaluate
                       Internal.Json
                       Internal.Log
                       Internal.Metadata
@@ -121,6 +122,7 @@ library
                       file-io,
                       ghc,
                       ghc-boot,
+                      ghci,
                       hashable,
                       text,
                       time,
