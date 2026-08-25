@@ -18,6 +18,7 @@ import GHC.Debug.Stub (withGhcDebugUnix)
 import GHC (DynFlags (..), Ghc, ModIface, getSession)
 import GHC.Driver.DynFlags (GhcMode (..))
 import GHC.Driver.Monad (reflectGhc, reifyGhc)
+import GHC.Utils.Outputable (text)
 import GhcWorker.CompileResult (CompileResult (..), writeResult)
 import GhcWorker.Instrumentation (Hooks (..), InstrumentedHandler (..))
 import Internal.AbiHash (AbiHash (..), showAbiHash)
@@ -26,13 +27,17 @@ import Internal.Compile.Make (compileModuleWithDepsInHpt)
 import Internal.Debug (debugSocketPath)
 #endif
 import Internal.DynFlags (modifyGlobalFlags)
+import qualified Internal.Evaluate
 import Internal.Log (newLogger)
 import Internal.Metadata (computeMetadata)
 import Internal.Session (withGhcMakeModule, withGhcMakeSource)
 import Prelude hiding (log)
+import System.IO (stdout)
+import System.IO.Silently (hCapture)
+import System.OsPath.Extra (fromOsPath)
 import Types.Args (Args (..))
 import qualified Types.BuckArgs
-import Types.BuckArgs (BuckArgs, IsInterpreted (..), Mode (..), parseBuckArgs, toGhcArgs)
+import Types.BuckArgs (BuckArgs, IsInterpreted (..), Mode (..), checkModuleTarget, parseBuckArgs, toGhcArgs)
 import Types.Env (Env (..))
 import Types.FeatureFlags (FeatureFlags (..))
 import Types.Grpc (RequestArgs (..))
@@ -87,6 +92,23 @@ dispatch hooks env args =
     Just ModeMetadata -> do
       (success, target) <- computeMetadata env
       pure (if success then 0 else 1, target)
+    Just ModeEval -> do
+      mModTarget <- checkModuleTarget args
+      case mModTarget of
+        Just modTarget -> do
+          case args.expr of
+            Just expr -> do
+              result <- eval args.evalTargetName modTarget expr args.imports
+              case result of
+                Nothing -> pure (1, Just (TargetUnknown "test"))
+                Just isSuccessful ->
+                  pure (if isSuccessful then 0 else 1, Just (TargetUnknown "test"))
+            Nothing -> do
+              _ <- error "worker: no expr"
+              pure (1, Just (TargetUnknown "test"))
+        Nothing -> do
+          _ <- error "worker: No modTarget"
+          pure (1, Just (TargetUnknown "test"))
     Just m -> error ("worker: mode not implemented: " ++ show m)
     Nothing -> error "worker: no mode specified"
   where
@@ -102,6 +124,20 @@ dispatch hooks env args =
         withGhcMakeSource env (withTarget compileHpt . TargetSource)
 
     compileHpt = compileAndReadAbiHash CompManager (compileModuleWithDepsInHpt env.log) hooks args
+
+    eval mname modTarget stmt imports = do
+      case mname of
+        Nothing -> pure ()
+        Just name -> env.log.setTarget (TargetUnknown name)
+      (res_stdout, r) <-
+        hCapture [stdout] $
+          withGhcMakeModule Interpreted modTarget env
+            (\_ -> do
+              isSuccessful <- Internal.Evaluate.evaluate env (fromOsPath <$> args.homeUnit) modTarget imports stmt
+              pure (Just isSuccessful)
+            )
+      env.log.infoD (text res_stdout)
+      pure r
 
     withTarget f (target :: TargetSpec) =
       reifyGhc $ \session -> do
