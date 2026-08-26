@@ -15,6 +15,7 @@ import Types.Target (TargetSpec (..))
 import UI.ActiveTasks qualified as ActiveTasks
 import UI.BytecodeBrowser qualified as BytecodeBrowser
 import UI.LogViewer qualified as LogViewer
+import UI.OpLog qualified as OpLog
 import UI.TaskTree qualified as TaskTree
 import UI.Types (Name, WorkerId)
 import UI.Utils (formatBytes, formatPs, stripEscSeqs)
@@ -86,9 +87,11 @@ toBrowserEntries entries =
   ]
 
 -- | Draws the session panel: active tasks on top, then a horizontal split of the project task tree (left) and the
--- bytecode-cache browser (right, replacing the previous popup dialog), then the worker stats footer.
-draw :: Name -> UTCTime -> State -> Widget Name
-draw current now Session{..} =
+-- bytecode-cache browser (right, replacing the previous popup dialog), the worker stats footer, and finally the
+-- operational message log (see 'UI.OpLog'), capped to its 5 most recent entries and flexibly sized (no minimum
+-- height, growing up to that cap).
+draw :: Name -> UTCTime -> OpLog.State -> State -> Widget Name
+draw current now opLog Session{..} =
   borderWithLabel (str $ " GHC Persistent Worker  " ++ _title ++ " ") $
     vBox
       [ vLimitPercent 30 $ ActiveTasks.draw current now _activeTasks
@@ -100,6 +103,8 @@ draw current now Session{..} =
           ]
       , hBorder
       , drawStats (length _workers) (foldMap _stats _workers <> _finishedWorkerStats)
+      , hBorder
+      , OpLog.draw 5 opLog
       ]
 
 drawStats :: Int -> Stats -> Widget Name

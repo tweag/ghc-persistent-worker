@@ -16,6 +16,7 @@ executable instrument
     UI.BytecodeBrowser
     UI.GhcDebug
     UI.LogViewer
+    UI.OpLog
     UI.Session
     UI.SessionSelector
     UI.TaskTree

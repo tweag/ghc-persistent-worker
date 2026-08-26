@@ -10,7 +10,7 @@ import Control.Monad (filterM, forever, unless, void, when)
 import Data.Binary (decode)
 import Data.ByteString (fromStrict)
 import Data.Foldable (for_)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf)
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Text qualified as Text
@@ -255,16 +255,47 @@ cleanServerAction serverInfoRef eventChan = do
       writeBChan eventChan $
         UI.ProcessLog (Text.pack "error") (Text.pack "No tracked ghc-server project root to clean")
 
--- | The default exit-time finalizer, run via 'finally' around the whole UI session so it fires even when the app
--- exits via an exception, not just a clean @q@\/Esc quit. Disabled entirely by @--remain@. Cleans the tracked
--- server's @cache@\/@output@ directories (via the @Clean@ RPC, which requires the server to still be reachable --
--- hence running this /before/ killing it) and then kills the tracked process (if any) -- a no-op if this session
--- never started a server itself (see 'ServerInfo').
-finalizeServer :: Options -> IORef (Maybe ServerInfo) -> BChan UI.Event -> IO ()
-finalizeServer opts serverInfoRef eventChan =
+-- | The clean\/kill shutdown steps shared by 'finalizeServer' (the exception-safety-net path, which may run
+-- after Brick's event loop has already halted) and 'requestShutdown' (the live, quit-key-triggered path, which
+-- runs while Brick is still pumping events). Parameterized over the event-sending function so each caller can
+-- pick the semantics appropriate to when it runs: non-blocking 'notify' (safe post-halt, may silently drop) for
+-- 'finalizeServer', blocking 'dispatch' (guaranteed delivery, but only safe while something is still draining
+-- the channel) for 'requestShutdown'. A no-op when @--remain@ was passed.
+runSteps :: (UI.Event -> IO ()) -> Options -> IORef (Maybe ServerInfo) -> BChan UI.Event -> IO ()
+runSteps send opts serverInfoRef eventChan =
   unless opts.remain $ do
+    send (UI.OpLogMessage (Text.pack "Cleaning ghc-server cache/output directories"))
     cleanServerAction serverInfoRef eventChan
+    send (UI.OpLogMessage (Text.pack "Killing ghc-server"))
     killServerAction serverInfoRef eventChan
+
+-- | The default exit-time finalizer, run via 'finally' around the whole UI session so it fires even when the app
+-- exits via an exception, not just a clean @q@\/Esc quit. Cleans the tracked server's @cache@\/@output@
+-- directories and kills the tracked process, if any (see 'runSteps') -- unless 'requestShutdown' (the quit-key
+-- path) already did so, as tracked by 'finalizedRef', in which case this is a no-op: it exists purely as a
+-- safety net for abnormal exits (exceptions, signals) that bypass the quit key entirely. Uses non-blocking
+-- 'notify' throughout, since this can run after Brick's event loop has already halted, in which case nothing
+-- would ever drain a blocking 'dispatch'.
+finalizeServer :: Options -> IORef Bool -> IORef (Maybe ServerInfo) -> BChan UI.Event -> IO ()
+finalizeServer opts finalizedRef serverInfoRef eventChan = do
+  already <- readIORef finalizedRef
+  unless already $ runSteps (notify eventChan) opts serverInfoRef eventChan
+
+-- | Backs the quit key's '_shutdown' closure (see 'UI.requestQuit'): runs while Brick's event loop is still
+-- alive (the quit handler cleared the session list and dispatched a "Shutting down" message but did /not/ call
+-- 'halt'), so the clean\/kill steps (see 'runSteps') can use blocking 'dispatch' and have their progress genuinely
+-- rendered live -- if shutdown hangs, the last dispatched message stays visible on screen instead of the app
+-- just freezing silently. Forks its own thread so the UI's event loop keeps responding\/redrawing while this
+-- runs. Sets 'finalizedRef' first (guarding against a second quit-key press re-running this concurrently) so
+-- 'finalizeServer's fallback path skips redundant cleanup afterwards. Dispatches 'UI.ShutdownComplete' once done,
+-- which is what actually triggers 'halt'.
+requestShutdown :: Options -> IORef Bool -> IORef (Maybe ServerInfo) -> BChan UI.Event -> IO ()
+requestShutdown opts finalizedRef serverInfoRef eventChan = do
+  alreadyShuttingDown <- atomicModifyIORef' finalizedRef (\old -> (True, old))
+  unless alreadyShuttingDown $ void $ forkIO $ do
+    runSteps (dispatch eventChan) opts serverInfoRef eventChan
+    dispatch eventChan (UI.OpLogMessage (Text.pack "Shutdown complete"))
+    dispatch eventChan UI.ShutdownComplete
 
 -- | Read lines from a spawned ghc-server's stdout\/stderr handle until it closes (EOF or the process exits),
 -- dispatching each as a 'UI.ProcessLog' event tagged with the given stream name. When given an accumulator
@@ -296,6 +327,10 @@ main = do
   let instrSocket = instrSocketEnv <|> (if defaultUp then Just (defaultSocketPath cwd) else Nothing)
   eventChan <- newBChan 10
   serverInfoRef <- newIORef Nothing
+  -- Guards against 'finalizeServer' (the exception safety net) redundantly re-running the clean\/kill steps
+  -- after 'requestShutdown' (the quit-key path) already did, and against a second quit-key press re-triggering
+  -- 'requestShutdown' while the first invocation is still running.
+  finalizedRef <- newIORef False
   _ <- forkIO $ forever $ do
     time <- getCurrentTime
     writeBChan eventChan (UI.SetTime time)
@@ -331,6 +366,7 @@ main = do
             (killServerAction serverInfoRef eventChan)
             (restartServerAction serverInfoRef opts.serverExe eventChan)
             (cleanServerAction serverInfoRef eventChan)
+            (requestShutdown opts finalizedRef serverInfoRef eventChan)
         )
-        `finally` finalizeServer opts serverInfoRef eventChan
+        `finally` finalizeServer opts finalizedRef serverInfoRef eventChan
     vty.shutdown

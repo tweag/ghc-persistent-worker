@@ -48,6 +48,14 @@ taskSucceededAttr = attrName "taskSucceeded"
 taskFailedAttr :: AttrName
 taskFailedAttr = attrName "taskFailed"
 
+-- | Applied to the indicator prefix of an operational-log line (see 'UI.OpLog').
+opLogIndicatorAttr :: AttrName
+opLogIndicatorAttr = attrName "opLogIndicator"
+
+-- | Applied to the message text of an operational-log line (see 'UI.OpLog').
+opLogTextAttr :: AttrName
+opLogTextAttr = attrName "opLogText"
+
 -- | Suffix appended to a 'UI.TaskTree.ModuleRow' label once that module has been built successfully.
 builtMarker :: Text
 builtMarker = " \9989"

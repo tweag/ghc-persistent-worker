@@ -10,7 +10,7 @@ import Brick.Util (on)
 import Brick.Widgets.Border (borderWithLabel)
 import Brick.Widgets.Border.Style (unicodeRounded)
 import Brick.Widgets.Center (center)
-import Brick.Widgets.Core (joinBorders, modifyDefAttr, str, strWrap, vBox, withBorderStyle, (<+>))
+import Brick.Widgets.Core (hLimitPercent, joinBorders, modifyDefAttr, str, vBox, withBorderStyle, (<+>))
 import Brick.Widgets.Edit (editFocusedAttr)
 import Brick.Widgets.List (listSelectedAttr, listSelectedElement, listSelectedElementL, listSelectedFocusedAttr)
 import Control.Exception (handle)
@@ -46,6 +46,7 @@ import UI.ActiveTasks qualified as ActiveTasks
 import UI.BytecodeBrowser qualified as BytecodeBrowser
 import UI.GhcDebug (debug)
 import UI.LogViewer qualified as LogViewer
+import UI.OpLog qualified as OpLog
 import UI.Session qualified as Session
 import UI.SessionSelector qualified as SessionSelector
 import UI.TaskTree qualified as TaskTree
@@ -55,6 +56,8 @@ import UI.Types (
   canDebugAttr,
   disabledAttr,
   evictedAttr,
+  opLogIndicatorAttr,
+  opLogTextAttr,
   pendingEvictionAttr,
   taskFailedAttr,
   taskRunningAttr,
@@ -87,25 +90,18 @@ data Event
     -- dispatched into the current session's server-log viewer via 'logClient'.
     ProcessLog Text.Text Text.Text
   | -- | Dispatched by @Main@'s @startServer@ closure immediately upon being invoked (before forking the background
-    -- startup thread), carrying the project path text the user entered (empty means the current directory). Sets
-    -- 'serverStatus' so the main window's placeholder message reflects the in-progress startup instead of the
-    -- generic "waiting for first session" text.
+    -- startup thread), carrying the project path text the user entered (empty means the current directory).
+    -- Recorded via 'logOp' so the operational log reflects the in-progress startup.
     ServerStarting Text.Text
   | -- | Dispatched when a @ghc-server@ subprocess spawned by this client terminates with a failing exit code.
-    -- Carries the project path text and the process's captured stderr; replaces the startup message in the main
-    -- window with an error display.
+    -- Carries the project path text and the process's captured stderr; recorded via 'logOp'.
     ServerFailed Text.Text Text.Text
-
--- | Status of the most recent server-start request, driving the placeholder message shown in the main window
--- while no session is connected yet (see 'drawUI').
-data ServerStatus
-  = -- | No server-start request has ever been made in this session.
-    ServerIdle
-  | -- | A server-start request is in flight for the given project path (empty means "current directory").
-    ServerLaunching Text.Text
-  | -- | The most recent server-start request's spawned subprocess terminated with a failing exit code. Carries
-    -- the project path and the process's captured stderr.
-    ServerLaunchFailed Text.Text Text.Text
+  | -- | A generic operational message dispatched from outside 'EventM' (e.g. Main's background shutdown
+    -- sequence, see 'ShutdownComplete'), recorded via 'logOp'.
+    OpLogMessage Text.Text
+  | -- | Dispatched once the background shutdown sequence started by the quit key has finished (see Main's
+    -- 'requestShutdown'). Triggers the actual 'halt'.
+    ShutdownComplete
 
 -- | Input fields for the "start ghc-server" popup (the capital-@S@ key binding).
 data ServeInput = ServeInput
@@ -137,9 +133,15 @@ data State = State
   , -- | Removes the tracked @ghc-server@ project's @cache@ and @output@ directories (the capital-@C@ key binding).
     -- Supplied by @Main@.
     _cleanServer :: IO ()
-  , -- | Status of the most recent server-start request; drives the placeholder message shown in the main window
-    -- while no session is connected (see 'drawUI'). Updated by the 'ServerStarting'\/'ServerFailed' events.
-    _serverStatus :: ServerStatus
+  , -- | Runs the background shutdown sequence (clean\/kill the tracked @ghc-server@ instance, if any) and, once
+    -- finished, dispatches 'ShutdownComplete' to actually 'halt' the app. Non-blocking: forks its own background
+    -- thread and returns immediately, so the quit key ('requestQuit') can clear the session list and log the
+    -- "Shutting down" message without freezing the UI while shutdown proceeds. Supplied by @Main@.
+    _shutdown :: IO ()
+  , -- | Operational message log (see 'UI.OpLog'): high-visibility status\/lifecycle messages, shown centered while
+    -- no session is connected (see 'drawUI') and in a pane below the stats footer once one is (see
+    -- 'UI.Session.draw'). Updated via 'logOp'.
+    _opLog :: OpLog.State
   }
 
 makeLenses ''State
@@ -157,8 +159,8 @@ ghcOptionsLens =
     (\opts s -> opts{extraGhcOptions = s})
     . packed
 
-initialState :: (Text.Text -> [String] -> IO ()) -> IO () -> IO () -> IO () -> State
-initialState onStartServer onKill onRestart onClean =
+initialState :: (Text.Text -> [String] -> IO ()) -> IO () -> IO () -> IO () -> IO () -> State
+initialState onStartServer onKill onRestart onClean onShutdown =
   State
     { _sessions = SessionSelector.initialState
     , _options = newForm optionFields defaultOptions
@@ -169,7 +171,8 @@ initialState onStartServer onKill onRestart onClean =
     , _killServer = onKill
     , _restartServer = onRestart
     , _cleanServer = onClean
-    , _serverStatus = ServerIdle
+    , _shutdown = onShutdown
+    , _opLog = OpLog.addEntry (Text.pack "Waiting for first session") OpLog.initialState
     }
 
 optionFields :: [Options -> FormFieldState Options Event Name]
@@ -197,8 +200,8 @@ drawUI State{..} =
           [ joinBorders $
               withBorderStyle unicodeRounded $
                 maybe
-                  (borderWithLabel (str " GHC Persistent Worker ") $ center $ strWrap (statusText _serverStatus))
-                  (Session.draw _currentFocus _currentTime)
+                  (borderWithLabel (str " GHC Persistent Worker ") $ center $ hLimitPercent 50 $ OpLog.draw 5 _opLog)
+                  (Session.draw _currentFocus _currentTime _opLog)
                   session
           , modifyDefAttr (`V.withStyle` V.italic) $
               str
@@ -208,14 +211,8 @@ drawUI State{..} =
  where
   session = snd . snd <$> listSelectedElement _sessions
 
--- | Placeholder text shown in the main window while no session is connected, reflecting the most recent
--- server-start request's status (see 'ServerStatus').
-statusText :: ServerStatus -> String
-statusText ServerIdle = "Waiting for first session"
-statusText (ServerLaunching path) = "Starting ghc-server in " ++ describePath path
-statusText (ServerLaunchFailed path stderrText) =
-  "Failed to start ghc-server in " ++ describePath path ++ ":\n\n" ++ Text.unpack stderrText
-
+-- | Renders a project path as it should appear in an operational-log message, substituting a description for an
+-- empty path (meaning "use the current directory").
 describePath :: Text.Text -> String
 describePath path
   | Text.null path = "the current directory"
@@ -248,10 +245,33 @@ logClient level message = do
   currentSession . Session.logViewer %=
     LogViewer.addEntry LogViewer.Entry {target = Text.pack "client", level, message, timestampMs = ms}
 
+-- | Records a high-visibility operational message (see 'UI.OpLog'): appended to the top-level operational log
+-- (always) and, when a session is currently connected, mirrored into that session's regular server-log viewer
+-- (tagged @"operational"@) as well, so it remains visible via the 'L' key too.
+logOp :: Text.Text -> EventM Name State ()
+logOp message = do
+  opLog %= OpLog.addEntry message
+  ms <- liftIO $ round . (* 1000) <$> getPOSIXTime
+  currentSession . Session.logViewer %=
+    LogViewer.addEntry LogViewer.Entry {target = Text.pack "operational", level = Text.pack "info", message, timestampMs = ms}
+
 beep :: EventM Name State ()
 beep = do
   vty <- getVtyHandle
   liftIO $ V.ringTerminalBell $ V.outputIface vty
+
+-- | Backs the quit keys ('q'\/Esc). Per the task's requirement, switches back to the view shown on start --
+-- clearing the session list, which makes 'drawUI' fall back to the operational-log placeholder -- \'before
+-- anything else\', then logs and kicks off the background shutdown sequence (see the '_shutdown' field\/Main's
+-- @requestShutdown@) rather than halting immediately: that sequence dispatches 'OpLogMessage'\/'ShutdownComplete'
+-- events while this app's event loop is still running, so its progress remains visible (and, if it hangs,
+-- diagnosable) instead of freezing on whatever was on screen when 'q' was pressed.
+requestQuit :: EventM Name State ()
+requestQuit = do
+  sessions .= SessionSelector.initialState
+  logOp (Text.pack "Shutting down")
+  action <- use shutdown
+  liftIO action
 
 -- | Runs 'handler' against the currently selected active-task target, or beeps if none is selected. Shared by the
 -- 'd' (debug) and 'r' (rebuild) key handlers.
@@ -317,8 +337,12 @@ handleEvent (AppEvent (RequestServe path opts)) = do
   liftIO $ action path (words (Text.unpack opts))
 handleEvent (AppEvent (ProcessLog stream line)) =
   logClient (Text.pack "info") (stream <> Text.pack ": " <> line)
-handleEvent (AppEvent (ServerStarting path)) = serverStatus .= ServerLaunching path
-handleEvent (AppEvent (ServerFailed path stderrText)) = serverStatus .= ServerLaunchFailed path stderrText
+handleEvent (AppEvent (ServerStarting path)) =
+  logOp (Text.pack "Starting ghc-server in " <> Text.pack (describePath path))
+handleEvent (AppEvent (ServerFailed path stderrText)) =
+  logOp (Text.pack "Failed to start ghc-server in " <> Text.pack (describePath path) <> Text.pack ": " <> stderrText)
+handleEvent (AppEvent (OpLogMessage message)) = logOp message
+handleEvent (AppEvent ShutdownComplete) = halt
 handleEvent (VtyEvent evt) = do
   current <- use currentFocus
   case current of
@@ -360,8 +384,8 @@ handleEvent (VtyEvent evt) = do
         V.EvKey (V.KChar 'L') [] -> hide
         _ -> handleListEventOf (currentSession . Session.logViewer . LogViewer.rowsLens) evt
     _ -> case evt of
-      V.EvKey V.KEsc [] -> halt
-      V.EvKey (V.KChar 'q') [] -> halt
+      V.EvKey V.KEsc [] -> requestQuit
+      V.EvKey (V.KChar 'q') [] -> requestQuit
       V.EvKey (V.KChar 's') [] -> do
         currentFocus .= SessionSelector
       V.EvKey (V.KChar 'o') [] -> do
@@ -464,6 +488,8 @@ app =
             , (taskRunningAttr, V.defAttr `V.withForeColor` yellow)
             , (taskSucceededAttr, V.defAttr `V.withForeColor` green)
             , (taskFailedAttr, V.defAttr `V.withForeColor` red)
+            , (opLogIndicatorAttr, V.withStyle (V.defAttr `V.withForeColor` green) V.bold)
+            , (opLogTextAttr, V.defAttr `V.withForeColor` brightWhite)
             ]
     , appChooseCursor = showFirstCursor
     }
