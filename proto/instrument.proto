@@ -16,8 +16,34 @@ message RebuildRequest {
   string target = 1;
 }
 
+message BcoCacheEntry {
+  string unit_id = 1;
+  string module_name = 2;
+  int64 size = 3;
+  int64 last_access = 4;
+  // Whether the module is currently present in the worker's loader state (home package table), i.e. not evicted.
+  bool resident = 5;
+  // Whether the module has been requested for eviction but the request hasn't been applied yet (see
+  // 'Types.State.Make.pendingEvictions').
+  bool pending_eviction = 6;
+}
+
+message BytecodeState {
+  repeated BcoCacheEntry entries = 1;
+}
+
+message EvictBytecodeRequest {
+  string unit_id = 1;
+  string module_name = 2;
+}
+
 service Instrument {
   rpc NotifyMe(Empty) returns (stream Event) {};
   rpc SetOptions(Options) returns (Empty) {};
   rpc TriggerRebuild(RebuildRequest) returns (Empty) {};
+  // Execute the `main` binding of every module in the given unit (target text is a bare unit name), in
+  // parallel, skipping modules that don't export `main`. Fire-and-forget, same semantics as TriggerRebuild.
+  rpc TriggerExecute(RebuildRequest) returns (Empty) {};
+  rpc GetBytecodeState(Empty) returns (BytecodeState) {};
+  rpc EvictBytecode(EvictBytecodeRequest) returns (Empty) {};
 }

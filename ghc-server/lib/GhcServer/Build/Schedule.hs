@@ -12,6 +12,7 @@ module GhcServer.Build.Schedule where
 
 import Control.Applicative ((<|>))
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import Data.Maybe (fromMaybe)
@@ -53,6 +54,13 @@ data TaskKey (p :: Phase) where
   PendingSource :: UnitName -> OsPath -> TaskKey 'Pending
   -- | Compile step for a module within a unit.  Active\/completed tasks only.
   ResolvedModule :: UnitName -> ModuleName -> TaskKey 'Resolved
+  -- | Execute step for a source file within a unit.  Pending pool only.  Resolves to
+  -- 'ExecuteModule' once the module's compile task ('ResolvedModule') is known, which
+  -- 'ExecuteModule' depends on transitively via the resolution's pending-dep set.
+  PendingExecute :: UnitName -> OsPath -> TaskKey 'Pending
+  -- | Execute step for a module within a unit.  Active\/completed tasks only.  Depends on
+  -- the corresponding 'ResolvedModule' compile task.
+  ExecuteModule :: UnitName -> ModuleName -> TaskKey 'Resolved
 
 deriving stock instance Show (TaskKey p)
 deriving stock instance Eq (TaskKey p)
@@ -62,12 +70,18 @@ instance Ord (TaskKey 'Pending) where
   compare (MetaTask _) _ = LT
   compare _ (MetaTask _) = GT
   compare (PendingSource u1 p1) (PendingSource u2 p2) = compare (u1, p1) (u2, p2)
+  compare (PendingSource _ _) _ = LT
+  compare _ (PendingSource _ _) = GT
+  compare (PendingExecute u1 p1) (PendingExecute u2 p2) = compare (u1, p1) (u2, p2)
 
 instance Ord (TaskKey 'Resolved) where
   compare (MetaTask a) (MetaTask b) = compare a b
   compare (MetaTask _) _ = LT
   compare _ (MetaTask _) = GT
   compare (ResolvedModule u1 m1) (ResolvedModule u2 m2) = compare (u1, m1) (u2, m2)
+  compare (ResolvedModule _ _) _ = LT
+  compare _ (ResolvedModule _ _) = GT
+  compare (ExecuteModule u1 m1) (ExecuteModule u2 m2) = compare (u1, m1) (u2, m2)
 
 -- | Per-request flags carried by every build task.
 --
@@ -133,6 +147,25 @@ compileTasksFromSources name rebuild isEnabled =
         key = PendingSource name src,
         deps = Set.singleton (MetaTask name),
         enabled = isEnabled,
+        value = BuildStatus {rebuild, cached = False}
+      }
+
+-- | Create pending execute tasks from a unit's source files.
+--
+-- Each task depends only on its unit's metadata task at creation time; the dependency on the
+-- module's own compile task ('ResolvedModule') is added later at promotion time via the pending-dep
+-- set produced by 'resolutionsFromModuleMap', mirroring 'compileTasksFromSources'\/'PendingSource'.
+--
+-- Always enabled: an execute request implies both compiling and running the selected module(s).
+executeTasksFromSources :: UnitName -> Bool -> [OsPath] -> [Task TaskKey 'Pending BuildStatus]
+executeTasksFromSources name rebuild =
+  map mkTask
+  where
+    mkTask src =
+      Task {
+        key = PendingExecute name src,
+        deps = Set.singleton (MetaTask name),
+        enabled = True,
         value = BuildStatus {rebuild, cached = False}
       }
 
@@ -242,6 +275,24 @@ resolveFromCachedUnit name outputDir cu =
     jsonFsVal :: JsonFs a -> a
     jsonFsVal (JsonFs a) = a
 
+-- | Extension state threaded through the scheduler's @ext@ parameter.
+--
+-- Accumulates the module map across metadata completion events so that later
+-- units can resolve cross-unit dependencies against earlier units' modules.
+-- Each entry maps a 'ModuleKey' to its scheduler identity (@'TaskKey' 'Pending'@),
+-- direct deps, and @.dyn_hi@ path.
+data BuildExt =
+  BuildExt {
+    -- | Unified module map: scheduler identity, direct deps, and interface path per module.
+    -- Built incrementally as each unit's resolutions are computed.
+    moduleMap :: Map ModuleKey ModuleInfo
+  }
+
+-- | Initial (empty) 'BuildExt'.
+emptyBuildExt :: BuildExt
+emptyBuildExt =
+  BuildExt {moduleMap = Map.empty}
+
 -- | Assemble deduplicated, topologically sorted 'CachedDeps' for a module
 -- from the full module map.
 --
@@ -269,32 +320,42 @@ buildModuleCachedDeps allModules target =
               (visited'', childDeps) = go visited' (Set.toList info.deps)
               (visited''', siblingDeps) = go visited'' ks
             in
-              (visited''', childDeps ++ [mkDep k] ++ siblingDeps)
+              (visited''', childDeps ++ [mkDep k info] ++ siblingDeps)
       where
         visited' = Set.insert k visited
 
-    mkDep key =
+    mkDep key info =
       CachedDep {
         name = JsonFs key.name,
-        package = JsonFs (unitId key.unit)
+        package = JsonFs (unitId key.unit),
+        interfaces = info.hiPath :| []
       }
 
 -- | Derive scheduler 'Resolutions' from a module map.
 --
--- Maps each pending key to a resolved key with direct module-level
--- dependencies.  Dependencies are resolved by looking up each dep's
--- 'ModuleKey' in the combined (prior + new) module map.
+-- Maps each pending compile key to a resolved key with direct module-level
+-- dependencies, and each pending execute key to its 'ExecuteModule' resolution,
+-- which depends on the module's own compile task ('ResolvedModule') via the
+-- pending-dep set (resolved transitively by the scheduler's promotion machinery).
 resolutionsFromModuleMap ::
   Map ModuleKey ModuleInfo ->
   Map ModuleKey ModuleInfo ->
   Resolutions
 resolutionsFromModuleMap priorModules newModules =
-  Map.fromList
-    [ (info.task, (ResolvedModule key.unit key.name, BuildStatus {rebuild = False, cached = False}, depTasks info))
-    | (key, info) <- Map.toList newModules
-    ]
+  Map.fromList (compileEntries ++ executeEntries)
   where
     allModules = Map.union newModules priorModules
+
+    compileEntries =
+      [ (info.task, (ResolvedModule key.unit key.name, BuildStatus {rebuild = False, cached = False}, depTasks info))
+      | (key, info) <- Map.toList newModules
+      ]
+
+    executeEntries =
+      [ (PendingExecute key.unit src, (ExecuteModule key.unit key.name, BuildStatus {rebuild = False, cached = False}, Set.singleton info.task))
+      | (key, info) <- Map.toList newModules
+      , PendingSource _ src <- [info.task]
+      ]
 
     depTasks :: ModuleInfo -> Set (TaskKey 'Pending)
     depTasks info =

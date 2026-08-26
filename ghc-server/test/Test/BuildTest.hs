@@ -1,4 +1,5 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE OverloadedStrings #-}
 -- | End-to-end tests for the standalone GHC server build pipeline.
 --
 -- Creates synthetic multi-unit projects in temporary directories and builds
@@ -6,7 +7,7 @@
 module Test.BuildTest where
 
 import Control.Concurrent.Async (cancel)
-import Control.Concurrent.MVar (MVar, readMVar)
+import Control.Concurrent.MVar (MVar, newMVar, readMVar)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Aeson (encode)
 import qualified Data.ByteString.Lazy as LBS
@@ -35,6 +36,9 @@ import GhcServer.Data.BuildEvent (BuildEvent (..), BuildEvents, newBuildEvents, 
 import GhcServer.Data.Request (ScheduleRequest (..), UnitRequest (..))
 import GhcServer.Data.Unit (ClientModule (..), Project (..), Unit (..), UnitCache (..), UnitName (..))
 import GhcServer.Data.UnitConfig (UnitConfig (..))
+import GhcServer.Build.Execute (executeModuleTask)
+import GhcServer.Build.Schedule (emptyBuildExt)
+import GhcServer.Scheduler (TaskResult (..))
 import GhcServer.Log (newLogger)
 import GhcServer.Path (osPath)
 import GhcServer.Project (discoverProject)
@@ -104,6 +108,7 @@ newBuildEnv :: TestProject -> MVar WorkerState -> IO (BuildEnv, BuildEvents)
 newBuildEnv tp stateVar = do
   log <- newLogger False
   events <- newBuildEvents
+  extDepsDb <- newMVar Nothing
   pure (BuildEnv {
     baseArgs = emptyArgs Map.empty,
     projectRoot = tp.rootOs,
@@ -112,7 +117,9 @@ newBuildEnv tp stateVar = do
     stateVar,
     project = tp.project,
     log,
-    events
+    events,
+    instrChan = Nothing,
+    extDepsDb
   }, events)
 
 -- ---------------------------------------------------------------------------
@@ -1232,6 +1239,107 @@ test_cacheTransitiveMultipleRoots =
 -- Top-level test tree
 -- ---------------------------------------------------------------------------
 
+-- ---------------------------------------------------------------------------
+-- Test group: Execute module (@x@ key / 'GhcServer.Build.Execute.executeModule')
+-- ---------------------------------------------------------------------------
+
+-- | Project with a single unit whose module exports @main@, used to regression-test
+-- 'GhcServer.Build.Execute.executeModule' -- specifically, that it recompiles the module
+-- to bytecode before running @main@, rather than relying on a stale object-code HPT entry
+-- from a prior plain compile (which fails with \"Cannot add module ... to context: not interpreted\").
+createExecProject :: FilePath -> IO ()
+createExecProject root = do
+  createDirectoryIfMissing True (root ++ "/unit0")
+  writeUnitConfig root "unit0" UnitConfig {deps = [], args = baseGhcArgs}
+  writeProjectFile root "unit0/Main.hs" $ unlines
+    [ "module Main where"
+    , ""
+    , "main :: IO ()"
+    , "main = putStrLn \"hello from execute test\""
+    ]
+
+execProjectTest :: TestName -> (TestProject -> TestT IO ()) -> TestTree
+execProjectTest =
+  projectTest "ghc-server-exec" createExecProject
+
+-- | Regression test for the \"not interpreted\" execute failure: compile the module as
+-- object code (mirroring a normal build / the UI's @b@ key), then execute it (mirroring
+-- the UI's @x@ key) and assert it actually runs @main@ successfully rather than failing.
+test_executeAfterCompile :: TestTree
+test_executeAfterCompile =
+  execProjectTest "execute module after plain compile succeeds" \ tp -> do
+    (result, _) <- runFreshAll tp
+    assertSuccess "compile" result
+    stateVar <- liftIO newBuildState
+    (buildEnv, _) <- liftIO (newBuildEnv tp stateVar)
+    let name = UnitName "unit0"
+    mresult <- liftIO (executeModuleTask buildEnv emptyBuildExt name (mkModuleName "Main"))
+    annotate ("executeModuleTask result: " ++ show mresult)
+    case mresult of
+      Just (TaskSuccess Nothing) -> pure ()
+      other -> fail ("Expected Just (TaskSuccess Nothing), got " ++ show other)
+
+-- | Project with a single unit whose module's @main@ has type @IO String@, used to regression-test
+-- 'Internal.Evaluate.classifyMainResultType'\'s 'ResultString' branch and 'GhcServer.Build.Execute.executeModule'\'s
+-- propagation of the returned string as a build-task result.
+createExecStringProject :: FilePath -> IO ()
+createExecStringProject root = do
+  createDirectoryIfMissing True (root ++ "/unit0")
+  writeUnitConfig root "unit0" UnitConfig {deps = [], args = baseGhcArgs}
+  writeProjectFile root "unit0/Main.hs" $ unlines
+    [ "module Main where"
+    , ""
+    , "main :: IO String"
+    , "main = pure \"hello from IO String main\""
+    ]
+
+execStringProjectTest :: TestName -> (TestProject -> TestT IO ()) -> TestTree
+execStringProjectTest =
+  projectTest "ghc-server-exec-string" createExecStringProject
+
+-- | Exercises 'Internal.Evaluate.classifyMainResultType'\'s 'ResultString' branch end-to-end: a module whose
+-- @main :: IO String@ is compiled then executed, and its return value must be exfiltrated verbatim as the
+-- companion 'String' returned by 'executeModule' (rather than merely succeeding, which the ordinary
+-- @main :: IO ()@ case would also do).
+test_executeStringMain :: TestTree
+test_executeStringMain =
+  execStringProjectTest "execute module with main :: IO String succeeds" \ tp -> do
+    (result, _) <- runFreshAll tp
+    assertSuccess "compile" result
+    stateVar <- liftIO newBuildState
+    (buildEnv, _) <- liftIO (newBuildEnv tp stateVar)
+    let name = UnitName "unit0"
+    mresult <- liftIO (executeModuleTask buildEnv emptyBuildExt name (mkModuleName "Main"))
+    annotate ("executeModuleTask result: " ++ show mresult)
+    case mresult of
+      Just (TaskSuccess (Just "hello from IO String main")) -> pure ()
+      other -> fail ("Expected Just (TaskSuccess (Just \"hello from IO String main\")), got " ++ show other)
+
+test_executeModule :: TestTree
+test_executeModule =
+  dependentTestGroup "Execute module" AllFinish
+    [ test_executeAfterCompile
+    , test_executeStringMain
+    , test_executeNonexistentModuleFails
+    ]
+
+-- | Regression test for the previously-conflated "no main" \/ "session setup failed" outcomes of
+-- 'executeModuleTask': targeting a module that does not exist in the unit at all must surface as 'TaskFailed',
+-- not silently as a skip ('Nothing'), which is reserved for the genuinely no-@main@ case.
+test_executeNonexistentModuleFails :: TestTree
+test_executeNonexistentModuleFails =
+  execProjectTest "execute nonexistent module surfaces a failure, not a silent skip" \ tp -> do
+    (result, _) <- runFreshAll tp
+    assertSuccess "compile" result
+    stateVar <- liftIO newBuildState
+    (buildEnv, _) <- liftIO (newBuildEnv tp stateVar)
+    let name = UnitName "unit0"
+    mresult <- liftIO (executeModuleTask buildEnv emptyBuildExt name (mkModuleName "DoesNotExist"))
+    annotate ("executeModuleTask result: " ++ show mresult)
+    case mresult of
+      Just (TaskFailed _) -> pure ()
+      other -> fail ("Expected Just (TaskFailed _), got " ++ show other)
+
 test_serverBuild :: TestTree
 test_serverBuild =
   dependentTestGroup "GhcServer.Build" AllFinish
@@ -1244,5 +1352,6 @@ test_serverBuild =
     , test_implicitDepCompileSkip
     , test_hptAssembly
     , test_transitiveDepRestore
+    , test_executeModule
     ]
 

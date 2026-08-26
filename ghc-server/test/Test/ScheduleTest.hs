@@ -243,7 +243,10 @@ test_resolveCachedNoDeps =
         cachedUnit = mkCachedUnit [("A", mkCachedModule "u0/A.hs" [] [])]
       }
       result = runResolve spec
-    Map.size result === 1
+    -- Every module contributes both a compile ('ResolvedModule') and an execute ('ExecuteModule')
+    -- resolution entry (keyed by 'PendingSource'\/'PendingExecute' respectively), so the map has
+    -- twice as many entries as there are modules.
+    Map.size result === 2
     case lookupResolution "u0" "u0/A.hs" result of
       Just (ResolvedModule name modName, BuildStatus {}, deps) -> do
         name === UnitName "u0"
@@ -262,7 +265,8 @@ test_resolveCachedIntraDep =
           ]
       }
       result = runResolve spec
-    Map.size result === 2
+    -- 2 modules x (compile + execute) entries each = 4.
+    Map.size result === 4
     case lookupResolution "u0" "u0/B.hs" result of
       Just (_, _, deps) -> deps === Set.singleton (pk "u0" "u0/A.hs")
       _ -> fail "expected resolution for B"
@@ -326,7 +330,8 @@ test_resolveCachedFromBuildPlan =
         }
       }
       result = runResolve spec
-    Map.size result === 1
+    -- 1 module x (compile + execute) entries = 2.
+    Map.size result === 2
 
 test_resolveCachedEmpty :: TestTree
 test_resolveCachedEmpty =

@@ -16,6 +16,12 @@ data UnitRequest =
   |
   -- | Run metadata and compile all modules.
   UnitAll
+  |
+  -- | Run metadata, compile, and execute @main@ for all modules.
+  UnitExecute
+  |
+  -- | Run metadata, compile, and execute @main@ for specific modules.
+  UnitExecuteModules [ClientModule]
   deriving stock (Show, Eq)
 
 -- | The sequence of build steps requested by the user.

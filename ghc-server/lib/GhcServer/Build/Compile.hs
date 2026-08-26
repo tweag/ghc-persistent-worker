@@ -6,7 +6,7 @@ import GHC.Unit.Types (stringToUnit)
 import GhcServer.Cache (loadHomeUnitCache)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
-import GhcServer.Log (withBuildLog)
+import GhcServer.Log (instrumentLogger, withBuildLog)
 import Internal.Compile.Make (compileModuleWithDepsInHpt)
 import Internal.Session (withGhcMakeModule)
 import Prelude hiding (log)
@@ -44,8 +44,9 @@ compileSingleModule buildEnv name modName cachedDeps =
       let modTmpDir = buildEnv.tmpDir </> toOsPath name.string </> toOsPath (moduleNameString modName)
       createDirectoryIfMissing True modTmpDir
       cachedUnit <- loadHomeUnitCache unit.cache
-      withBuildLog \ logger -> do
+      withBuildLog \ rawLogger -> do
         let
+          logger = instrumentLogger buildEnv.instrChan (name.string ++ ":" ++ moduleNameString modName) rawLogger
           args = buildEnv.baseArgs {
             tempDir = Just modTmpDir,
             homeUnit = cachedUnit,

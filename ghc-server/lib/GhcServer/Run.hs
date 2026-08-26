@@ -2,18 +2,24 @@
 -- Listens on a Unix socket and accepts build schedule requests via the Worker gRPC protocol.
 module GhcServer.Run where
 
-import Common.Grpc (fromGrpcHandler, runGrpcServer)
+import Common.Grpc (runGrpcServer)
 import Control.Applicative (many, optional, (<|>))
+import Control.Concurrent.Async (async)
+import Control.Monad (void)
 import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Except (runExceptT)
+import Control.Monad.Trans.Except (ExceptT, runExceptT)
+import GhcServer.Cabal.Setup (cabalSetup)
+import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.Config (ServerConfig (..))
-import GhcServer.Handler (serverHandler)
-import GhcServer.Path (socketDirName, socketPath)
+import GhcServer.Grpc (instrumentMethods)
+import GhcServer.Handler (ServerContext (..), serverContext, serverMethods)
+import GhcServer.Path (instrumentSocketPath, socketDirName, socketPath)
 import Options.Applicative (
   Parser,
   ParserInfo,
   argument,
   auto,
+  command,
   eitherReader,
   execParser,
   fullDesc,
@@ -27,14 +33,17 @@ import Options.Applicative (
   progDesc,
   short,
   str,
+  strArgument,
+  subparser,
   switch,
   value,
   (<**>),
   )
-import System.Directory.OsPath (createDirectoryIfMissing)
+import Options.Applicative.Builder (allPositional)
+import System.Directory.OsPath (canonicalizePath, createDirectoryIfMissing, getCurrentDirectory)
 import System.Exit (die)
 import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
-import System.OsPath (encodeUtf, (</>))
+import System.OsPath (OsPath, encodeUtf, (</>))
 import System.OsPath.Extra (fromOsPath)
 import Types.FeatureFlags (FeatureFlag (..), FeatureFlags (..), defaultFeatureFlags, parseByteSize)
 
@@ -55,40 +64,58 @@ featureFlagsParser =
         (fixedNodesCache, FeatureFixedNodesCache) -> flags {fixedNodesCache}
         (flagParser, FeatureFlagParser) -> flags {flagParser}
         (concurrentInitUnits, FeatureConcurrentInitUnits) -> flags {concurrentInitUnits}
-        (instrument, FeatureInstrument) -> flags {instrument}
         (incrementalBuildPlan, FeatureIncrementalBuildPlan) -> flags {incrementalBuildPlan}
         (lazyByteCode, FeatureLazyByteCode) -> flags {lazyByteCode}
+        (instrument, FeatureInstrument) -> flags {instrument}
 
     flagOption v = do
       flag <- eitherReader \case
         "fixed-nodes-cache" -> Right FeatureFixedNodesCache
         "flag-parser" -> Right FeatureFlagParser
         "concurrent-init-units" -> Right FeatureConcurrentInitUnits
-        "instrument" -> Right FeatureInstrument
         "incremental-build-plan" -> Right FeatureIncrementalBuildPlan
         "lazy-byte-code" -> Right FeatureLazyByteCode
+        "instrument" -> Right FeatureInstrument
         flag -> Left ("Invalid feature flag: " ++ flag)
       pure (v, flag)
 
--- | Parser for '--max-bytecode', bounding the loader state size.
+-- | Parser for '--max-bytecode', bounding the lazily-loaded bytecode cache (see 'FeatureFlags.lazyByteCodeCacheLimit').
 maxBytecodeParser :: Parser (Maybe Int)
 maxBytecodeParser =
   optional (
     option (eitherReader parseByteSize) (
       long "max-bytecode"
-      <> metavar "NUM[k|M|G]"
-      <> help "Maximum number of BCOs in the loader state (enables eviction)"
+      <> metavar "NUM[M|G]"
+      <> help "Upper bound on the tracked size of lazily-loaded bytecode kept in the HPT (enables eviction)"
       )
     )
 
+data ExecMode =
+  ExecServer RawServerConfig
+  |
+  ExecCabalSetup [String]
+  deriving stock (Show)
+
+-- | Server CLI config prior to resolving the project root, which defaults to the current directory when not given
+-- explicitly (see 'resolveServerConfig').
+data RawServerConfig =
+  RawServerConfig {
+    projectRootArg :: Maybe OsPath,
+    maxJobs :: Int,
+    verbose :: Bool,
+    jsonConfig :: Bool,
+    features :: FeatureFlags
+  }
+  deriving stock (Show)
+
 -- | CLI argument parser for the server.
-serverConfigParser :: Parser ServerConfig
+serverConfigParser :: Parser RawServerConfig
 serverConfigParser =
-  ServerConfig
-    <$> argument readOsPath (metavar "PROJECT_ROOT" <> help "Path to the project root directory")
+  RawServerConfig
+    <$> optional (argument readOsPath (metavar "PROJECT_ROOT" <> help "Path to the project root directory (defaults to the current directory)"))
     <*> option auto (long "jobs" <> short 'j' <> metavar "N" <> help "Maximum concurrent jobs" <> value 4)
     <*> switch (long "verbose" <> short 'v' <> help "Print the build log on success")
-    <*> switch (long "cabal" <> help "Use .cabal file for project discovery")
+    <*> switch (long "json-config" <> help "Force unit.json-based project discovery even if a .cabal file is present")
     <*> featureFlagsParser
   where
     readOsPath = str >>= \ s ->
@@ -96,26 +123,65 @@ serverConfigParser =
         Right p -> pure p
         Left e -> fail ("Invalid path: " ++ show e)
 
-serverParserInfo :: ParserInfo ServerConfig
-serverParserInfo =
-  info (serverConfigParser <**> helper)
-    (fullDesc <> progDesc "Standalone GHC build server" <> header "ghc-server - worker without Buck")
+-- | Resolve a 'RawServerConfig' into a 'ServerConfig', defaulting the project root to the current directory when
+-- not given explicitly.
+resolveServerConfig :: RawServerConfig -> IO ServerConfig
+resolveServerConfig raw = do
+  -- Canonicalize unconditionally: the project root is used verbatim to compute source paths recorded in
+  -- on-disk caches ('cached_unit.json', 'dep_units.json') and to key in-memory scheduler task IDs
+  -- ('GhcServer.Build.Schedule.PendingSource'). Two server invocations pointed at the same physical directory
+  -- via different (both valid) path spellings would otherwise produce syntactically different 'OsPath' values
+  -- for the same file, causing cache entries written by one invocation to silently fail to resolve pending
+  -- compile tasks submitted to another -- such an unresolved pending task is never promoted, dispatched, or
+  -- reported as a failure, so the request completes as a silent, incorrect "success".
+  projectRoot <- maybe getCurrentDirectory pure raw.projectRootArg >>= canonicalizePath
+  pure ServerConfig {
+    projectRoot,
+    maxJobs = raw.maxJobs,
+    verbose = raw.verbose,
+    jsonConfig = raw.jsonConfig,
+    features = raw.features
+  }
 
--- | Run the server: parse CLI args, start the gRPC server on a Unix socket.
+cabalSetupParser :: Parser [String]
+cabalSetupParser =
+  subparser $
+  command "act-as-setup" (info (many (strArgument mempty)) (allPositional <> progDesc "cabal act-as-setup proxy"))
+
+execModeParser :: Parser ExecMode
+execModeParser =
+  (ExecCabalSetup <$> cabalSetupParser)
+  <|>
+  (ExecServer <$> serverConfigParser)
+
+serverParserInfo :: ParserInfo ExecMode
+serverParserInfo =
+  info (execModeParser <**> helper)
+    (fullDesc <> progDesc "Standalone GHC build server" <> header "ghc-server")
+
+-- | Run the server: parse CLI args, start the gRPC server on a Unix socket. If the @instrument@ feature is
+-- enabled, also starts the Instrument gRPC service on a second socket, mirroring 'ghc-worker'\'s behavior.
 runServer :: IO ()
 runServer = do
   hSetBuffering stdout LineBuffering
   hSetBuffering stderr LineBuffering
-  config <- execParser serverParserInfo
-  runExceptT (server config) >>= \case
-    Left err -> die err
-    Right () -> pure ()
+  execParser serverParserInfo >>= \case
+    ExecServer raw -> either die pure =<< runExceptT (server =<< lift (resolveServerConfig raw))
+    ExecCabalSetup args -> cabalSetup args
   where
+    server :: ServerConfig -> ExceptT String IO ()
     server config = do
       let socket = socketPath config.projectRoot
       lift do
         createDirectoryIfMissing True (config.projectRoot </> socketDirName)
+        ctx@ServerContext {buildEnv} <- serverContext config
+        let methods = serverMethods ctx
+        case buildEnv.instrChan of
+          Just chan -> do
+            let instrSocket = instrumentSocketPath config.projectRoot
+            hPutStrLn stderr ("Starting instrument service on " ++ fromOsPath instrSocket)
+            void $ async $ runGrpcServer instrSocket (instrumentMethods chan buildEnv.stateVar ctx.build buildEnv.project)
+          Nothing ->
+            pure ()
         hPutStrLn stderr ("Starting ghc-server on " ++ fromOsPath socket)
-        handler <- serverHandler config
-        let methods = fromGrpcHandler handler
         runGrpcServer socket methods

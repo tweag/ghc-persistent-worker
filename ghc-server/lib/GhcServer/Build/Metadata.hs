@@ -2,10 +2,12 @@ module GhcServer.Build.Metadata where
 
 import Control.Monad.Extra (ifM)
 import qualified Data.Map.Strict as Map
+import GhcServer.Cabal.ExtDeps (ensureExtDepsDb)
 import GhcServer.Cache (buildDepPlans, writeUnitCache)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (BuildEvent (..), logEvent)
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
+import GhcServer.Log (instrumentLogger)
 import GhcServer.Path (fp, osPath)
 import Internal.Metadata (computeMetadata)
 import Prelude hiding (log)
@@ -70,6 +72,11 @@ metadataArgs base outputDir cachedPlans buckHashes unit =
 
 -- | Run the metadata step for a unit.
 --
+-- If the unit has external (Cabal) package dependencies, they are built into the Cabal store first (see
+-- "GhcServer.Cabal.ExtDeps"); the resulting package database is added to the unit's GHC arguments so the
+-- external @-package@ flags added at project discovery time can be resolved. This "unlocks" the unit for
+-- metadata processing only once the dependency build has completed.
+--
 -- On success, writes the unit's cache files (args + 'CachedUnit' JSON) so that subsequent builds
 -- can restore the unit without rerunning metadata.
 --
@@ -80,8 +87,15 @@ runMetadata buildEnv name = do
   logEvent buildEnv.events (MetadataRan name)
   case Map.lookup name buildEnv.project.units of
     Nothing -> pure ([(name, "Unit not found in project")], [])
-    Just unit -> run unit buildEnv.log
+    Just unit -> withExtDeps unit (instrumentLogger buildEnv.instrChan (name.string ++ ":metadata") buildEnv.log)
   where
+    withExtDeps unit logger
+      | null unit.extDeps = run unit logger
+      | otherwise =
+        ensureExtDepsDb buildEnv >>= \case
+          Left err -> pure ([(name, "External dependency build failed: " ++ err)], [])
+          Right dbPath -> run (unit {ghcArgs = ["-package-db", dbPath] ++ unit.ghcArgs}) logger
+
     run unit logger = do
       cachedPlans <- buildDepPlans buildEnv.project.depGraph unit
       buckHashes <- lookupEnv "buck_source_hashes"

@@ -4,8 +4,7 @@
 -- the build system's key, value, and extension types.
 module GhcServer.Data.BuildSystem where
 
-import GhcServer.Build.Propagate (BuildExt)
-import GhcServer.Build.Schedule (BuildStatus, TaskKey)
+import GhcServer.Build.Schedule (BuildExt, BuildStatus, TaskKey)
 import GhcServer.Data.Request (ScheduleRequest)
 import GhcServer.Scheduler (Handlers)
 
