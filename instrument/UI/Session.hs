@@ -3,18 +3,19 @@
 module UI.Session where
 
 import Brick.Types (EventM, Widget)
-import Brick.Widgets.Border (borderWithLabel, hBorder)
-import Brick.Widgets.Core (str, vBox, vLimitPercent)
-import Control.Monad.IO.Class (liftIO)
+import Brick.Widgets.Border (borderWithLabel, hBorder, vBorder)
+import Brick.Widgets.Core (hBox, hLimitPercent, str, vBox, vLimitPercent)
 import Data.Map qualified as Map
 import Data.Text qualified as Text
-import Data.Time (UTCTime, diffUTCTime, getCurrentTime, nominalDiffTimeToSeconds)
+import Data.Time (UTCTime)
 import Lens.Micro.Platform (each, filtered, makeLenses, modifying, use, zoom)
 import Network.GRPC.Client (Connection)
 import Types.Instrument qualified as Instr
 import Types.Target (TargetSpec (..))
 import UI.ActiveTasks qualified as ActiveTasks
-import UI.ModuleSelector qualified as ModuleSelector
+import UI.BytecodeBrowser qualified as BytecodeBrowser
+import UI.LogViewer qualified as LogViewer
+import UI.TaskTree qualified as TaskTree
 import UI.Types (Name, WorkerId)
 import UI.Utils (formatBytes, formatPs, stripEscSeqs)
 
@@ -25,7 +26,9 @@ data State = Session
   { _title :: String
   , _workers :: [Worker]
   , _activeTasks :: ActiveTasks.State
-  , _modules :: ModuleSelector.State
+  , _taskTree :: TaskTree.State
+  , _logViewer :: LogViewer.State
+  , _bcoBrowser :: BytecodeBrowser.State
   , _sesStartTime :: UTCTime
   , _sesEndTime :: Maybe UTCTime
   , _finishedWorkerStats :: Stats
@@ -60,19 +63,41 @@ mkSession _title _startTime =
     { _title
     , _workers = []
     , _activeTasks = ActiveTasks.initialState
-    , _modules = ModuleSelector.initialState
+    , _taskTree = TaskTree.initialState
+    , _logViewer = LogViewer.initialState
+    , _bcoBrowser = BytecodeBrowser.initialState
     , _sesStartTime = _startTime
     , _sesEndTime = Nothing
     , _finishedWorkerStats = mempty
     }
 
+-- | Convert a pushed 'Instr.BytecodeSnapshot's cache-entry list into the bytecode browser's own 'BytecodeBrowser.Entry'
+-- shape.
+toBrowserEntries :: [Instr.BcoEntryInfo] -> [BytecodeBrowser.Entry]
+toBrowserEntries entries =
+  [ BytecodeBrowser.Entry
+      (Text.pack e.unitId)
+      (Text.pack e.moduleName)
+      e.size
+      e.lastAccess
+      e.resident
+      e.pendingEviction
+  | e <- entries
+  ]
+
+-- | Draws the session panel: active tasks on top, then a horizontal split of the project task tree (left) and the
+-- bytecode-cache browser (right, replacing the previous popup dialog), then the worker stats footer.
 draw :: Name -> UTCTime -> State -> Widget Name
 draw current now Session{..} =
   borderWithLabel (str $ " GHC Persistent Worker  " ++ _title ++ " ") $
     vBox
       [ vLimitPercent 30 $ ActiveTasks.draw current now _activeTasks
       , hBorder
-      , ModuleSelector.draw current _modules
+      , hBox
+          [ hLimitPercent 50 $ TaskTree.draw current _taskTree
+          , vBorder
+          , BytecodeBrowser.draw current _bcoBrowser
+          ]
       , hBorder
       , drawStats (length _workers) (foldMap _stats _workers <> _finishedWorkerStats)
       ]
@@ -101,15 +126,13 @@ handleEvent (InstrEvent wid evt) =
       zoom activeTasks $ ActiveTasks.addTask (TargetUnknown target) wid canDebug
     Instr.CompileEnd {..} -> do
       let content = stripEscSeqs stderr
-          target' = TargetUnknown $ if target == "" then takeWhile (/= ':') content else target
+          rawTarget = if target == "" then takeWhile (/= ':') content else target
+          target' = TargetUnknown rawTarget
       if exitCode == 0
         then do
-          start <- zoom activeTasks $ ActiveTasks.removeTask target'
-          end <- liftIO getCurrentTime
-          let time = nominalDiffTimeToSeconds . diffUTCTime end <$> start
-          zoom modules $ ModuleSelector.addModule target' content time wid
-        else do
-          zoom activeTasks $ ActiveTasks.taskFailure target' content
+          zoom activeTasks $ ActiveTasks.completeTask target' (ActiveTasks.Succeeded result)
+          zoom taskTree $ TaskTree.handleEvent $ TaskTree.MarkBuilt (Text.pack rawTarget)
+        else zoom activeTasks $ ActiveTasks.completeTask target' (ActiveTasks.Failed content)
     Instr.Stats {..} -> do
         modifying (workers . each . filtered (\w -> w._workerId == wid) . stats) \st ->
           st
@@ -117,11 +140,28 @@ handleEvent (InstrEvent wid evt) =
             , _gc_cpu_ns = gcCpuNs
             , _cpu_ns = cpuNs
             }
+    Instr.ProjectStructure {..} ->
+      zoom taskTree $
+        TaskTree.handleEvent $
+          TaskTree.Load
+            [ TaskTree.Entry (Text.pack u.unitName) (Text.pack <$> u.modules)
+            | u <- units
+            ]
     Instr.Halt -> pure ()
+    Instr.LogMessage {..} ->
+      modifying logViewer $
+        LogViewer.addEntry
+          LogViewer.Entry
+            { target = Text.pack target
+            , level = Text.pack level
+            , message = Text.pack message
+            , timestampMs
+            }
+    Instr.BytecodeSnapshot {..} ->
+      zoom bcoBrowser (BytecodeBrowser.handleEvent (BytecodeBrowser.Load (toBrowserEntries entries)))
 
 removeWorker :: WorkerId -> EventM Name State ()
 removeWorker wid = do
   st <- use (workers . each . filtered (\w -> w._workerId == wid) . stats)
   modifying finishedWorkerStats (<> st{_memory = mempty})
   modifying workers (filter (\w -> w._workerId /= wid))
-  zoom modules $ ModuleSelector.removeWorker wid
