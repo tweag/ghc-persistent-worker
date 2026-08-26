@@ -10,12 +10,15 @@ executable instrument
   hs-source-dirs: .
   other-modules:
     Grpc
+    ServeGhcServer
     UI
     UI.ActiveTasks
+    UI.BytecodeBrowser
     UI.GhcDebug
-    UI.ModuleSelector
+    UI.LogViewer
     UI.Session
     UI.SessionSelector
+    UI.TaskTree
     UI.Types
     UI.Utils
   ghc-options:
@@ -37,6 +40,7 @@ executable instrument
     StrictData,
     TypeFamilies
   build-depends:
+    async,
     base ==4.*,
     binary,
     brick,
@@ -51,6 +55,10 @@ executable instrument
     fsnotify,
     grapesy,
     microlens-platform,
+    mtl,
+    network,
+    optparse-applicative,
+    process,
     text,
     time,
     vty
