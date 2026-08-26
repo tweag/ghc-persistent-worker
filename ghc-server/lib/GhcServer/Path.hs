@@ -15,11 +15,16 @@ osPath :: String -> OsPath
 osPath = unsafeEncodeUtf
 
 -- | Directory names under the project root for server artifacts.
-outputDirName, tmpDirName, socketDirName :: OsPath
+outputDirName, tmpDirName, socketDirName, cacheDirName :: OsPath
 outputDirName = toOsPath "output"
 tmpDirName = toOsPath "tmp"
 socketDirName = toOsPath "socket"
+cacheDirName = toOsPath "cache"
 
 -- | The Unix socket path for the server, placed under the project root.
 socketPath :: OsPath -> OsPath
 socketPath projectRoot = projectRoot </> socketDirName </> [osp|server.sock|]
+
+-- | The Unix socket path for the Instrument gRPC service, placed under the project root, alongside 'socketPath'.
+instrumentSocketPath :: OsPath -> OsPath
+instrumentSocketPath projectRoot = projectRoot </> socketDirName </> [osp|instrument|]

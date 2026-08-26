@@ -9,7 +9,7 @@ import GHC.Data.Graph.Directed (Graph)
 import GHC.Unit (UnitId, stringToUnit)
 import GHC.Unit.Types (toUnitId, unitIdString)
 import GHC.Utils.Outputable (Outputable (..), text)
-import GhcServer.Path (osPath)
+import GhcServer.Path (cacheDirName, osPath)
 import System.OsPath (OsPath, (</>))
 
 -- | A unit name used as the identity of a build unit.
@@ -63,6 +63,10 @@ data Unit =
     sources :: [OsPath],
     -- | Names of home units that this unit depends on, as declared in @unit.json@.
     depUnits :: [UnitName],
+    -- | Names of external (non-local) package dependencies, as declared in a Cabal project's
+    -- @build-depends@. Empty for @unit.json@-based projects. Non-empty entries require building
+    -- these packages into the Cabal store before metadata can run (see "GhcServer.Cabal.ExtDeps").
+    extDeps :: [String],
     -- | Precomputed cache paths for this unit.
     cache :: UnitCache
   }
@@ -111,4 +115,4 @@ mkUnitCache projectRoot name =
     depUnitsPath = cDir </> osPath "dep_units.json"
   }
   where
-    cDir = projectRoot </> osPath "cache" </> osPath name.string
+    cDir = projectRoot </> cacheDirName </> osPath name.string

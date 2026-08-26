@@ -3,17 +3,16 @@
   inherit (util) build;
 
   serverPkg = build.packages.min.ghc-server.package;
-  fixedServerPkg = build.packages.mwb-26-04-fixed.ghc-server.package;
+  instrumentPkg = build.packages.min.instrument.package;
   profiledServerPkg = build.packages.profiled.ghc-server.package;
   profiledFixedPkg = build.packages.profiled-fixed.ghc-server.package;
   profiteur = build.envs.tools.toolchain.packages.profiteur;
 
   # Prebuilt ext dep packages for the mwb-26-07-linkables GHC, used by profiling apps.
-  fixedGhc = build.envs.mwb-26-04-fixed.toolchain.packages.ghc;
-  fixedExtDeps = import ./test-ext-deps.nix {
+  ghc = build.envs.min.toolchain.packages.ghc;
+  extDeps = import ./test-ext-deps.nix {
     inherit (config) pkgs;
-    inherit lib;
-    ghc = fixedGhc;
+    inherit lib ghc;
   };
 
   setupProject = ''
@@ -82,6 +81,10 @@ in {
 
   config = {
 
+    outputs.apps.ui = util.zapp "ui" ''
+    exec ${instrumentPkg}/bin/instrument --server-exe ${serverPkg}/bin/ghc-server "$@"
+    '';
+
     outputs.apps.rebuild-impure-worker = util.zapp "rebuild-impure-worker" ''
     if [[ -z $1 ]]
     then
@@ -136,8 +139,8 @@ in {
 
     ${cleanup}
 
-    server="${fixedServerPkg}/bin/ghc-server"
-    client="${fixedServerPkg}/bin/ghc-client"
+    server="${serverPkg}/bin/ghc-server"
+    client="${serverPkg}/bin/ghc-client"
 
     echo "Starting ghc-server with buck_source_hashes..."
     export buck_source_hashes=$metadata_file
@@ -207,7 +210,7 @@ in {
     project=$(mktemp -d --tmpdir ghc-server-incr-wide.XXXXXXXX)
     echo "Creating wide project: depth=$depth, mods=$mods_per_unit at $project"
 
-    export resource_test_ext_deps=${fixedExtDeps}
+    export resource_test_ext_deps=${extDeps}
     ${serverPkg}/bin/gen-project --wide $project $depth $mods_per_unit
 
     # Compute buck_source_hashes JSON from unit1 sources
@@ -305,7 +308,7 @@ in {
       default-language: GHC2021
     EOF
 
-    ${testServerBuild "--cabal"}
+    ${testServerBuild ""}
     '';
 
     outputs.apps.test-server-cabal-ext-deps = util.zapp "test-server-cabal-ext-deps" ''
@@ -352,16 +355,16 @@ in {
     depth=''${1-2}
     project=$(mktemp -d --tmpdir profile-cache-restore.XXXXXXXX)
     echo "Creating ''$(($depth * 2))-level test project at $project"
-    ${fixedServerPkg}/bin/gen-project $project $depth
+    ${serverPkg}/bin/gen-project $project $depth
 
     ${cleanup}
 
     echo "Starting ghc-server for initial full build..."
-    ${fixedServerPkg}/bin/ghc-server --verbose $project &
+    ${serverPkg}/bin/ghc-server --verbose $project &
     server_pid=$!
 
     echo "Building all units..."
-    ${fixedServerPkg}/bin/ghc-client $project --wait
+    ${serverPkg}/bin/ghc-client $project --wait
 
     echo "Stopping server..."
     kill $server_pid
@@ -437,7 +440,7 @@ in {
     cd -
 
     echo "Running metadata for root units only..."
-    ${fixedServerPkg}/bin/ghc-client $project --wait $targets
+    ${serverPkg}/bin/ghc-client $project --wait $targets
 
     echo "Stopping profiled server..."
     kill -INT $server_pid
@@ -468,7 +471,7 @@ in {
     output_dir=''${PROFILE_OUTPUT_DIR:-$(mktemp -d --tmpdir profile-output.XXXXXXXX)}
     mkdir -p $output_dir
 
-    export resource_test_ext_deps=${fixedExtDeps}
+    export resource_test_ext_deps=${extDeps}
     ${profiledFixedPkg}/bin/gen-project production $project $depth $big_mods
 
     ${cleanup}
@@ -712,16 +715,16 @@ in {
     mods_per_unit=''${2-3}
     project=$(mktemp -d --tmpdir profile-cache-wide.XXXXXXXX)
 
-    ${fixedServerPkg}/bin/gen-project --wide $project $depth $mods_per_unit
+    ${serverPkg}/bin/gen-project --wide $project $depth $mods_per_unit
 
     ${cleanup}
 
     echo "Starting ghc-server for initial full build..."
-    ${fixedServerPkg}/bin/ghc-server --verbose $project &
+    ${serverPkg}/bin/ghc-server --verbose $project &
     server_pid=$!
 
     echo "Building all units..."
-    ${fixedServerPkg}/bin/ghc-client $project --wait
+    ${serverPkg}/bin/ghc-client $project --wait
 
     echo "Stopping server..."
     kill $server_pid
@@ -743,7 +746,7 @@ in {
     cd -
 
     echo "Running metadata for root unit only..."
-    ${fixedServerPkg}/bin/ghc-client $project --wait $targets
+    ${serverPkg}/bin/ghc-client $project --wait $targets
 
     echo "Stopping profiled server..."
     kill -INT $server_pid
@@ -768,17 +771,17 @@ in {
     num_modules=''${1-1000}
     project=$(mktemp -d --tmpdir profile-incremental.XXXXXXXX)
 
-    export resource_test_ext_deps=${fixedExtDeps}
-    ${fixedServerPkg}/bin/gen-project --flat $project $num_modules
+    export resource_test_ext_deps=${extDeps}
+    ${serverPkg}/bin/gen-project --flat $project $num_modules
 
     ${cleanup}
 
     echo "Starting ghc-server for initial full build..."
-    ${fixedServerPkg}/bin/ghc-server --verbose $project &
+    ${serverPkg}/bin/ghc-server --verbose $project &
     server_pid=$!
 
     echo "Building all units..."
-    ${fixedServerPkg}/bin/ghc-client $project --wait
+    ${serverPkg}/bin/ghc-client $project --wait
 
     echo "Stopping server..."
     kill $server_pid
@@ -801,7 +804,7 @@ in {
     cd -
 
     echo "Running metadata for unit1..."
-    ${fixedServerPkg}/bin/ghc-client $project --wait unit1:metadata
+    ${serverPkg}/bin/ghc-client $project --wait unit1:metadata
 
     echo "Stopping profiled server..."
     kill -INT $server_pid
@@ -826,17 +829,17 @@ in {
     num_modules=''${1-1000}
     project=$(mktemp -d --tmpdir parallel.XXXXXXXX)
 
-    ${fixedServerPkg}/bin/gen-project flat $project $num_modules
+    ${serverPkg}/bin/gen-project flat $project $num_modules
     rm $project/unit1/M0.hs
 
     ${cleanup}
 
     echo "Starting ghc-server..."
-    ${fixedServerPkg}/bin/ghc-server --verbose $project -j 80 &
+    ${serverPkg}/bin/ghc-server --verbose $project -j 80 &
     server_pid=$!
 
     echo "Building..."
-    time ${fixedServerPkg}/bin/ghc-client $project --wait
+    time ${serverPkg}/bin/ghc-client $project --wait
 
     echo "Stopping server..."
     kill $server_pid

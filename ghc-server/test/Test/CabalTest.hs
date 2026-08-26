@@ -1,11 +1,13 @@
 -- | Tests for Cabal-based project discovery in the standalone GHC server.
 module Test.CabalTest where
 
+import Control.Concurrent.MVar (newMVar)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (fromJust)
 import qualified Data.Set as Set
 import GhcServer.Build (BuildResult (..), newBuildState, runBuild)
-import GhcServer.Cabal (discoverCabalProject)
+import GhcServer.Cabal (discoverCabalProject, findCabalFile)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (BuildEvent (..), newBuildEvents, readEvents)
 import GhcServer.Data.Request (ScheduleRequest (..), UnitRequest (..))
@@ -44,8 +46,9 @@ acquireCabalProject acquireRoot = do
     rootOs = osPath root
     outputDir = osPath (root ++ "/output")
     tmpDir = osPath (root ++ "/tmp")
+  cabal <- fromJust <$> findCabalFile rootOs
   project <- withBuildLog \ logger ->
-    discoverCabalProject logger rootOs outputDir tmpDir
+    discoverCabalProject logger rootOs outputDir tmpDir cabal
   pure TestProject {root, rootOs, project, outputDir, tmpDir}
 
 -- | Test combinator for Cabal-based projects.
@@ -65,6 +68,7 @@ runCabalFresh tp steps = timedBuild do
   stateVar <- newBuildState
   log <- newLogger False
   events <- newBuildEvents
+  extDepsDb <- newMVar Nothing
   let env = BuildEnv {
         baseArgs = emptyArgs Map.empty,
         projectRoot = tp.rootOs,
@@ -73,7 +77,9 @@ runCabalFresh tp steps = timedBuild do
         stateVar,
         project = tp.project,
         log,
-        events
+        events,
+        instrChan = Nothing,
+        extDepsDb
       }
   result <- runBuild 4 testTaskTimeout env ScheduleRequest {steps, recompile = False, rebuild = False}
   evs <- readEvents events

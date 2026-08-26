@@ -26,7 +26,6 @@
   in allPackages opts;
 
   buckBinOverrides = {overrideAttrs, notest, nodoc, ...}: {
-    buck-worker-internal = notest;
     ghc-worker = notest;
   };
 
@@ -81,13 +80,15 @@
     (overrides_mwb_flag flags)
   ];
 
-  defaultGhciArgs = ["-DMWB" "-DDOWNSWEEP_CACHE" "-DUNIT_INDEX" "-DFIXED_NODES"];
-
   defaultEnv = extra: {
     hls.enable = lib.mkForce false;
     package-set.extends = "mwb-26-07";
     overrides = commonOverrides ["mwb" "unit-index" "downsweep-cache"] ++ [ipeOverrides] ++ extra;
-    ghci.args = defaultGhciArgs;
+  };
+
+  latestEnv = extra: defaultEnv (extra ++ [(overrides_mwb_flag ["fixed-nodes" "linkables"])]) // {
+    package-set.extends = "mwb-26-07-linkables";
+    ghci.args = ["-DMWB" "-DDOWNSWEEP_CACHE" "-DUNIT_INDEX" "-DFIXED_NODES" "-DLINKABLES"];
   };
 
   mkGithub = {force, source, nodoc, ...}: {owner ? "tek", repo, rev, hash, path ? ""}:
@@ -100,35 +101,27 @@ in {
     overrides = [envOverrides ({notest, ...}: { ghc-worker = notest; })];
   };
 
-  envs.dev = defaultEnv [] // {
-    package-set.extends = "mwb-26-07";
+  envs.dev = latestEnv [] // {
     buildInputs = pkgs: [pkgs.zlib pkgs.snappy pkgs.protobuf build.envs.dev.toolchain.packages.proto-lens-protoc];
   };
 
-  envs.min = defaultEnv [];
+  envs.min = latestEnv [buckBinOverrides];
 
-  envs.mwb-26-07-linkables = defaultEnv [] // {
+  envs.mwb-26-07-linkables = latestEnv [buckBinOverrides] // {
     expose.scoped = true;
-    package-set.extends = "mwb-26-07-linkables";
-    overrides = commonOverrides ["mwb" "unit-index" "downsweep-cache" "linkables"] ++ [buckBinOverrides ipeOverrides];
-    ghci.args = defaultGhciArgs ++ ["-DLINKABLES"];
   };
 
-  envs.mwb-26-07 = defaultEnv [] // {
+  envs.mwb-26-07 = defaultEnv [buckBinOverrides] // {
     expose.scoped = true;
-    package-set.extends = "mwb-26-07";
   };
 
   envs.profiled = defaultEnv [({notest, ...}: { ghc-worker = notest; ghc-server = notest; })];
 
-  envs.profiled-fixed = {
+  envs.profiled-linkables = latestEnv [
+    ({notest, ...}: { ghc-worker = notest; ghc-server = notest; })
+  ] // {
     hls.enable = lib.mkForce false;
-    package-set.extends = "profiled-fixed";
-    overrides = commonOverrides ["mwb" "unit-index" "downsweep-cache" "fixed-nodes"] ++ [
-      ({notest, ...}: { ghc-worker = notest; ghc-server = notest; })
-    ] ++ [
-      ipeOverrides
-    ];
+    package-set.extends = "profiled-linkables";
     profiling = true;
   };
 
@@ -153,10 +146,10 @@ in {
     testExtDeps = import ./test-ext-deps.nix {
       inherit (config) pkgs;
       inherit lib;
-      ghc = build.envs.dev.toolchain.packages.ghc;
+      ghc = build.envs.test-ext-deps.toolchain.packages.ghc;
     };
 
-  in defaultEnv [] // {
+  in latestEnv [buckBinOverrides] // {
     expose.shell = true;
     env.resource_test_ext_deps = "${testExtDeps}";
     buildInputs = pkgs: [pkgs.zlib];
@@ -185,21 +178,6 @@ in {
     tls = hackage "2.2.2" "1arnw38a3x70264sags3yrq4c01nfcy17sjq3ycasfb2yq6fiflm";
   };
 
-  package-sets.mwb-26-07-linkables = {
-    extends = "mwb-26-07";
-    compiler = "mwb-26-07-linkables";
-    overrides = api@{hackage, force, source, notest, nodoc, nobench, ...}: let
-
-      github = mkGithub api;
-    in overrides2607 api // {
-      doctest = github {
-        repo = "doctest";
-        rev = "f6f0ea80314ae97a550229c95b15333566c35fe0";
-        hash = "sha256-R3HKHj6+btPodhOyeW50xvZwFqF1IaN3+6dHN9KLjmw=";
-      };
-    };
-  };
-
   package-sets.mwb-26-07 = {
     compiler = "mwb-26-07";
     overrides = api@{hackage, force, notest, ...}: let
@@ -215,8 +193,24 @@ in {
     };
   };
 
-  package-sets.profiled-fixed = {
-    extends = "mwb-26-04-fixed";
+  package-sets.mwb-26-07-linkables = {
+    extends = "mwb-26-07";
+    compiler = "mwb-26-07-linkables";
+    overrides = api@{hackage, force, source, notest, nodoc, nobench, ...}: let
+
+      github = mkGithub api;
+    in overrides2607 api // {
+      doctest = github {
+        repo = "doctest";
+        rev = "f6f0ea80314ae97a550229c95b15333566c35fe0";
+        hash = "sha256-R3HKHj6+btPodhOyeW50xvZwFqF1IaN3+6dHN9KLjmw=";
+      };
+      ghc-server = notest nodoc;
+    };
+  };
+
+  package-sets.profiled-linkables = {
+    extends = "mwb-26-07-linkables";
   };
 
   package-sets.ghc914 = {

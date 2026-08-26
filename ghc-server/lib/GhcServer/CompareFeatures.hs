@@ -12,7 +12,6 @@ import Control.Monad (unless, when)
 import Data.Char (isDigit, isSpace)
 import Data.Foldable (traverse_)
 import Data.List (intercalate, isPrefixOf, isSuffixOf, sort, sortOn, subsequences)
-import GhcServer.GenProject (ExtDepsConfig (..), writeProductionProject)
 import Options.Applicative (
   Parser,
   ParserInfo,
@@ -44,7 +43,7 @@ import System.Directory (
   )
 import System.Environment (getEnvironment, lookupEnv)
 import System.Exit (ExitCode (..), exitFailure)
-import System.FilePath (takeDirectory, (</>))
+import System.FilePath ((</>), takeDirectory)
 import System.IO (IOMode (..), hFlush, hPutStrLn, openFile, stderr)
 import System.Process (
   CreateProcess (..),
@@ -57,6 +56,8 @@ import System.Process (
   readProcess,
   waitForProcess,
   )
+
+import GhcServer.GenProject (ExtDepsConfig (..), writeProductionProject)
 import Types.FeatureFlags (FeatureFlag (..), FeatureFlags (..))
 
 -- ---------------------------------------------------------------------------
@@ -81,10 +82,10 @@ configParser =
           <> help "Modules per level in big unit" <> value 50)
     <*> strOption (long "server-app" <> metavar "APP"
           <> help "Nix flake app for the profiled server"
-          <> value "env.profiled-linkables.ghc-server")
+          <> value "env.profiled-fixed.ghc-server")
     <*> strOption (long "client-app" <> metavar "APP"
           <> help "Nix flake app for the client"
-          <> value "env.profiled-linkables.ghc-client")
+          <> value "env.profiled-fixed.ghc-client")
 
 configParserInfo :: ParserInfo CompareConfig
 configParserInfo =
@@ -113,7 +114,7 @@ data BenchResult =
 -- | All feature flag constructors.
 allFlags :: [FeatureFlag]
 allFlags =
-  [FeatureFixedNodesCache, FeatureFlagParser, FeatureConcurrentInitUnits, FeatureIncrementalBuildPlan]
+  [FeatureFixedNodesCache, FeatureFlagParser, FeatureIncrementalBuildPlan, FeatureLazyByteCode]
 
 -- | All 16 permutations (power set) of feature flags.
 allPermutations :: [FeatureFlags]
@@ -126,10 +127,11 @@ flagsFromList enabled =
   FeatureFlags {
     fixedNodesCache = FeatureFixedNodesCache `elem` enabled,
     flagParser = FeatureFlagParser `elem` enabled,
-    concurrentInitUnits = FeatureConcurrentInitUnits `elem` enabled,
-    incrementalBuildPlan = FeatureIncrementalBuildPlan `elem` enabled,
+    -- CIU is always on; removed from the matrix to keep the number of permutations in check.
+    concurrentInitUnits = True,
     instrument = False,
-    lazyByteCode = False,
+    incrementalBuildPlan = FeatureIncrementalBuildPlan `elem` enabled,
+    lazyByteCode = FeatureLazyByteCode `elem` enabled,
     lazyByteCodeCacheLimit = Nothing
   }
 
@@ -144,16 +146,20 @@ featureFlagsToArgs flags =
         enabled = case flag of
           FeatureFixedNodesCache -> flags.fixedNodesCache
           FeatureFlagParser -> flags.flagParser
-          FeatureConcurrentInitUnits -> flags.concurrentInitUnits
           FeatureIncrementalBuildPlan -> flags.incrementalBuildPlan
+          FeatureLazyByteCode -> flags.lazyByteCode
+          FeatureConcurrentInitUnits -> flags.concurrentInitUnits
+          FeatureInstrument -> flags.instrument
 
         prefix = if enabled then "--enable" else "--disable"
 
         name = case flag of
           FeatureFixedNodesCache -> "fixed-nodes-cache"
           FeatureFlagParser -> "flag-parser"
-          FeatureConcurrentInitUnits -> "concurrent-init-units"
           FeatureIncrementalBuildPlan -> "incremental-build-plan"
+          FeatureLazyByteCode -> "lazy-byte-code"
+          FeatureConcurrentInitUnits -> "concurrent-init-units"
+          FeatureInstrument -> "instrument"
 
 -- | Short label for a feature config.
 featureLabel :: FeatureFlags -> String
@@ -168,8 +174,8 @@ featureLabel flags
       [
         ("FNC", (.fixedNodesCache)),
         ("FP", (.flagParser)),
-        ("CIU", (.concurrentInitUnits)),
-        ("IBP", (.incrementalBuildPlan))
+        ("IBP", (.incrementalBuildPlan)),
+        ("LBC", (.lazyByteCode))
       ]
 
 -- ---------------------------------------------------------------------------

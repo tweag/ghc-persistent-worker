@@ -30,12 +30,14 @@ library
     Proto.Worker_Fields
     Proto.Instrument,
     Proto.Instrument_Fields
+    Proto.GhcServer,
+    Proto.GhcServer_Fields
   build-depends:
     base ==4.*,
     bytestring,
     containers,
     deepseq,
-    grapesy >=1.0.1,
+    grapesy ^>=1.0.1,
     lens-family,
     proto-lens,
     text,

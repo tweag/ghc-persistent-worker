@@ -146,6 +146,7 @@
       cabal.meta.synopsis = "Buck2 GHC persistent worker instrumentation client";
       executable = {
         dependencies = [
+          "async"
           "binary"
           "brick"
           "buck-worker-internal"
@@ -159,6 +160,10 @@
           "fsnotify"
           "grapesy"
           "microlens-platform"
+          "mtl"
+          "network"
+          "optparse-applicative"
+          "process"
           "text"
           "time"
           "vty"
@@ -189,6 +194,7 @@
           "filepath"
           "file-io"
           "ghc"
+          "ghci"
           "ghc-boot"
           "hashable"
           "text"
@@ -318,8 +324,10 @@
           "async"
           "buck-worker-grpc"
           "buck-worker-internal"
+          "binary"
           "buck-worker-proto"
           "buck-worker-types"
+          "cabal-install"
           "bytestring"
           "containers"
           "directory"
@@ -327,12 +335,16 @@
           "file-io"
           "filepath"
           "ghc"
+          "ghc-paths"
+          "ghc-worker"
           "ghc-worker-test-common"
           "grapesy"
           "optparse-applicative"
+          "parsec"
           "process"
           "stm"
           "text"
+          "time"
           "transformers"
         ];
       };
@@ -354,6 +366,17 @@
 
       executables.compare-features = {
         source-dirs = "app/compare-features";
+      };
+
+      executables.compare-eviction = {
+        source-dirs = "app/compare-eviction";
+        component = {
+          ghc-options = [
+            "-threaded"
+            "-rtsopts"
+            ''"-with-rtsopts=-N -T"''
+          ];
+        };
       };
 
       tests.ghc-server-test = {

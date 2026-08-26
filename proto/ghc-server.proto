@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package ghcserver;
+
+// Mirrors 'worker.proto''s 'ExecuteCommand'/'ExecuteResponse', duplicated here so 'ghc-server''s own protocol can
+// evolve independently of Buck's persistent-worker protocol.
+message ExecuteCommand {
+  message EnvironmentEntry {
+    bytes key = 1;
+    bytes value = 2;
+  }
+
+  repeated bytes argv = 1;
+  repeated EnvironmentEntry env = 2;
+}
+
+message ExecuteResponse {
+  int32 exit_code = 1;
+  string stderr = 2;
+}
+
+// Empty: the paths to clean (the project's 'output' and 'cache' directories) are hardcoded server-side rather
+// than sent by the client, since duplicating that assumption in a client is exactly what this RPC exists to avoid.
+message CleanRequest {}
+
+message CleanResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+service GhcServer {
+  rpc Execute(ExecuteCommand) returns (ExecuteResponse) {};
+  // Removes the project's 'output' and 'cache' directories (server-generated, fully reconstructible build
+  // artifacts).
+  rpc Clean(CleanRequest) returns (CleanResponse) {};
+}

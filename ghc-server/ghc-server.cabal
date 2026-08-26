@@ -48,23 +48,27 @@ library
     GhcServer.Build
     GhcServer.Build.Classify
     GhcServer.Build.Compile
+    GhcServer.Build.Execute
     GhcServer.Build.Metadata
     GhcServer.Build.Propagate
     GhcServer.Build.Schedule
     GhcServer.Cabal
+    GhcServer.Cabal.ExtDeps
+    GhcServer.Cabal.Setup
     GhcServer.Data.BuildEnv
     GhcServer.Data.BuildCache
     GhcServer.Data.BuildEvent
     GhcServer.Data.BuildSystem
     GhcServer.Data.Config
-
     GhcServer.Data.Request
     GhcServer.Data.Unit
     GhcServer.Data.UnitConfig
     GhcServer.Cache
+    GhcServer.CompareEviction
     GhcServer.CompareFeatures
     GhcServer.GenProject
     GhcServer.GenProject.Run
+    GhcServer.Grpc
     GhcServer.Handler
     GhcServer.Log
     GhcServer.Path
@@ -76,23 +80,29 @@ library
     async,
     buck-worker-grpc,
     buck-worker-internal,
+    binary,
     buck-worker-proto,
     buck-worker-types,
     bytestring,
     Cabal,
     Cabal-syntax,
+    cabal-install,
     containers,
     directory,
     extra,
     file-io,
     filepath,
     ghc,
+    ghc-paths,
+    ghc-worker,
     ghc-worker-test-common,
     grapesy ^>=1.0.1,
     optparse-applicative,
+    parsec,
     process,
     stm,
     text,
+    time,
     transformers
 
 executable ghc-server
@@ -124,6 +134,14 @@ executable compare-features
   main-is: Main.hs
   hs-source-dirs: app/compare-features
   ghc-options: -O2 -threaded "-with-rtsopts=-N"
+  build-depends:
+    ghc-server
+
+executable compare-eviction
+  import: all
+  main-is: Main.hs
+  hs-source-dirs: app/compare-eviction
+  ghc-options: -O2 -threaded "-with-rtsopts=-N -T"
   build-depends:
     ghc-server
 
