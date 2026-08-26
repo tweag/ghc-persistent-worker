@@ -166,6 +166,7 @@
           "process"
           "text"
           "time"
+          "unix"
           "vty"
         ];
         ghc-options-exe = [

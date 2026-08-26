@@ -62,4 +62,5 @@ executable instrument
     process,
     text,
     time,
+    unix,
     vty

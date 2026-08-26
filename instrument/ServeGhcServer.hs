@@ -7,6 +7,7 @@ module ServeGhcServer (resolveServerExe, isServerUp, defaultSocketPath, spawnGhc
 
 import BuckWorkerProto ()
 import Control.Exception (SomeException, bracket, catch, displayException, try)
+import Data.Foldable (for_)
 import Data.Functor (void)
 import Data.Text qualified as Text
 import Network.GRPC.Client (Server (ServerUnix), recvNextOutput, sendFinalInput, withConnection, withRPC)
@@ -17,15 +18,18 @@ import Proto.GhcServer (GhcServer)
 import System.Directory (findExecutable)
 import System.Exit (die)
 import System.IO (Handle)
+import System.Posix.Signals (sigKILL, signalProcessGroup)
 import System.Process (
   CreateProcess (..),
   ProcessHandle,
   StdStream (..),
   createProcess,
+  getPid,
   interruptProcessGroupOf,
   proc,
   waitForProcess,
   )
+import System.Timeout (timeout)
 
 -- | Check whether something is listening on the given Unix socket, by attempting an actual @connect(2)@.
 --
@@ -74,15 +78,33 @@ resolveServerExe = \case
     mExe <- findExecutable "ghc-server"
     maybe (die "ghc-server executable not found in PATH; pass --server-exe or ensure it's on PATH") pure mExe
 
+-- | How long to wait for a graceful shutdown (via 'interruptProcessGroupOf', i.e. @SIGINT@) before escalating to
+-- @SIGKILL@ in 'killGhcServer'. @ghc-server@ can legitimately spend a long time inside an uninterruptible GHC
+-- foreign call while compiling, during which @SIGINT@ is queued but not delivered -- without an escalation, a
+-- client quitting mid-build would block indefinitely on 'waitForProcess'.
+gracefulShutdownTimeoutMicros :: Int
+gracefulShutdownTimeoutMicros = 5_000_000
+
 -- | Kill a @ghc-server@ process previously spawned by 'spawnGhcServer'. It was started with @new_session = True@,
 -- making it the leader of its own process group, so interrupting the whole group (rather than just
 -- 'System.Process.terminateProcess' on the single tracked PID) also reaches any subprocesses it may have spawned
--- itself (e.g. via the in-process Cabal external-dependency build, which could in principle shell out). Blocks
--- until the process has actually exited.
+-- itself (e.g. via the in-process Cabal external-dependency build, which could in principle shell out).
+--
+-- Tries a graceful @SIGINT@ first, waiting up to 'gracefulShutdownTimeoutMicros' for the process to exit on its
+-- own. If it hasn't exited within that window (e.g. it's stuck inside a long-running or uninterruptible GHC
+-- compile), escalates to @SIGKILL@ on the whole process group, which the kernel delivers unconditionally --
+-- guaranteeing this function always returns instead of blocking forever. Always blocks until the process has
+-- actually exited.
 killGhcServer :: ProcessHandle -> IO ()
 killGhcServer ph = do
   interruptProcessGroupOf ph
-  void $ waitForProcess ph
+  exited <- timeout gracefulShutdownTimeoutMicros (waitForProcess ph)
+  case exited of
+    Just _ -> pure ()
+    Nothing -> do
+      mpid <- getPid ph
+      for_ mpid (signalProcessGroup sigKILL)
+      void $ waitForProcess ph
 
 -- | Ask a project's running @ghc-server@ to remove its own @output@\/@cache@ directories, via the @Clean@ RPC on
 -- the @ghc-server.proto@-defined @GhcServer@ service (see 'kb-grpc'). The server -- not this client -- knows and
@@ -91,18 +113,24 @@ killGhcServer ph = do
 -- reachable: call this /before/, not after, killing a server that's about to be torn down. Returns @Left@ with a
 -- human-readable reason on any failure (connection failure, or the RPC itself reporting @success = False@);
 -- @Right@ with the server's reported message otherwise.
+--
+-- Bounded by 'gracefulShutdownTimeoutMicros': if the server is busy (e.g. mid-build) and doesn't respond within
+-- that window, returns @Left@ instead of blocking indefinitely -- callers that need to tear the server down
+-- afterwards (e.g. the exit-time finalizer) must not be stalled by an unresponsive @Clean@ RPC.
 cleanGhcServer :: FilePath -> IO (Either String String)
 cleanGhcServer projectRoot = do
-  eres <-
-    try @SomeException $
-      withConnection def (ServerUnix sock) \ conn ->
-        withRPC conn def (Proxy @(Protobuf GhcServer "clean")) \ call -> do
-          sendFinalInput call defMessage
-          recvNextOutput call
+  eres <- try @SomeException (timeout gracefulShutdownTimeoutMicros rpcCall)
   pure $ case eres of
     Left e -> Left (displayException e)
-    Right resp
+    Right Nothing -> Left "Clean request timed out (server unresponsive)"
+    Right (Just resp)
       | resp.success -> Right (Text.unpack resp.message)
       | otherwise -> Left (Text.unpack resp.message)
   where
     sock = projectRoot ++ "/socket/server.sock"
+
+    rpcCall =
+      withConnection def (ServerUnix sock) \ conn ->
+        withRPC conn def (Proxy @(Protobuf GhcServer "clean")) \ call -> do
+          sendFinalInput call defMessage
+          recvNextOutput call

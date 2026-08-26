@@ -1,6 +1,6 @@
 module Main where
 
-import Brick.BChan (BChan, newBChan, writeBChan)
+import Brick.BChan (BChan, newBChan, writeBChan, writeBChanNonBlocking)
 import BuckWorkerProto (Instrument)
 import Control.Applicative ((<|>))
 import Control.Concurrent (forkIO, threadDelay)
@@ -106,6 +106,34 @@ newtype WorkerPath
 envWorkerPath :: IO WorkerPath
 envWorkerPath = WorkerPath . (++ "/") . fromMaybe "/tmp/ghc-persistent-worker" <$> lookupEnv "WORKER_PATH"
 
+-- | Dispatch an event to the UI's event channel without ever blocking. The channel is bounded ('newBChan 10'),
+-- and once the Brick main loop has halted (e.g. the user quit while background threads -- the periodic
+-- 'SetTime' ticker, 'listen', 'streamLines', the exit-time finalizer's own log messages -- are still producing
+-- events), nothing drains it any more. A plain blocking 'writeBChan' call made at that point (in particular from
+-- 'finalizeServer', which runs on the main thread after the Brick loop returns) would never return, since the
+-- channel fills up within about a second of ticks alone -- this was the root cause of the UI hanging indefinitely
+-- on quit. Dropping an event under backpressure (the 'False' case, silently ignored) is an acceptable trade-off:
+-- these are all best-effort UI notifications, not events anything relies on for correctness.
+-- | Best-effort dispatch: drops the event under backpressure instead of blocking. Reserved for events that are
+-- either recoverable\/idempotent (the periodic 'UI.SetTime' ticker, 'UI.ProcessLog' diagnostics) or dispatched from
+-- code paths that may run on the main thread /after/ the Brick loop has already halted (the exit-time finalizer,
+-- see 'finalizeServer') -- a blocking write there would hang the whole process, since nothing drains the channel
+-- any more once Brick has returned. See 'dispatch' for the counterpart used by session\/build-lifecycle events,
+-- which must never be silently dropped.
+notify :: BChan UI.Event -> UI.Event -> IO ()
+notify eventChan = void . writeBChanNonBlocking eventChan
+
+-- | Blocking dispatch for session\/build-lifecycle events (worker connect\/disconnect, and every event forwarded
+-- from a 'notifyMe' gRPC stream, including 'CompileStart'\/'CompileEnd'). These carry state transitions the UI
+-- has no way to recover if dropped (e.g. a dropped 'CompileEnd' leaves a task showing as running forever, or a
+-- dropped 'ProjectStructure'\/metadata event never appears at all) -- unlike 'notify', silently discarding them
+-- under backpressure is not an acceptable trade-off. This is safe to block on: 'dispatch' is only ever called
+-- from 'listen'\'s forked stream-reading thread, never from the main thread, so blocking here cannot reproduce the
+-- quit-time hang that motivated 'notify' -- when the RTS's main thread exits, any forked thread blocked on this
+-- call is simply killed along with it.
+dispatch :: BChan UI.Event -> UI.Event -> IO ()
+dispatch = writeBChan
+
 listen :: BChan UI.Event -> FilePath -> IO ()
 listen eventChan instrPath = do
   void $ forkIO $ go 5
@@ -115,23 +143,23 @@ listen eventChan instrPath = do
   sessionId = Session.Id $ Text.pack sessionId'
   workerId = WorkerId $ Text.pack workerId'
   go :: Int -> IO ()
-  go 0 = writeBChan eventChan $ UI.SessionSelectorEvent $ SS.RemoveWorker sessionId workerId
+  go 0 = dispatch eventChan $ UI.SessionSelectorEvent $ SS.RemoveWorker sessionId workerId
   go n =
     catch @SomeException
       ( withConnection def (ServerUnix instrPath) $ \conn -> do
           serverStreaming conn (rpc @(Protobuf Instrument "notifyMe")) defMessage $ \recv -> do
             time <- getModificationTime instrPath
-            writeBChan eventChan $ UI.SessionSelectorEvent $ SS.AddWorker sessionId workerId time conn
-            writeBChan eventChan (UI.SendOptions (Just workerId))
+            dispatch eventChan $ UI.SessionSelectorEvent $ SS.AddWorker sessionId workerId time conn
+            dispatch eventChan (UI.SendOptions (Just workerId))
             whileNext_ recv
-              $ writeBChan eventChan
+              $ dispatch eventChan
               . UI.SessionSelectorEvent
               . SS.SessionEvent sessionId
               . Session.InstrEvent workerId
               . decode
               . fromStrict
               . (.encoded)
-      )
+          )
       (const $ threadDelay 100_000 >> go (n - 1))
 
 -- | Kill the tracked server's poll thread and\/or subprocess, if any, leaving 'ServerInfo.projectRoot'\/'serveArgs'
@@ -172,7 +200,7 @@ runStartup serverInfoRef serverExe eventChan path extraOpts = do
     else do
       spawned <- try @SomeException (resolveServerExe serverExe >>= \exe -> spawnGhcServer exe projectRoot extraOpts)
       case spawned of
-        Left err -> writeBChan eventChan $ UI.ServerFailed path (Text.pack (displayException err))
+        Left err -> notify eventChan $ UI.ServerFailed path (Text.pack (displayException err))
         Right (out, err, ph) -> spawnedServer serverInfoRef eventChan path extraOpts projectRoot sock out err ph
 
 -- | Once a subprocess has actually been spawned: starts the indefinite 'isServerUp' poll (recording its 'Async' in
@@ -204,7 +232,7 @@ spawnedServer serverInfoRef eventChan path extraOpts projectRoot sock out err ph
     ExitSuccess -> pure ()
     ExitFailure _ -> do
       captured <- reverse <$> readIORef stderrLines
-      writeBChan eventChan $ UI.ServerFailed path (Text.unlines captured)
+      notify eventChan $ UI.ServerFailed path (Text.unlines captured)
 
 -- | Builds the closure passed to 'UI.initialState' that backs the capital-@S@ key binding (and, indirectly, the
 -- @R@ restart binding): dispatches 'UI.ServerStarting' immediately so the UI can replace its placeholder message,
@@ -215,7 +243,7 @@ spawnedServer serverInfoRef eventChan path extraOpts projectRoot sock out err ph
 -- deliberately no timeout anywhere in this path.
 startServer :: IORef (Maybe ServerInfo) -> Maybe FilePath -> BChan UI.Event -> Text.Text -> [String] -> IO ()
 startServer serverInfoRef serverExe eventChan path extraOpts = do
-  writeBChan eventChan (UI.ServerStarting path)
+  notify eventChan (UI.ServerStarting path)
   void $ forkIO $ runStartup serverInfoRef serverExe eventChan path extraOpts
 
 -- | Backs the capital-@K@ key binding: kills the tracked server's process\/poll thread, if any (see
@@ -227,7 +255,7 @@ killServerAction serverInfoRef eventChan = do
   case minfo >>= (.process) of
     Just _ -> killTracked serverInfoRef
     Nothing ->
-      writeBChan eventChan $
+      notify eventChan $
         UI.ProcessLog (Text.pack "error") (Text.pack "No tracked ghc-server process to kill (it wasn't started by this session)")
 
 -- | Backs the capital-@R@ key binding: re-runs 'startServer' with the same project path\/extra options previously
@@ -239,7 +267,7 @@ restartServerAction serverInfoRef serverExe eventChan = do
   case minfo of
     Just si -> uncurry (startServer serverInfoRef serverExe eventChan) si.serveArgs
     Nothing ->
-      writeBChan eventChan $
+      notify eventChan $
         UI.ProcessLog (Text.pack "error") (Text.pack "No prior ghc-server info to restart from")
 
 -- | Backs the capital-@C@ key binding: asks the tracked server to remove its @cache@\/@output@ directories via
@@ -250,9 +278,9 @@ cleanServerAction serverInfoRef eventChan = do
   case minfo of
     Just si -> do
       result <- cleanGhcServer si.projectRoot
-      writeBChan eventChan $ UI.ProcessLog (Text.pack "clean") (Text.pack (either ("Clean failed: " ++) ("Clean: " ++) result))
+      notify eventChan $ UI.ProcessLog (Text.pack "clean") (Text.pack (either ("Clean failed: " ++) ("Clean: " ++) result))
     Nothing ->
-      writeBChan eventChan $
+      notify eventChan $
         UI.ProcessLog (Text.pack "error") (Text.pack "No tracked ghc-server project root to clean")
 
 -- | The clean\/kill shutdown steps shared by 'finalizeServer' (the exception-safety-net path, which may run
@@ -313,7 +341,7 @@ streamLines eventChan streamName h macc =
         else do
           line <- Text.pack <$> IO.hGetLine h
           for_ macc (`modifyIORef'` (line :))
-          writeBChan eventChan (UI.ProcessLog streamName line)
+          notify eventChan (UI.ProcessLog streamName line)
           loop
 
 main :: IO ()
@@ -325,7 +353,11 @@ main = do
   cwd <- getCurrentDirectory
   defaultUp <- isServerUp (defaultSocketPath cwd)
   let instrSocket = instrSocketEnv <|> (if defaultUp then Just (defaultSocketPath cwd) else Nothing)
-  eventChan <- newBChan 10
+  -- Sized generously beyond the old default of 10: 'dispatch' (used for session\/build events, see above) blocks
+  -- until space is available rather than dropping, so a larger buffer reduces how often a burst of build
+  -- traffic (metadata\/compile start\/end, log messages) has to wait on the best-effort ticker\/diagnostic traffic
+  -- ('notify') being drained first.
+  eventChan <- newBChan 1000
   serverInfoRef <- newIORef Nothing
   -- Guards against 'finalizeServer' (the exception safety net) redundantly re-running the clean\/kill steps
   -- after 'requestShutdown' (the quit-key path) already did, and against a second quit-key press re-triggering
@@ -333,7 +365,7 @@ main = do
   finalizedRef <- newIORef False
   _ <- forkIO $ forever $ do
     time <- getCurrentTime
-    writeBChan eventChan (UI.SetTime time)
+    notify eventChan (UI.SetTime time)
     threadDelay 100_000
 
   case instrSocket of
