@@ -86,6 +86,7 @@ library
                       Internal.Compat.GHC914
                       Internal.Compat.Linkables
                       Internal.Compat.UnitIndex
+                      Internal.Compat.Unload
                       Internal.Compile.Make
                       Internal.Debug
                       Internal.DynFlags
