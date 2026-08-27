@@ -56,6 +56,27 @@ opLogIndicatorAttr = attrName "opLogIndicator"
 opLogTextAttr :: AttrName
 opLogTextAttr = attrName "opLogText"
 
+-- | Applied to the "Start server" label rendered above the server-start form's input fields (see
+-- 'UI.drawStartServer').
+startServerLabelAttr :: AttrName
+startServerLabelAttr = attrName "startServerLabel"
+
+-- | Foreground color for the "arrow" component of the Haskell logo (see 'UI.haskellArt'\/'UI.drawHaskellArt'):
+-- the leftmost double-chevron bracket shape, the darkest of the logo's three purple tones
+-- (@#453a62@, matching the official @purple0@ from the source in @georgefst\/haskell-logo@).
+haskellLogoArrowAttr :: AttrName
+haskellLogoArrowAttr = attrName "haskellLogoArrow"
+
+-- | Foreground color for the "lambda" component of the Haskell logo: the stylized "\955" glyph, the medium
+-- purple tone (@#5e5086@, @purple1@).
+haskellLogoLambdaAttr :: AttrName
+haskellLogoLambdaAttr = attrName "haskellLogoLambda"
+
+-- | Foreground color for the "equals" component of the Haskell logo: the two-bar "=" to the right of the
+-- lambda, the lightest\/most pink-toned purple (@#8f4e8b@, @purple2@).
+haskellLogoEqualsAttr :: AttrName
+haskellLogoEqualsAttr = attrName "haskellLogoEquals"
+
 -- | Suffix appended to a 'UI.TaskTree.ModuleRow' label once that module has been built successfully.
 builtMarker :: Text
 builtMarker = " \9989"

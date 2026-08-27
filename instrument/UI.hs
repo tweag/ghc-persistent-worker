@@ -2,18 +2,43 @@
 
 module UI (module UI, customMainWithDefaultVty) where
 
-import Brick.AttrMap (attrMap)
+import Brick.AttrMap (AttrName, attrMap)
 import Brick.Forms (Form, FormFieldState, editTextField, formState, handleFormEvent, newForm, renderForm, (@@=))
 import Brick.Main (App (..), customMainWithDefaultVty, getVtyHandle, halt, showFirstCursor, suspendAndResume')
-import Brick.Types (BrickEvent (..), EventM, Widget)
+import Brick.Types (
+  BrickEvent (..),
+  Context (availHeight, availWidth),
+  EventM,
+  Location (..),
+  Result (image),
+  Size (Greedy),
+  Widget (..),
+  getContext,
+  )
 import Brick.Util (on)
-import Brick.Widgets.Border (borderWithLabel)
+import Brick.Widgets.Border (hBorder)
 import Brick.Widgets.Border.Style (unicodeRounded)
-import Brick.Widgets.Center (center)
-import Brick.Widgets.Core (hLimitPercent, joinBorders, modifyDefAttr, str, vBox, withBorderStyle, (<+>))
+import Brick.Widgets.Center (centerLayer, hCenterLayer)
+import Brick.Widgets.Core (
+  Padding (Pad),
+  addResultOffset,
+  fill,
+  hBox,
+  hLimitPercent,
+  joinBorders,
+  modifyDefAttr,
+  padLeft,
+  padTop,
+  str,
+  vBox,
+  withAttr,
+  withBorderStyle,
+  (<+>),
+  )
 import Brick.Widgets.Edit (editFocusedAttr)
 import Brick.Widgets.List (listSelectedAttr, listSelectedElement, listSelectedElementL, listSelectedFocusedAttr)
 import Control.Exception (handle)
+import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_)
 import Data.Monoid (First (..))
@@ -56,9 +81,13 @@ import UI.Types (
   canDebugAttr,
   disabledAttr,
   evictedAttr,
+  haskellLogoArrowAttr,
+  haskellLogoEqualsAttr,
+  haskellLogoLambdaAttr,
   opLogIndicatorAttr,
   opLogTextAttr,
   pendingEvictionAttr,
+  startServerLabelAttr,
   taskFailedAttr,
   taskRunningAttr,
   taskSucceededAttr,
@@ -165,7 +194,7 @@ initialState onStartServer onKill onRestart onClean onShutdown =
     { _sessions = SessionSelector.initialState
     , _options = newForm optionFields defaultOptions
     , _serveForm = newForm serveFields defaultServeInput
-    , _currentFocus = TaskTree
+    , _currentFocus = ServeOptions
     , _currentTime = UTCTime (fromGregorian 1970 1 1) 0
     , _startServer = onStartServer
     , _killServer = onKill
@@ -191,21 +220,27 @@ drawUI State{..} =
   ( case _currentFocus of
       SessionSelector -> [SessionSelector.draw _sessions]
       OptionsEditor -> [drawOptionsEditor _options]
-      ServeOptions -> [drawServeEditor _serveForm]
+      -- The start-server form is already embedded directly in the idle\/start screen (see 'idleLayers'); this
+      -- overlay only applies when a session is connected, so 'S' still has a visible effect in that case.
+      ServeOptions -> maybe [] (const [drawServeOverlay _serveForm]) session
       TaskDetails -> let task = session >>= listSelectedElement . Session._activeTasks in maybe [] (pure . ActiveTasks.drawTaskDetails . snd) task
       LogViewer -> maybe [] (pure . drawLogViewer . Session._logViewer) session
       _ -> []
   )
-    ++ [ vBox $
+    -- On the idle\/start screen, the "GHC" banner, the Haskell-logo banner, the operational log and the
+    -- start-server form are rendered as independent layers (see 'drawGhcArt', 'drawHaskellArt', 'drawIdleLog',
+    -- 'drawIdleStartServer') instead of being stacked in a single 'vBox', so that the log and the form can each
+    -- be positioned relative to the *whole* main view rather than relative to whatever space the banners happen
+    -- to leave behind.
+    ++ maybe [drawGhcArt, drawHaskellArt, drawIdleLog _opLog, drawIdleStartServer _serveForm] (const []) session
+    ++ [ vBox
           [ joinBorders $
               withBorderStyle unicodeRounded $
-                maybe
-                  (borderWithLabel (str " GHC Persistent Worker ") $ center $ hLimitPercent 50 $ OpLog.draw 5 _opLog)
-                  (Session.draw _currentFocus _currentTime _opLog)
-                  session
+                maybe (fill ' ') (Session.draw _currentFocus _currentTime _opLog) session
+          , hBorder
           , modifyDefAttr (`V.withStyle` V.italic) $
               str
-          " q:quit   Tab:switch pane   Enter:expand/details   b:build   m:metadata   x:execute   r:trigger rebuild   d:debug   o:options   s:sessions   S:start server   K:kill server   R:restart server   C:clean cache   t:sort bytecode   e:evict bytecode   L:log"
+          " q:quit   Tab:switch focus   Enter:expand/details   b:build   m:metadata   x:execute   r:trigger rebuild   d:debug   o:options   s:sessions   S:start server   K:kill server   R:restart server   C:clean cache   t:sort bytecode   e:evict bytecode   L:log"
           ]
        ]
  where
@@ -221,14 +256,200 @@ describePath path
 drawOptionsEditor :: Form Options Event Name -> Widget Name
 drawOptionsEditor form = popup 50 "Session Options" $ renderForm form
 
-drawServeEditor :: Form ServeInput Event Name -> Widget Name
-drawServeEditor form =
-  popup 50 "Start ghc-server" $
+-- | Block-letter rendering of "GHC", 5 rows high, drawn in the top-left corner of the idle\/start screen (see
+-- 'drawGhcArt') with a two-cell margin from the top and left edges.
+ghcArt :: [String]
+ghcArt =
+  [ "█████ █   █ █████"
+  , "█     █   █ █    "
+  , "█  ██ █████ █    "
+  , "█   █ █   █ █    "
+  , "█████ █   █ █████"
+  ]
+
+-- | Position a widget as a transparent, non-space-filling layer -- like 'Brick.Widgets.Center.vCenterLayer',
+-- which this generalizes (a fraction of 0.5 reproduces it exactly) -- so that its vertical center sits at the
+-- given fraction of the available height, measured from the top of the rendering context. Only usable as a
+-- top-level layer (see 'Brick.Main.App' 'appDraw'\/'drawUI'): unlike 'vCenterLayer' it isn't meant to be nested
+-- inside another layout, since its positioning is computed against whatever the ambient context's available
+-- height happens to be at the point it renders.
+vAnchorLayer :: Double -> Widget n -> Widget n
+vAnchorLayer frac p =
+  Widget (hSize p) Greedy $ do
+    result <- render p
+    ctx <- getContext
+    let rHeight = V.imageHeight (image result)
+        targetCenter = round (frac * fromIntegral (availHeight ctx))
+        topOffset = max 0 (targetCenter - rHeight `div` 2)
+    if topOffset == 0
+      then pure result
+      else
+        pure $
+          addResultOffset (Location (0, topOffset)) $
+            result {image = V.translate 0 topOffset (image result)}
+
+-- | The "GHC" banner layer, anchored to the top-left corner of the whole screen (see 'ghcArt'). A plain
+-- 'Fixed'-sized widget doesn't fill its context, so as a layer it leaves the rest of the idle screen -- and
+-- whatever other layers sit underneath it -- untouched.
+drawGhcArt :: Widget Name
+drawGhcArt = padTop (Pad 2) $ padLeft (Pad 2) $ vBox (str <$> ghcArt)
+
+-- | A contiguous run of identical cells in one row of 'haskellArt': a repeated glyph character, optionally
+-- colored via 'haskellLogoArrowAttr'\/'haskellLogoLambdaAttr'\/'haskellLogoEqualsAttr'. 'Nothing' renders in
+-- the ambient default attribute, used for the blank cells surrounding and separating the glyph's strokes.
+data ArtCell = ArtCell
+  { artCount :: Int
+  , artChar :: Char
+  , artColor :: Maybe AttrName
+  }
+
+haskellLogo :: [[ArtCell]]
+haskellLogo =
+  [
+    line1 0,
+    line1 1,
+    line1 2,
+    line1 3,
+    line2 4 10,
+    line2 5 9,
+    line [
+      (6, segment 5 chevron otri itri),
+      (1, segment 5 lambda otri ur)
+    ],
+    line3 5 7 7,
+    line3 4 9 6,
+    line [
+      (3, segment 5 chevron ul lr),
+      (1, segment 5 lambda ul utri),
+      (0, segment 4 lambda full ur)
+    ],
+    line4 2 1,
+    line4 1 3,
+    line4 0 5
+  ]
+ where
+  chevron = haskellLogoArrowAttr
+  lambda = haskellLogoLambdaAttr
+  equals = haskellLogoEqualsAttr
+
+  line1 pre =
+    line [
+      (pre, chevron2),
+      (1, lambda2)
+    ]
+
+  line2 pre eqWidth =
+    line [
+      (pre, chevron2),
+      (1, segment 5 lambda ll ur),
+      (1, segment eqWidth equals ll full)
+    ]
+
+  line3 pre lamWidth eqWidth =
+    line [
+      (pre, segment 5 chevron ul lr),
+      (1, segment lamWidth lambda ul ur),
+      (1, segment eqWidth equals ll full)
+    ]
+
+  line4 pre gap =
+    line [
+      (pre, chevron1),
+      (1, lambda1),
+      (gap, lambda2)
+    ]
+
+  chevron1 = segment 5 chevron ul lr
+
+  chevron2 = segment 5 chevron ll ur
+
+  lambda1 = segment 5 lambda ul lr
+
+  lambda2 = segment 5 lambda ll ur
+
+  line cells =
+    mconcat [ws w ++ c | (w, c) <- cells]
+
+  ws artCount =
+    [
+      ArtCell {
+        artCount,
+        artChar = ' ',
+        artColor = Nothing
+      }
+    ]
+
+  segment width color l r =
+    [
+      ArtCell 1 l (Just color),
+      ArtCell width full (Just color),
+      ArtCell 1 r (Just color)
+    ]
+
+  ul = '◢'
+  ur = '◣'
+  ll = '◥'
+  lr = '◤'
+  full = '█'
+  itri = '🭬'
+  otri = '🭨'
+  utri = '🭫'
+
+renderArtCell :: ArtCell -> Widget Name
+renderArtCell (ArtCell n c color) = maybe id withAttr color (str (replicate n c))
+
+-- | The Haskell-logo banner layer (see 'haskellArt'), anchored to the top-right corner of the whole screen
+-- with a two-cell margin from both edges, mirroring 'drawGhcArt' on the opposite side.
+drawHaskellArt :: Widget Name
+drawHaskellArt = hAnchorRightLayer 2 $ padTop (Pad 2) $ vBox (hBox . fmap renderArtCell <$> haskellLogo)
+
+-- | Position a widget as a transparent, non-space-filling layer -- the horizontal, right-anchored analogue of
+-- 'vAnchorLayer' (and of 'Brick.Widgets.Center.hCenterLayer', which this would reproduce if the margin were
+-- chosen to center rather than right-align) -- so that its right edge sits the given number of columns from
+-- the right edge of the whole screen. Only usable as a top-level layer, for the same reason as 'vAnchorLayer'.
+hAnchorRightLayer :: Int -> Widget n -> Widget n
+hAnchorRightLayer marginRight p =
+  Widget Greedy (vSize p) $ do
+    result <- render p
+    ctx <- getContext
+    let rWidth = V.imageWidth (image result)
+        leftOffset = max 0 (availWidth ctx - rWidth - marginRight)
+    if leftOffset == 0
+      then pure result
+      else
+        pure $
+          addResultOffset (Location (leftOffset, 0)) $
+            result {image = V.translate leftOffset 0 (image result)}
+
+-- | The operational message log layer, centered relative to the whole main view (i.e. the entire screen above
+-- the footer legend, ignoring how much space the "GHC" banner and the start-server form separately occupy --
+-- see 'drawGhcArt', 'drawIdleStartServer').
+drawIdleLog :: OpLog.State -> Widget Name
+drawIdleLog opLogState = centerLayer (hLimitPercent 50 (OpLog.draw 5 opLogState))
+
+-- | The "start ghc-server" form: a "Start server" label (blue) above the project-path\/extra-options input
+-- fields. Unbordered; callers are responsible for placement (see 'drawIdleStartServer', 'drawServeOverlay').
+drawStartServer :: Form ServeInput Event Name -> Widget Name
+drawStartServer form =
+  hLimitPercent 50 $
     vBox
-      [ renderForm form
+      [ withAttr startServerLabelAttr (str "Start server")
+      , str " "
+      , renderForm form
       , str " "
       , str "Leaving the path empty starts ghc-server in the current directory."
       ]
+
+-- | The start-server form layer, positioned so that it sits a quarter of the main view's height above the
+-- footer legend (i.e. its vertical center is at 3\/4 of the main view's height, measured from the top).
+drawIdleStartServer :: Form ServeInput Event Name -> Widget Name
+drawIdleStartServer form = hCenterLayer (vAnchorLayer 0.75 (drawStartServer form))
+
+-- | Fallback rendering of the "start ghc-server" form as a borderless overlay, used when the 'S' key is pressed
+-- while a session is already connected (so 'drawIdleStartServer', which normally hosts the form, is not on
+-- screen).
+drawServeOverlay :: Form ServeInput Event Name -> Widget Name
+drawServeOverlay form = centerLayer (drawStartServer form)
 
 drawLogViewer :: LogViewer.State -> Widget Name
 drawLogViewer = popup 80 "Server Log" . LogViewer.draw LogViewer
@@ -330,8 +551,13 @@ handleEvent (AppEvent (RequestEvict unitId modName)) = do
   mconn <- bcoConnection
   for_ mconn $ \conn -> liftIO $ evictBytecode conn unitId (maybe Text.empty id modName)
   zoom (currentSession . Session.bcoBrowser) (BytecodeBrowser.handleEvent (BytecodeBrowser.Evicted unitId modName))
-handleEvent (AppEvent (SessionSelectorEvent evt)) =
+handleEvent (AppEvent (SessionSelectorEvent evt)) = do
   zoom sessions (SessionSelector.handleEvent evt)
+  -- The first session to appear is auto-selected (see 'SessionSelector.handleEvent's 'StartSession' case)
+  -- without the user dismissing any modal, so the idle screen's initial focus (the start-server form) has to be
+  -- moved off explicitly here once that happens, mirroring what the other modals' "hide" logic does on Esc\/Enter.
+  current <- use currentFocus
+  when (current == ServeOptions) $ currentFocus .= TaskTree
 handleEvent (AppEvent (RequestServe path opts)) = do
   action <- use startServer
   liftIO $ action path (words (Text.unpack opts))
@@ -362,6 +588,10 @@ handleEvent (VtyEvent evt) = do
         V.EvKey V.KEnter [] -> hide
         _ -> zoom options (handleFormEvent (VtyEvent evt))
     ServeOptions -> do
+      -- Esc\/Enter always fall back to 'TaskTree', not back into the form (even though the form is the initial
+      -- focus on the idle screen -- see 'initialState'): otherwise there would be no way to reach any other
+      -- keybinding (including quit) while no session is connected, since every keystroke would keep being routed
+      -- right back into the form.
       let hide = currentFocus .= TaskTree
       case evt of
         V.EvKey V.KEsc [] -> hide
@@ -490,6 +720,10 @@ app =
             , (taskFailedAttr, V.defAttr `V.withForeColor` red)
             , (opLogIndicatorAttr, V.withStyle (V.defAttr `V.withForeColor` green) V.bold)
             , (opLogTextAttr, V.defAttr `V.withForeColor` brightWhite)
+            , (startServerLabelAttr, V.defAttr `V.withForeColor` blue)
+            , (haskellLogoArrowAttr, V.defAttr `V.withForeColor` RGBColor 0x45 0x3a 0x62)
+            , (haskellLogoLambdaAttr, V.defAttr `V.withForeColor` RGBColor 0x5e 0x50 0x86)
+            , (haskellLogoEqualsAttr, V.defAttr `V.withForeColor` RGBColor 0x8f 0x4e 0x8b)
             ]
     , appChooseCursor = showFirstCursor
     }

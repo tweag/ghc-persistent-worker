@@ -3,7 +3,7 @@
 module UI.Session where
 
 import Brick.Types (EventM, Widget)
-import Brick.Widgets.Border (borderWithLabel, hBorder, vBorder)
+import Brick.Widgets.Border (hBorder, vBorder)
 import Brick.Widgets.Core (hBox, hLimitPercent, str, vBox, vLimitPercent)
 import Data.Map qualified as Map
 import Data.Text qualified as Text
@@ -92,20 +92,19 @@ toBrowserEntries entries =
 -- height, growing up to that cap).
 draw :: Name -> UTCTime -> OpLog.State -> State -> Widget Name
 draw current now opLog Session{..} =
-  borderWithLabel (str $ " GHC Persistent Worker  " ++ _title ++ " ") $
-    vBox
-      [ vLimitPercent 30 $ ActiveTasks.draw current now _activeTasks
-      , hBorder
-      , hBox
-          [ hLimitPercent 50 $ TaskTree.draw current _taskTree
-          , vBorder
-          , BytecodeBrowser.draw current _bcoBrowser
-          ]
-      , hBorder
-      , drawStats (length _workers) (foldMap _stats _workers <> _finishedWorkerStats)
-      , hBorder
-      , OpLog.draw 5 opLog
-      ]
+  vBox
+    [ vLimitPercent 30 $ ActiveTasks.draw current now _activeTasks
+    , hBorder
+    , hBox
+        [ hLimitPercent 50 $ TaskTree.draw current _taskTree
+        , vBorder
+        , BytecodeBrowser.draw current _bcoBrowser
+        ]
+    , hBorder
+    , drawStats (length _workers) (foldMap _stats _workers <> _finishedWorkerStats)
+    , hBorder
+    , OpLog.draw 5 opLog
+    ]
 
 drawStats :: Int -> Stats -> Widget Name
 drawStats workerCount Stats{..} =
