@@ -90,6 +90,7 @@ library
                       Internal.Compat.ModuleGraph.GHC914
                       Internal.Compat.ModuleGraph.Reachability
                       Internal.Compat.UnitIndex
+                      Internal.Compat.Unload
                       Internal.Compile.Make
                       Internal.Compile.TopEnv
                       Internal.Debug
