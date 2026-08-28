@@ -155,6 +155,7 @@ test-suite ghc-server-test
     Test.BuildTest
     Test.CabalTest
     Test.CacheTest
+    Test.EvictionTest
     Test.ScheduleTest
     Test.SchedulerTest
   build-depends:
@@ -168,6 +169,7 @@ test-suite ghc-server-test
     filepath,
     ghc,
     ghc-server,
+    ghc-worker-test-common,
     hedgehog,
     tasty >= 1.5,
     tasty-hedgehog,

@@ -389,6 +389,7 @@
           "filepath"
           "ghc"
           "ghc-server"
+          "ghc-worker-test-common"
           "hedgehog"
           "tasty"
           "tasty-hedgehog"
