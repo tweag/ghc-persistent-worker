@@ -80,7 +80,7 @@ executeModuleTask buildEnv ext name modName =
         captured <- logger.flush
         logger.debug ("executeModuleTask: " ++ name.string ++ ":" ++ modBaseName ++ " outcome=" ++ show (outcomeLabel outcome))
         pure $ case outcome of
-          ExecSessionFailed reason -> Just (TaskFailed reason)
+          ExecSessionFailed reason -> Just (TaskFailed (reason ++ "\n" ++ unlines captured))
           ExecSetupFailed reason -> Just (TaskFailed reason)
           ExecNoMain -> Nothing
           ExecRan True mResultStr -> Just (TaskSuccess (Text.pack <$> mResultStr))
