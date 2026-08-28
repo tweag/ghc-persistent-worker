@@ -91,12 +91,18 @@ test_evictBySize =
       WorkerState {make} <- liftIO $ readMVar sessionEnv.env.state
       [showPprUnsafe (moduleFor keyB)] === (showPprUnsafe <$> Map.keys make.bcoCache)
 
+      -- Only modules that are actually referenced by a TH splice (via 'Language.Haskell.TH.Syntax.lift') are ever
+      -- linked into the interpreter's loader, tracked by 'Internal.State.Linkables.linkablesSelect' via
+      -- 'ldAllLinkables' and mirrored 1:1 into 'MakeState.bcoCache'. Module A is spliced by C, module B is spliced
+      -- by D; C and D themselves are never splice targets of anything (D depends only on B, not on C), so they are
+      -- never loaded into the interpreter at all -- independently of the LRU eviction exercised above, which only
+      -- ever unloads modules that were tracked in 'bcoCache' in the first place.
       bcos <- loadedBcos sessionEnv.env
       let modules = [modFs | (_, modFs, _) <- bcos]
       assert (not (any (== "Unit0Module0") modules))
       assert (any (== "Unit1Module0") modules)
-      assert (any (== "Unit1Module1") modules)
-      assert (any (== "Unit1Module2") modules)
+      assert (not (any (== "Unit1Module1") modules))
+      assert (not (any (== "Unit1Module2") modules))
 
 test_touchNoEviction :: TestTree
 test_touchNoEviction =
