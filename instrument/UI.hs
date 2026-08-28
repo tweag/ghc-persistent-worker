@@ -612,7 +612,7 @@ handleEvent (VtyEvent evt) = do
         V.EvKey V.KEsc [] -> hide
         V.EvKey (V.KChar 'q') [] -> hide
         V.EvKey (V.KChar 'L') [] -> hide
-        _ -> handleListEventOf (currentSession . Session.logViewer . LogViewer.rowsLens) evt
+        _ -> zoom (currentSession . Session.logViewer) (LogViewer.handleEvent evt)
     _ -> case evt of
       V.EvKey V.KEsc [] -> requestQuit
       V.EvKey (V.KChar 'q') [] -> requestQuit
