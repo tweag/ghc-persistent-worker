@@ -10,6 +10,7 @@ import Test.BuildTest (test_serverBuild)
 import Test.CabalTest (test_cabalTests)
 import Test.CacheTest (test_depLoadOrder)
 import Test.CompactBytecodeTest (test_compactBytecode)
+import Test.EvictionTest (test_bcoEvictionManual)
 import Test.ExecutorPlanTest (test_executorPlan)
 import Test.GbcTransportTest (test_gbcTransport)
 import Test.ScheduleTest (test_schedule)
@@ -26,6 +27,7 @@ tests =
     test_serverBuild,
     test_cabalTests,
     test_depLoadOrder,
+    test_bcoEvictionManual,
     test_schedule,
     test_scheduler,
     test_compactBytecode,
