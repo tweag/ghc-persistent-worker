@@ -14,7 +14,7 @@ module GhcServer.Cabal.ExtDeps (
 ) where
 
 import Control.Concurrent.MVar (modifyMVar)
-import Control.Exception (displayException, try)
+import Control.Exception (SomeAsyncException, SomeException, displayException, fromException, throwIO, try)
 import Data.Char (isAlphaNum)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -22,7 +22,7 @@ import Distribution.Client.Config (defaultStoreDir)
 import Distribution.Client.DistDirLayout (CabalDirLayout (..), StoreDirLayout (..))
 import Distribution.Client.InstallPlan (GenericPlanPackage (..))
 import qualified Distribution.Client.InstallPlan as InstallPlan
-import Distribution.Client.ProjectConfig.Types (ProjectConfig (..), ProjectConfigShared (..))
+import Distribution.Client.ProjectConfig.Types (ProjectConfig (..), ProjectConfigBuildOnly (..), ProjectConfigShared (..))
 import Distribution.Client.ProjectOrchestration (
   CurrentCommand (OtherCommand),
   ProjectBaseContext (..),
@@ -36,10 +36,12 @@ import Distribution.Client.ProjectPlanning.Types (ElaboratedConfiguredPackage (.
 import Distribution.Package (HasUnitId (..))
 import Distribution.Simple.Flag (toFlag)
 import Distribution.Types.UnitId (UnitId)
-import Distribution.Verbosity (silent)
+import Distribution.Verbosity (verbose)
 import GHC.Paths (ghc, libdir)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Path (fp)
+import System.IO (stderr, stdout)
+import System.IO.Silently (hCapture)
 import Types.Log (Logger (..))
 import Prelude hiding (log)
 
@@ -80,13 +82,27 @@ localUnitIds plan =
 -- dependencies of the local packages, executes that pruned plan, then reports the store's package
 -- database path for the compiler that was used (pinned to the server's own in-process GHC via
 -- 'GHC.Paths.ghc', ensuring ABI compatibility).
+--
+-- Cabal/@cabal-install@ report progress and failures by printing to stdout\/stderr at the given
+-- 'Verbosity' rather than through a return value or a pluggable logger (there is no supported hook to
+-- redirect this to an arbitrary sink), so 'verbose' is used everywhere a 'Verbosity' is threaded through
+-- below to ensure failures are actually descriptive. That output is captured for the duration of the
+-- build via 'hCapture' -- which also stops it from interleaving with concurrent unit builds' output on
+-- the real handles -- then re-emitted through 'logger.info' (so it still ends up in the log panel like
+-- ordinary server stdio) and, on failure, appended to the returned error so it reaches 'TaskFailed'
+-- directly instead of only being discoverable by scrolling back through the log.
 resolvePackageDb :: Logger -> FilePath -> IO (Either String FilePath)
 resolvePackageDb logger projectDir = do
   logger.info ("Building external dependencies in-process via cabal-install for " ++ projectDir)
-  attempt <- try build
-  pure case attempt of
-    Left (e :: IOError) -> Left (displayException e)
-    Right dbPath -> Right dbPath
+  (captured, attempt) <- hCapture [stdout, stderr] (try build)
+  logger.info captured
+  case attempt of
+    Left (e :: SomeException)
+      -- Don't swallow the scheduler's task-timeout cancellation (see 'Test.Scheduler.Concurrent.runTask'):
+      -- rethrow async exceptions instead of reporting them as an ordinary build failure.
+      | Just asyncExc <- fromException e -> throwIO (asyncExc :: SomeAsyncException)
+      | otherwise -> pure (Left (displayException e ++ "\n" ++ captured))
+    Right dbPath -> pure (Right dbPath)
   where
     build = do
       storeDir <- scopedStoreDir
@@ -109,6 +125,13 @@ resolvePackageDb logger projectDir = do
                 -- See 'scopedStoreDir': avoids ABI-incompatible reuse of a store populated by a
                 -- different custom GHC build that happens to share the same version string.
                 projectConfigStoreDir = toFlag storeDir
+              },
+            -- Verbosity for the per-package configure\/build steps that 'runProjectBuildPhase' drives
+            -- (Setup.hs invocations); see the 'verbose' arguments below for the top-level orchestration
+            -- verbosity, and the module-level note above 'resolvePackageDb' for why this is necessary.
+            projectConfigBuildOnly =
+              mempty {
+                projectConfigVerbosity = toFlag verbose
               }
             -- projectConfigBuildOnly =
             --   mempty {
@@ -116,13 +139,13 @@ resolvePackageDb logger projectDir = do
             --     projectConfigUseSemaphore = toFlag False
             --   }
           }
-      ctx <- establishProjectBaseContext silent cliConfig OtherCommand
+      ctx <- establishProjectBaseContext verbose cliConfig OtherCommand
       buildCtx <-
-        runProjectPreBuildPhase silent ctx \elaboratedPlan ->
+        runProjectPreBuildPhase verbose ctx \elaboratedPlan ->
           case pruneInstallPlanToDependencies (localUnitIds elaboratedPlan) elaboratedPlan of
             Left err -> fail ("Cannot prune install plan to dependencies: " ++ show err)
             Right pruned -> pure (pruned, Map.empty)
-      outcomes <- runProjectBuildPhase silent ctx buildCtx
+      outcomes <- runProjectBuildPhase verbose ctx buildCtx
       case [err | (_, Left err) <- Map.toList outcomes] of
         (err : _) -> fail ("Build failed: " ++ show err)
         [] ->
@@ -131,10 +154,15 @@ resolvePackageDb logger projectDir = do
 -- | Ensure the project's external Cabal dependencies have been built into the store, memoizing the
 -- result in 'BuildEnv.extDepsDb' so the (potentially slow) build only runs once per server lifetime,
 -- regardless of how many units request it concurrently.
-ensureExtDepsDb :: BuildEnv -> IO (Either String FilePath)
-ensureExtDepsDb env =
+--
+-- Takes the caller's 'Logger' (rather than reaching into 'BuildEnv.log' directly) so that whichever
+-- caller happens to trigger the actual build gets its own instrument-connected logger used for
+-- 'resolvePackageDb''s output, ensuring it reaches the instrument UI's log viewer like the rest of
+-- that caller's log output.
+ensureExtDepsDb :: BuildEnv -> Logger -> IO (Either String FilePath)
+ensureExtDepsDb env logger =
   modifyMVar env.extDepsDb \case
     Just cached -> pure (Just cached, cached)
     Nothing -> do
-      result <- resolvePackageDb env.log (fp env.projectRoot)
+      result <- resolvePackageDb logger (fp env.projectRoot)
       pure (Just result, result)

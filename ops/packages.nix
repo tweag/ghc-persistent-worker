@@ -347,6 +347,7 @@
           "optparse-applicative"
           "parsec"
           "process"
+          "silently"
           "stm"
           "text"
           "time"

@@ -92,7 +92,7 @@ runMetadata buildEnv name = do
     withExtDeps unit logger
       | null unit.extDeps = run unit logger
       | otherwise =
-        ensureExtDepsDb buildEnv >>= \case
+        ensureExtDepsDb buildEnv logger >>= \case
           Left err -> pure ([(name, "External dependency build failed: " ++ err)], [])
           Right dbPath -> run (unit {ghcArgs = ["-package-db", dbPath] ++ unit.ghcArgs}) logger
 
