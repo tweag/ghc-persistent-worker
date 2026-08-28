@@ -328,6 +328,24 @@ test_insertPendingResolvesImmediately =
     Map.null result.pending === True
     readyKeys result === Set.singleton 1
 
+-- | Regression test: two independent requests (e.g. separate 'TriggerBuild' RPCs for sibling modules
+-- that share an already-built implicit dependency) each submit a 'Pending' task for the same key once
+-- its resolution is already cached. The second call must not append a duplicate entry to 'ready' --
+-- 'readyKeys' alone can't detect this, since it de-duplicates through a 'Set', so this asserts on the
+-- length of the raw 'ready' list instead.
+test_insertPendingDoesNotDuplicateAlreadyAcceptedReadyTask :: TestTree
+test_insertPendingDoesNotDuplicateAlreadyAcceptedReadyTask =
+  unitTest "insertPending does not duplicate an already-accepted ready task" do
+    let
+      state = emptyState {
+        resolutions = mkResolutions [(1, (ResolvedVal 10, Set.empty))]
+      }
+      afterFirst = insertPending (pendingTask 1 Set.empty True 10) state
+      afterSecond = insertPending (pendingTask 1 Set.empty True 10) afterFirst
+    length afterFirst.ready === 1
+    Map.null afterSecond.pending === True
+    length afterSecond.ready === 1
+
 -- ---------------------------------------------------------------------------
 -- Tests for 'addResolutions'
 -- ---------------------------------------------------------------------------
@@ -373,7 +391,8 @@ test_scheduler =
         [ test_addResolutionsPromotesPending
         ]
     , dependentTestGroup "insertPending" AllFinish
-        [ test_insertPendingMergesEnabled
+    [ test_insertPendingMergesEnabled
         , test_insertPendingResolvesImmediately
+        , test_insertPendingDoesNotDuplicateAlreadyAcceptedReadyTask
         ]
     ]

@@ -303,11 +303,19 @@ resolveTask k s = do
       [rk | pk <- Set.toList pendingDeps, Just (rk, _, _) <- [Map.lookup pk s.resolutions]]
     allDeps = Set.union task.deps resolvedDeps
     resolvedTask = Task {key = resolvedKey, deps = allDeps, enabled = task.enabled, value = resolved}
-    s' = s {
-      pending = Map.delete k s.pending,
-      unsatisfied = Map.insert resolvedKey (resolvedTask, Set.difference allDeps s.completed) s.unsatisfied,
-      accepted = Set.insert resolvedKey s.accepted
-    }
+    withoutPending = s {pending = Map.delete k s.pending}
+    -- Guard against reprocessing a key that was already activated by an earlier resolution reachable
+    -- via a different pending key (e.g. an implicit cross-unit dependency task re-enqueued by several
+    -- independent requests once its resolution is already cached). Without this guard, a resolved key
+    -- already sitting in 'unsatisfied'/'ready' would be reinserted and re-promoted, appending a
+    -- duplicate entry to the unguarded 'ready' list -- mirrors the guard 'classifyTask' already applies
+    -- via 'state.accepted' for active tasks.
+    s'
+      | Set.member resolvedKey s.accepted = withoutPending
+      | otherwise = withoutPending {
+        unsatisfied = Map.insert resolvedKey (resolvedTask, Set.difference allDeps s.completed) s.unsatisfied,
+        accepted = Set.insert resolvedKey s.accepted
+      }
   pure (s', [pk | pk <- Set.toList pendingDeps, Map.member pk s'.pending])
 
 -- | Promote all pending tasks that have @enabled = True@ and have an entry
