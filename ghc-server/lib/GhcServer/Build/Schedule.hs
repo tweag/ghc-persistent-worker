@@ -133,12 +133,16 @@ metadataTasks project cachedUnits rebuild =
 -- Each task depends only on its unit's metadata task. Foreign-unit and home-unit
 -- module deps are injected later at promotion time using resolution data.
 --
--- The @isEnabled@ flag controls whether the task is eligible for promotion.
--- Tasks for implicit dependency units should pass @False@; the scheduler's
--- 'insertPending' will upgrade the flag with OR if a later batch enables them.
+-- The @isEnabled@ predicate controls, per source file, whether the task is eligible for
+-- promotion. Tasks for implicit dependency units should pass @const False@; the scheduler's
+-- 'insertPending' will upgrade the flag with OR if a later batch enables them. A per-source
+-- predicate (rather than a single uniform flag) lets callers restrict enabling to specific
+-- requested modules -- e.g. 'GhcServer.Build.Classify.compileEnabledSources' -- so that other
+-- modules in the same unit are still tracked (for dependency propagation) without being
+-- independently promoted.
 --
 -- The @rebuild@ flag is embedded in the task value for dispatch-time skip decisions.
-compileTasksFromSources :: UnitName -> Bool -> Bool -> [OsPath] -> [Task TaskKey 'Pending BuildStatus]
+compileTasksFromSources :: UnitName -> Bool -> (OsPath -> Bool) -> [OsPath] -> [Task TaskKey 'Pending BuildStatus]
 compileTasksFromSources name rebuild isEnabled =
   map mkTask
   where
@@ -146,7 +150,7 @@ compileTasksFromSources name rebuild isEnabled =
       Task {
         key = PendingSource name src,
         deps = Set.singleton (MetaTask name),
-        enabled = isEnabled,
+        enabled = isEnabled src,
         value = BuildStatus {rebuild, cached = False}
       }
 

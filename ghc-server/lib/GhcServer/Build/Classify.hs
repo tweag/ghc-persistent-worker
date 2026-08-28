@@ -26,8 +26,8 @@ import GhcServer.Data.Request (
   EffectiveUnit (..),
   ScheduleRequest (..),
   UnitRequest (..),
-  effectiveIsCompile,
   effectiveUnitName,
+  isCompileRequest,
   )
 import GhcServer.Data.Unit (ClientModule (..), Project (..), Unit (..), UnitName (..))
 import GhcServer.Path (fp)
@@ -86,9 +86,28 @@ classifyBuildRequest cachedUnits env request =
           compileTasksFromSources
             (effectiveUnitName eu)
             rebuild
-            (effectiveIsCompile rebuild eu)
+            (compileEnabledSources unit eu)
             unit.sources
         Nothing -> []
+
+    -- | Whether a source file should be enabled for compilation, given an effective unit
+    -- request.
+    --
+    -- 'UnitModules'\/'UnitExecuteModules' restrict enabling to the sources of the selected
+    -- modules only, mirroring 'selectedSources' below (used for the analogous execute-task
+    -- restriction) -- without this, every source of the unit would be enabled regardless of
+    -- which modules were actually requested, causing unrelated modules to be scheduled
+    -- (and, when the same unit receives multiple concurrent per-module requests, e.g. from
+    -- the UI's project-root or unit-header \'build\' action, redundantly re-resolving
+    -- already-dispatched modules into duplicate scheduler entries).
+    -- Other explicit request kinds enable either all sources or none, uniformly for the
+    -- whole unit. Implicit deps are controlled by the @recompile@ parameter, as before.
+    compileEnabledSources :: Unit -> EffectiveUnit -> OsPath -> Bool
+    compileEnabledSources unit = \case
+      Explicit _ (UnitModules mods) -> (`elem` selectedSources unit mods)
+      Explicit _ (UnitExecuteModules mods) -> (`elem` selectedSources unit mods)
+      Explicit _ req -> const (isCompileRequest req)
+      ImplicitDep _ -> const rebuild
 
     -- | Execute tasks are only produced for units explicitly requested with 'UnitExecute'\/
     -- 'UnitExecuteModules' -- implicit transitive deps and other request kinds never trigger execution.

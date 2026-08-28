@@ -85,14 +85,17 @@ addTask name wid canDebug = do
   listElementsL .= Seq.insertAt i (Task name time Nothing Nothing wid canDebug) tasks
   modifying listSelectedL (Just . maybe i (\i' -> if i' >= i then i' + 1 else i'))
 
--- | Mark a task as finished with the given outcome, keeping it in the list indefinitely instead of removing it.
+-- | Mark all tasks matching the given target as finished with the given outcome, keeping them in the list
+-- indefinitely instead of removing them. Updates every match rather than just the first, since duplicate
+-- entries for the same target can occur (e.g. retries), and picking only the first risks completing an
+-- already-finished row instead of the one the outcome actually belongs to.
 completeTask :: TargetSpec -> Outcome -> EventM Name State ()
 completeTask target outcome = do
   time <- liftIO getCurrentTime
-  tasks <- use listElementsL
-  case Seq.findIndexL ((== target) . _taskTarget) tasks of
-    Just i -> listElementsL .= Seq.adjust' (\t -> t{_outcome = Just outcome, _taskEndTime = Just time}) i tasks
-    Nothing -> pure ()
+  let complete t
+        | _taskTarget t == target = t{_outcome = Just outcome, _taskEndTime = Just time}
+        | otherwise = t
+  modifying listElementsL (fmap complete)
 
 getSelectedTarget :: EventM Name State (Maybe (WorkerId, TargetSpec))
 getSelectedTarget = do

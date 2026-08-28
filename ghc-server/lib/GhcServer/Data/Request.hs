@@ -54,23 +54,6 @@ effectiveUnitName = \case
   Explicit name _ -> name
   ImplicitDep name -> name
 
--- | Whether an effective unit triggers compilation.
---
--- Explicit requests delegate to 'isCompileRequest'.
--- Implicit deps are controlled by the @recompile@ parameter: when 'True',
--- implicit deps enable compilation directly; when 'False' (default), their
--- compile tasks start disabled and are only promoted transitively by the
--- scheduler when they appear as dependencies of explicitly-compiled units.
---
--- Module index entries are always built for all units (including cached
--- implicit deps), so cross-unit scheduler dependencies are created.
--- Whether to actually compile or skip is decided at dispatch time by
--- 'dispatchTask' based on cache availability.
-effectiveIsCompile :: Bool -> EffectiveUnit -> Bool
-effectiveIsCompile recompile = \case
-  Explicit _ req -> isCompileRequest req
-  ImplicitDep _ -> recompile
-
 -- | Whether a 'UnitRequest' triggers compilation for a unit.
 isCompileRequest :: UnitRequest -> Bool
 isCompileRequest = \case

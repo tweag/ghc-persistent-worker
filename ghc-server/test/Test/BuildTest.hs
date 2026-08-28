@@ -605,6 +605,27 @@ test_cacheSpecificModules =
     assertNoMetadata "unit1" events2
     assertHasCompiled "unit1" events2
 
+-- | Regression test for a bug where 'UnitModules' enabled compilation for every source
+-- file of the unit instead of just the requested module(s), which allowed unrelated
+-- sibling modules to be scheduled\/compiled alongside the one actually requested (and, when
+-- the same unit received multiple concurrent per-module requests -- as the UI's
+-- project-root and unit-header 'build' actions do -- caused the same module to be
+-- redundantly resubmitted and dispatched twice).
+test_cacheSpecificModuleDoesNotCompileSiblings :: TestTree
+test_cacheSpecificModuleDoesNotCompileSiblings =
+  largeTest "requesting a specific module does not compile independent sibling modules" \ tp -> do
+    (result1, _) <- runFreshAll tp
+    assertSuccess "initial build" result1
+    (result2, events2) <- runFresh tp [(UnitName "unit1", UnitModules [ClientModule "B1"])]
+    assertSuccess "cached specific module" result2
+    assertNoMetadata "unit1" events2
+    assertEventsContain [ModuleCompiled (UnitName "unit1") (mkModuleName "B1")] events2
+    assertNoEvent isUnrelatedUnit1Compile events2
+  where
+    isUnrelatedUnit1Compile = \case
+      ModuleCompiled (UnitName "unit1") m -> m /= mkModuleName "B1"
+      _ -> False
+
 test_cacheDeleteLeafRebuildsChain :: TestTree
 test_cacheDeleteLeafRebuildsChain =
   smallTest "deleting leaf cache: leaf interface present, skip compile" \ tp -> do
@@ -639,6 +660,7 @@ test_cacheRestore =
     , test_cacheModulesOnly
     , test_cacheMixedFreshAndCached
     , test_cacheSpecificModules
+    , test_cacheSpecificModuleDoesNotCompileSiblings
     , test_cacheDeleteLeafRebuildsChain
     , test_cacheDeleteMiddleUnit
     ]
