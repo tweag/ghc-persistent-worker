@@ -38,7 +38,7 @@ import GHC.Unit.Module.ModIface (mi_module)
 import GHC.Unit.Types (toUnitId)
 import GHC.Utils.Outputable (parens, ppr, text, (<+>))
 import Internal.Cache.Bytecode (touchBcoCache)
-import Internal.Cache.Hpt (loadCachedByteCodeFrom)
+import Internal.Cache.Hpt (loadCachedByteCodeFrom, reloadIfaceFromDisk)
 import Internal.Error (workerErrorIO)
 import Internal.State (modifyMakeState)
 import Language.Haskell.Syntax.ImpExp (IsBootInterface (..))
@@ -73,7 +73,9 @@ withFinder hsc_env hug f =
 -- Query the Finder for a 'ModLocation', since we don't have a file path available, which is normally used when loading
 -- bytecode from cache upfront.
 -- Then, compile bytecode from Core as usual.
--- If the interface has no Core, skip and return 'Nothing'.
+-- If the in-memory interface has no Core, reload the interface from disk and try once more, since the on-disk version
+-- may contain Core bindings that were stripped from (or never present in) the copy we're holding.
+-- If that still yields no Core, skip and return 'Nothing'.
 -- Otherwise, add the bytecode 'Linkable' to the HPT in the state and return it.
 -- HPTs are stored in 'IORef's, so the bytecode will be available to other compile tasks immediately.
 --
@@ -90,9 +92,14 @@ lazyLoadByteCode logger stateVar hsc_env hmi = do
   logger.debugD ("Loading lazy bytecode for " <+> ppr module_)
   modifyMVar stateVar \ state -> do
     location <- findLocation state.make.hug
-    loadCachedByteCodeFrom hsc_env location (hm_iface hmi) (hm_details hmi) >>= \case
-      Just bytecode -> insertBytecode state bytecode
-      Nothing -> pure (state, Nothing)
+    bytecode <- loadCachedByteCodeFrom hsc_env location (hm_iface hmi) (hm_details hmi) >>= \case
+      Just bytecode -> pure (Just bytecode)
+      -- The in-memory interface may be missing Core bindings even though the on-disk interface has them, so reload it
+      -- from disk and try once more before giving up.
+      Nothing -> do
+        iface <- reloadIfaceFromDisk hsc_env location
+        loadCachedByteCodeFrom hsc_env location iface (hm_details hmi)
+    maybe (pure (state, Nothing)) (insertBytecode state) bytecode
   where
     findLocation hug = do
       result <- withFinder hsc_env hug findExactModule (hsc_units hsc_env) (Just homeUnit) (toUnitId <$> module_) NotBoot

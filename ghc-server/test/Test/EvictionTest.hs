@@ -24,7 +24,6 @@ module Test.EvictionTest where
 
 import Control.Concurrent.MVar (readMVar)
 import Control.Monad.IO.Class (liftIO)
-import Data.List (isInfixOf)
 import qualified Data.Map.Strict as Map
 import GHC (ModuleName, mkModuleName)
 import GHC.Utils.Outputable (showPprUnsafe)
@@ -49,6 +48,7 @@ import System.IO (readFile')
 import Test.BuildTest (TestProject (..), baseGhcArgs, newBuildEnv, projectTest, writeUnitConfig)
 import Test.Data.Project (ModuleKey (..))
 import Test.Path (moduleName, moduleValueName)
+import Test.Run (assertJust)
 import Test.Source (writeFatModuleSource)
 import Test.Tasty (TestName, TestTree)
 import Types.CachedDeps (CachedDeps (..))
@@ -115,8 +115,8 @@ createEvictionProject root = do
     mainSource =
       unlines [
         "",
-        "main :: IO ()",
-        "main = print (" ++ moduleValueName moduleKey ++ " + " ++ moduleName helperModuleKey ++ "." ++ moduleValueName helperModuleKey ++ ")"
+        "main :: IO Int",
+        "main = pure (" ++ moduleValueName moduleKey ++ " + " ++ moduleName helperModuleKey ++ "." ++ moduleValueName helperModuleKey ++ ")"
       ]
 
 evictionProjectTest :: TestName -> (TestProject -> TestT IO ()) -> TestTree
@@ -191,34 +191,4 @@ test_bcoEvictionManual =
     assert (Map.notMember targetModule afterState.make.bcoCache)
     assert (Map.notMember helperModule afterState.make.bcoCache)
 
-    -- Re-run execution after eviction. The target module is always force-recompiled by
-    -- 'GhcServer.Build.Execute.executeModuleTask' before running, so this alone re-establishes its own bytecode;
-    -- the interesting case is the helper module, a link dependency that is *not* recompiled and must instead have
-    -- its bytecode lazily reloaded from its interface's Core ('Internal.State.Linkables.lazyLoadByteCode').
-    --
-    -- CONFIRMED BUG: this reload fails, because the helper's Core was already stripped from its interface -- not
-    -- by eviction, but earlier, as a side effect of the helper itself having been run through
-    -- 'executeModuleTask' above (see the comment on 'helperModuleKey'). At that point the helper also never
-    -- produced object code (interpreted-only backend), so after eviction clears its cached bytecode, none of
-    -- 'GHC.Linker.Deps.getLinkDeps'\'s three linkable sources (object code, cached bytecode, Core-based lazy
-    -- reload) can supply it any more. This currently surfaces not as a graceful error but as a GHC compiler
-    -- panic, caught by 'GhcServer.Build.Execute.runGhcCatchingExceptions' and reported as
-    -- @Just (TaskFailed "GHC session setup failed\npanic! (the 'impossible' happened) ... expectJust getLinkDeps
-    -- ... GHC/Linker/Deps.hs ...")@:
-    --
-    -- > panic! (the 'impossible' happened)
-    -- >   GHC version 9.10.1:
-    -- >     expectJust getLinkDeps
-    -- >   CallStack (from HasCallStack):
-    -- >     error, called at compiler/GHC/Data/Maybe.hs:72:27 in ghc-9.10.1-inplace:GHC.Data.Maybe
-    -- >     expectJust, called at compiler/GHC/Linker/Deps.hs:264:26 in ghc-9.10.1-inplace:GHC.Linker.Deps
-    --
-    -- The assertion below checks for the confirmed panic text (a stable substring, since the exact panic message
-    -- includes a GHC version number and vendored source line numbers) rather than the aspirational
-    -- @Just (TaskSuccess _)@, since fixing the underlying bug requires changes to the vendored GHC itself.
-    execResult2 <- liftIO (executeModuleTask buildEnv emptyBuildExt unit0 fatModuleName)
-    annotate ("execute result (post-eviction): " ++ show execResult2)
-    case execResult2 of
-      Just (TaskFailed reason)
-        | "expectJust" `isInfixOf` reason, "getLinkDeps" `isInfixOf` reason -> pure ()
-      other -> fail ("Expected Just (TaskFailed _) with a getLinkDeps panic, got " ++ show other)
+    assertJust (TaskSuccess (Just "2")) =<< liftIO (executeModuleTask buildEnv emptyBuildExt unit0 fatModuleName)
