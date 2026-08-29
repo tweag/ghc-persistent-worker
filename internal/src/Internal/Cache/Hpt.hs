@@ -158,6 +158,14 @@ loadCachedByteCodeFrom hsc_env location iface details =
       time <- maybe getCurrentTime pure if_time
       return $! Linkable time (mi_module iface) parts
 
+-- | Re-read a module's interface from disk.
+--
+-- Used when the in-memory 'ModIface' lacks the Core bindings required to lazily produce bytecode, since the on-disk
+-- interface may have been written with them even though the copy we're holding was stripped or never had them.
+reloadIfaceFromDisk :: HscEnv -> ModLocation -> IO ModIface
+reloadIfaceFromDisk hsc_env location =
+  readBinIface (targetProfile (hsc_dflags hsc_env)) (hsc_NC hsc_env) IgnoreHiWay QuietBinIFace (ml_hi_file location)
+
 -- | Load bytecode from an interface.
 -- Used only for modules missing from the current target's HPT when restoring the Buck cache after restarting a build.
 --
