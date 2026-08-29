@@ -10,15 +10,17 @@
 module GhcServer.Build.Propagate where
 
 import Control.Concurrent.Chan (writeChan)
-import Control.Monad.Extra (ifM)
+import Control.Concurrent.MVar (readMVar)
 import Data.Foldable (for_)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
+import qualified Data.Set as Set
 import qualified Data.Text as Text
 import GHC (ModuleName, moduleNameString)
 import qualified GHC.Utils.Outputable as O
 import GHC.Utils.Outputable (ppr, (<+>))
 import GhcServer.Build.Compile (compileSingleModule)
+import GhcServer.Build.Diff (changedModuleKeys, moduleGraphDelta, staleClosure, UnitDiff (..))
 import GhcServer.Build.Execute (executeModuleTask)
 import GhcServer.Build.Metadata (runMetadata)
 import GhcServer.Build.Schedule (
@@ -89,28 +91,12 @@ withTaskEvents env target action = do
   emitTaskEnd env target result
   pure result
 
--- | Skip metadata for a cached unit.
+-- | Skip metadata for a unit whose Phase 0 analysis found no changes.
 skipMetadata :: BuildEnv -> UnitName -> IO (TaskResult String)
 skipMetadata env name = do
-  env.log.debug ("Skipping metadata (cached): " ++ name.string)
+  env.log.debug ("Skipping metadata (unchanged): " ++ name.string)
   logEvent env.events (MetadataSkipped name)
   pure (TaskSuccess Nothing)
-
--- | Attempt to skip compilation for a module that was not directly requested.
---
--- If the module's @.dyn_hi@ interface file exists (indicating it was compiled
--- in a prior build), the compilation is skipped.  Otherwise, compilation
--- proceeds normally.
-skipCompileIfCached :: BuildCache -> BuildExt -> BuildEnv -> UnitName -> ModuleName -> IO (TaskResult String)
-skipCompileIfCached cache ext env unit moduleName =
-  ifM (cache.interfaceExists unit moduleName)
-  skip
-  (compile ext env unit moduleName)
-  where
-    skip = do
-      env.log.debugD ("Skipping compile (cached):" <+> ppr unit O.<> ":" O.<> ppr moduleName)
-      logEvent env.events (CompileSkipped unit moduleName)
-      pure (TaskSuccess Nothing)
 
 -- | Compile a single module.
 --
@@ -127,21 +113,17 @@ compile ext env name modName = do
 
 -- | Dispatch a resolved build task to the appropriate GHC operation.
 --
--- Metadata tasks run 'computeMetadata' via 'runMetadata'; compile tasks run
--- 'compileModuleWithDepsInHpt' via 'compileSingleModule'.  Both paths support
--- cache-based skipping that emulates an external build system omitting unchanged
--- work items.
-dispatchTask :: BuildCache -> BuildEnv -> BuildExt -> Task TaskKey 'Resolved BuildStatus -> IO (TaskResult String)
-dispatchTask cache env ext task = case task.key of
+-- Dispatch is blind: all decisions (whether metadata must run, which modules are stale) were made
+-- during classification (Phase 0) and metadata propagation (Phase 2).  A compile task only exists
+-- for stale modules, so it always compiles.
+dispatchTask :: BuildEnv -> BuildExt -> Task TaskKey 'Resolved BuildStatus -> IO (TaskResult String)
+dispatchTask env ext task = case task.key of
   MetaTask name
-    | not task.value.rebuild && task.value.cached -> skipMetadata env name
-    | otherwise ->
+    | task.value.runMeta ->
       withTaskEvents env (name.string ++ ":metadata") (taskResultFromErrors . fst <$> runMetadata env name)
-  ResolvedModule name modName
-    | shouldSkipCompile -> skipCompileIfCached cache ext env name modName
-    | otherwise -> withTaskEvents env (name.string ++ ":" ++ moduleNameString modName) (compile ext env name modName)
-    where
-      shouldSkipCompile = not task.value.rebuild && not task.enabled
+    | otherwise -> skipMetadata env name
+  ResolvedModule name modName ->
+    withTaskEvents env (name.string ++ ":" ++ moduleNameString modName) (compile ext env name modName)
   ExecuteModule name modName ->
     executeModuleTask env ext name modName >>= \case
       Nothing -> pure (TaskSuccess Nothing)
@@ -174,9 +156,11 @@ computeResolutions cache env name _state =
 
 -- | Propagate a task's completion to the scheduler state.
 --
--- On successful metadata completion, computes a resolution map for the unit's
--- compile tasks and promotes those that are enabled.  For all other completions
--- (compile tasks, failures), the state is returned unchanged.
+-- On successful metadata completion, runs the Phase 2 analysis: seeds the staleness set with
+-- the unit's changed modules (Phase 0), the module-graph delta against the pre-refresh graph,
+-- and (for @--recompile@) the unit's entire module set; extends the accumulated stale closure
+-- by downstream reachability over the merged module graph; and derives resolutions restricted
+-- to stale modules.  For all other completions the state is returned unchanged.
 propagateCompletion ::
   BuildCache ->
   BuildEnv ->
@@ -190,9 +174,19 @@ propagateCompletion cache env (MetaTask name) (TaskSuccess _) state =
       env.log.debug ("Cache decode failure during propagation: " ++ err)
       pure state {failures = Map.insert (MetaTask name) err state.failures}
     Right newModules -> do
+      diffs <- readMVar env.diff
       let
-        newResolutions = resolutionsFromModuleMap state.ext.moduleMap newModules
-        ext' = state.ext {moduleMap = Map.union newModules state.ext.moduleMap}
+        unitDiff = Map.lookup name diffs
+        seeds = case unitDiff of
+          Nothing -> Map.keysSet newModules
+          Just d ->
+            changedModuleKeys d.changed newModules
+            <> moduleGraphDelta d.oldModules newModules
+            <> (if d.forceAll then Map.keysSet newModules else Set.empty)
+        merged = Map.union newModules state.ext.moduleMap
+        stale = staleClosure (seeds <> state.ext.stale) merged
+        newResolutions = resolutionsFromModuleMap stale state.ext.moduleMap newModules
+        ext' = BuildExt {moduleMap = merged, stale}
       pure (addResolutions newResolutions state {ext = ext'})
 propagateCompletion _ _ _ _ state =
   pure state

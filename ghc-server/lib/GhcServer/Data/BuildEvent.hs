@@ -12,7 +12,7 @@ import GhcServer.Data.Unit (UnitName (..))
 
 -- | A build event representing a conditional action in the pipeline.
 data BuildEvent =
-  -- | Metadata was skipped because the unit's cache exists.
+  -- | Metadata was skipped because the unit's sources are unchanged since the last build.
   MetadataSkipped UnitName
   |
   -- | Metadata was run (fresh downsweep).
@@ -20,9 +20,6 @@ data BuildEvent =
   |
   -- | A module was compiled.
   ModuleCompiled UnitName ModuleName
-  |
-  -- | A module's compilation was skipped because cached artifacts exist.
-  CompileSkipped UnitName ModuleName
   |
   -- | Resolution was computed from cache data after metadata.
   ResolutionComputed UnitName
@@ -33,7 +30,6 @@ instance Show BuildEvent where
     MetadataSkipped name -> "MetadataSkipped " ++ name.string
     MetadataRan name -> "MetadataRan " ++ name.string
     ModuleCompiled name modName -> "ModuleCompiled " ++ name.string ++ ":" ++ moduleNameString modName
-    CompileSkipped name modName -> "CompileSkipped " ++ name.string ++ ":" ++ moduleNameString modName
     ResolutionComputed name -> "ResolutionComputed " ++ name.string
 
 -- | Mutable event log for recording build events.

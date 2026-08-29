@@ -14,6 +14,11 @@ message Options {
 
 message RebuildRequest {
   string target = 1;
+  // Force a full rebuild of the requested scope: discard the stored source-digest record first, so every
+  // source is treated as changed (see the incremental-recompilation design's Phase 0). False means an ordinary
+  // incremental recompile, which still forces the named targets into the stale closure but reuses digests for
+  // everything else.
+  bool rebuild = 2;
 }
 
 message BcoCacheEntry {

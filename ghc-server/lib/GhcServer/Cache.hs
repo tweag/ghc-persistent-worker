@@ -11,23 +11,20 @@
 -- @Opt_ForceRecomp@ disabled, so GHC's native recompilation checking skips modules whose @.hi@ files are up to date.
 module GhcServer.Cache where
 
-import Control.Monad (filterM, foldM)
+import Control.Monad (filterM)
 import Control.Monad.Extra (whenMaybeM)
 import qualified Data.Aeson as Aeson
 import Data.Aeson (eitherDecodeFileStrict')
 import Data.ByteString (fromStrict)
 import qualified Data.ByteString.Char8 as B8
-import Data.Functor ((<&>))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Set (Set)
-import GHC (ModuleName)
 import GHC.Data.Graph.Directed (Graph, reachablesG, topologicalSortG)
 import qualified GHC.Data.Graph.Directed as Graph (Node (..))
 import GHC.Unit (stringToUnit)
 import GHC.Unit.Types (toUnitId)
 import GhcServer.Data.BuildCache (BuildCache (..))
-import GhcServer.Data.Unit (Project (..), Unit (..), UnitCache (..), UnitDepNode, UnitName (..), moduleHiPath)
+import GhcServer.Data.Unit (Project (..), Unit (..), UnitCache (..), UnitDepNode, UnitName (..))
 import GhcServer.Path (fp, osPath)
 import qualified System.Directory.OsPath as OsPath
 import System.Directory.OsPath (createDirectoryIfMissing, doesFileExist)
@@ -148,33 +145,14 @@ loadHomeUnitCache :: UnitCache -> IO (Maybe OsPath)
 loadHomeUnitCache unitCache =
   whenMaybeM (doesFileExist unitCache.cachedUnitPath) (pure unitCache.cachedUnitPath)
 
--- | Check whether a module's interface file (@.dyn_hi@) exists.
---
--- The interface file is the reliable indicator that a module was compiled in a prior build.
-interfaceExists :: OsPath -> UnitName -> ModuleName -> IO Bool
-interfaceExists outputDir name modName =
-  doesFileExist (moduleHiPath outputDir name modName)
-
--- | Compute the set of all units with cache from a prior build.
-cachedUnitsForProject :: Project -> IO (Set UnitName)
-cachedUnitsForProject project =
-  foldM check Set.empty (Map.toList project.units)
-  where
-    check acc (name, unit) =
-      cacheExists unit.cache <&> \case
-        True -> Set.insert name acc
-        False -> acc
-
 -- | Construct a 'BuildCache' from a 'Project' and output directory.
 mkBuildCache :: OsPath -> Project -> BuildCache
-mkBuildCache outputDir project =
+mkBuildCache _outputDir project =
   BuildCache {
     unitCached = \name ->
       maybe (pure False) (cacheExists . (.cache)) (Map.lookup name project.units),
     loadUnit = \name ->
-      maybe (pure (Right Nothing)) (loadCachedUnit . (.cache)) (Map.lookup name project.units),
-    interfaceExists = interfaceExists outputDir,
-    cachedUnits = cachedUnitsForProject project
+      maybe (pure (Right Nothing)) (loadCachedUnit . (.cache)) (Map.lookup name project.units)
   }
 
 -- | Load the 'CachedUnit' from @cached_unit.json@, if it exists.

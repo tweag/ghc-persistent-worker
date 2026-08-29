@@ -207,8 +207,11 @@ data ResolveSpec =
 
 runResolve :: ResolveSpec -> Resolutions
 runResolve spec =
-  resolutionsFromModuleMap spec.priorModules newModules
+  resolutionsFromModuleMap stale spec.priorModules newModules
   where
+    -- Treat every module as stale so the full resolution set is produced, matching the behavior
+    -- for a fresh (never-built) unit.
+    stale = Map.keysSet newModules <> Map.keysSet spec.priorModules
     newModules = resolveFromCachedUnit (UnitName spec.unitName) (osPath "output") spec.cachedUnit
 
 defaultResolveSpec :: ResolveSpec

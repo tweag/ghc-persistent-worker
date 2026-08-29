@@ -1,7 +1,9 @@
 module GhcServer.Build.Metadata where
 
+import Control.Concurrent.MVar (readMVar)
 import Control.Monad.Extra (ifM)
 import qualified Data.Map.Strict as Map
+import GhcServer.Build.Diff (UnitDiff (..), writeSourceHashes)
 import GhcServer.Cabal.ExtDeps (ensureExtDepsDb)
 import GhcServer.Cache (buildDepPlans, writeUnitCache)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
@@ -11,9 +13,7 @@ import GhcServer.Log (instrumentLogger)
 import GhcServer.Path (fp, osPath)
 import Internal.Metadata (computeMetadata)
 import Prelude hiding (log)
-import System.Environment (lookupEnv)
 import System.OsPath (OsPath, (</>))
-import System.OsPath.Extra (toOsPath)
 import Types.Args (Args (..))
 import Types.BuildPlan.Incremental (BuckHashesPath (..), BuildPlanPath (..), IncrementalStatePath (..))
 import Types.CachedDeps (CachedBuildPlans)
@@ -98,8 +98,8 @@ runMetadata buildEnv name = do
 
     run unit logger = do
       cachedPlans <- buildDepPlans buildEnv.project.depGraph unit
-      buckHashes <- lookupEnv "buck_source_hashes"
-      let args = metadataArgs buildEnv.baseArgs buildEnv.outputDir (Just cachedPlans) (toOsPath <$> buckHashes) unit
+      buckHashes <- writeHashes unit
+      let args = metadataArgs buildEnv.baseArgs buildEnv.outputDir (Just cachedPlans) buckHashes unit
           sourcePaths = map fp unit.sources
           env = Env {
             log = logger,
@@ -107,6 +107,15 @@ runMetadata buildEnv name = do
             args = args {ghcOptions = args.ghcOptions ++ sourcePaths}
           }
       ifM (fst <$> computeMetadata env) (success unit (Just cachedPlans) args logger) (failure logger)
+
+    -- Feed the Phase 0 source digests to the core's incremental metadata path.  Without a diff
+    -- entry (e.g. metadata triggered outside a classified batch), no hashes are passed and the
+    -- core falls back to a full downsweep.
+    writeHashes unit = do
+      diffs <- readMVar buildEnv.diff
+      case Map.lookup name diffs of
+        Nothing -> pure Nothing
+        Just d -> Just <$> writeSourceHashes unit.cache d.newDigests
 
     success unit cachedPlans args logger = do
       cacheResult <- case args.buildPlan of

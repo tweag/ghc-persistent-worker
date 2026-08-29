@@ -8,10 +8,13 @@ import GhcServer.Scheduler (
   Phase (..),
   SchedulerState (..),
   Task (..),
+  TaskResult (..),
   addResolutions,
+  classifyTask,
   insertPending,
   promote,
   promoteEnabled,
+  recordResult,
   )
 import Hedgehog (TestT, property, test, withTests, (===))
 import Test.Tasty (DependencyType (..), TestName, TestTree, dependentTestGroup)
@@ -365,6 +368,72 @@ test_addResolutionsPromotesPending =
     readyKeys result === Set.singleton 1
 
 -- ---------------------------------------------------------------------------
+-- Tests for recordResult
+-- ---------------------------------------------------------------------------
+
+test_recordResultRemovesFromAccepted :: TestTree
+test_recordResultRemovesFromAccepted =
+  unitTest "recordResult removes the completed key from accepted" do
+    let
+      state = emptyState {accepted = Set.singleton (TK 1)}
+      result = recordResult (TK 1) (TaskSuccess Nothing) state
+    Set.member (TK 1) result.accepted === False
+    Set.member (TK 1) result.completed === True
+
+-- Regression test for the actual UI bug: a scheduler state that outlives a single batch (as
+-- GhcServer.Build does across repeated TriggerBuild RPCs from the instrument UI per-module
+-- b/r/m keypresses) must allow a key to be reclassified after it has already completed once.
+-- Before the fix, recordResult never removed a key from accepted, so this second classifyTask
+-- call was a silent no-op forever, reproducing "pressing b/r/m does nothing after the first build".
+-- This test is expected to fail if the accepted-pruning line is reverted from recordResult.
+test_classifyTaskCanReactivateAfterCompletion :: TestTree
+test_classifyTaskCanReactivateAfterCompletion =
+  unitTest "classifyTask can re-activate a key after its earlier completion" do
+    let
+      task = Task {key = TK 1, deps = Set.empty, enabled = True, value = ResolvedVal 10}
+      afterFirst = classifyTask task emptyState
+      -- Simulate the scheduler loop having already dispatched the sole ready task (as
+      -- 'loopSchedule' does by popping the ready list before forking the request), so that only
+      -- 'accepted' -- not a stale leftover 'ready' entry -- can account for the key reappearing.
+      dispatched = afterFirst {ready = []}
+      afterCompletion = recordResult (TK 1) (TaskSuccess Nothing) dispatched
+      afterSecond = classifyTask task afterCompletion
+    readyKeys afterFirst === Set.singleton 1
+    readyKeys afterSecond === Set.singleton 1
+
+-- Demonstrates that the intra-batch dedup invariant the accepted guard maintains is unaffected
+-- by the recordResult fix, regardless of fan-out size. A shared dependency (key 0, mirroring an
+-- ImplicitDep task with enabled = False) is reachable via a pending dep edge from a large number
+-- of sibling modules (keys 1..30, mirroring Explicit per-module requests with enabled = True).
+-- All siblings are submitted sequentially against the same evolving state with no recordResult
+-- call in between (mirroring a single in-flight window before the shared dependency's own task has
+-- finished) -- the shared dependency must still be promoted to ready exactly once.
+--
+-- This does not exercise genuine OS-thread-level timing (the scheduler loop processes one event at
+-- a time, so this pure-function sequence is representative of that single-threaded processing
+-- order). A later, separate batch re-triggering the same explicitly-requested key after its
+-- completion is the fix's intended, safe behaviour (see test_classifyTaskCanReactivateAfterCompletion),
+-- not a regression of this invariant.
+test_sharedDependencyResolvedOnceAcrossManySiblings :: TestTree
+test_sharedDependencyResolvedOnceAcrossManySiblings =
+  unitTest "a shared dependency is resolved once across many sibling requests" do
+    let
+      siblingCount = 30
+      siblings = [1 .. siblingCount]
+      resolutions =
+        mkResolutions ((0, (ResolvedVal 0, Set.empty)) : [(i, (ResolvedVal i, Set.singleton 0)) | i <- siblings])
+      initial =
+        emptyState {
+          pending = Map.fromList ((TK 0, pendingTask 0 Set.empty False 0) : [(TK i, pendingTask i Set.empty True i) | i <- siblings]),
+          resolutions
+        }
+      submitSibling state i = insertPending (pendingTask i Set.empty True i) state
+      final = foldl' submitSibling initial siblings
+      sharedDepReadyCount = length (filter (\t -> t.key == TK 0) final.ready)
+    sharedDepReadyCount === 1
+    Map.null final.pending === True
+
+-- ---------------------------------------------------------------------------
 -- Test tree
 -- ---------------------------------------------------------------------------
 
@@ -394,5 +463,10 @@ test_scheduler =
     [ test_insertPendingMergesEnabled
         , test_insertPendingResolvesImmediately
         , test_insertPendingDoesNotDuplicateAlreadyAcceptedReadyTask
+        ]
+    , dependentTestGroup "recordResult" AllFinish
+        [ test_recordResultRemovesFromAccepted
+        , test_classifyTaskCanReactivateAfterCompletion
+        , test_sharedDependencyResolvedOnceAcrossManySiblings
         ]
     ]

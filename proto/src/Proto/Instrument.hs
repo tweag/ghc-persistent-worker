@@ -946,9 +946,11 @@ instance Control.DeepSeq.NFData Options where
              (Control.DeepSeq.deepseq (_Options'extraGhcOptions x__) ())
 {- | Fields :
      
-         * 'Proto.Instrument_Fields.target' @:: Lens' RebuildRequest Data.Text.Text@ -}
+         * 'Proto.Instrument_Fields.target' @:: Lens' RebuildRequest Data.Text.Text@
+         * 'Proto.Instrument_Fields.rebuild' @:: Lens' RebuildRequest Prelude.Bool@ -}
 data RebuildRequest
   = RebuildRequest'_constructor {_RebuildRequest'target :: !Data.Text.Text,
+                                 _RebuildRequest'rebuild :: !Prelude.Bool,
                                  _RebuildRequest'_unknownFields :: !Data.ProtoLens.FieldSet}
   deriving stock (Prelude.Eq, Prelude.Ord)
 instance Prelude.Show RebuildRequest where
@@ -964,12 +966,20 @@ instance Data.ProtoLens.Field.HasField RebuildRequest "target" Data.Text.Text wh
            _RebuildRequest'target
            (\ x__ y__ -> x__ {_RebuildRequest'target = y__}))
         Prelude.id
+instance Data.ProtoLens.Field.HasField RebuildRequest "rebuild" Prelude.Bool where
+  fieldOf _
+    = (Prelude..)
+        (Lens.Family2.Unchecked.lens
+           _RebuildRequest'rebuild
+           (\ x__ y__ -> x__ {_RebuildRequest'rebuild = y__}))
+        Prelude.id
 instance Data.ProtoLens.Message RebuildRequest where
   messageName _ = Data.Text.pack "instrument.RebuildRequest"
   packedMessageDescriptor _
     = "\n\
       \\SORebuildRequest\DC2\SYN\n\
-      \\ACKtarget\CAN\SOH \SOH(\tR\ACKtarget"
+      \\ACKtarget\CAN\SOH \SOH(\tR\ACKtarget\DC2\CAN\n\
+      \\arebuild\CAN\STX \SOH(\bR\arebuild"
   packedFileDescriptor _ = packedFileDescriptor
   fieldsByTag
     = let
@@ -981,9 +991,18 @@ instance Data.ProtoLens.Message RebuildRequest where
               (Data.ProtoLens.PlainField
                  Data.ProtoLens.Optional (Data.ProtoLens.Field.field @"target")) ::
               Data.ProtoLens.FieldDescriptor RebuildRequest
+        rebuild__field_descriptor
+          = Data.ProtoLens.FieldDescriptor
+              "rebuild"
+              (Data.ProtoLens.ScalarField Data.ProtoLens.BoolField ::
+                 Data.ProtoLens.FieldTypeDescriptor Prelude.Bool)
+              (Data.ProtoLens.PlainField
+                 Data.ProtoLens.Optional (Data.ProtoLens.Field.field @"rebuild")) ::
+              Data.ProtoLens.FieldDescriptor RebuildRequest
       in
         Data.Map.fromList
-          [(Data.ProtoLens.Tag 1, target__field_descriptor)]
+          [(Data.ProtoLens.Tag 1, target__field_descriptor),
+           (Data.ProtoLens.Tag 2, rebuild__field_descriptor)]
   unknownFields
     = Lens.Family2.Unchecked.lens
         _RebuildRequest'_unknownFields
@@ -991,6 +1010,7 @@ instance Data.ProtoLens.Message RebuildRequest where
   defMessage
     = RebuildRequest'_constructor
         {_RebuildRequest'target = Data.ProtoLens.fieldDefault,
+         _RebuildRequest'rebuild = Data.ProtoLens.fieldDefault,
          _RebuildRequest'_unknownFields = []}
   parseMessage
     = let
@@ -1022,6 +1042,12 @@ instance Data.ProtoLens.Message RebuildRequest where
                                              (Prelude.fromIntegral len))
                                        "target"
                                 loop (Lens.Family2.set (Data.ProtoLens.Field.field @"target") y x)
+                        16
+                          -> do y <- (Data.ProtoLens.Encoding.Bytes.<?>)
+                                       (Prelude.fmap
+                                          ((Prelude./=) 0) Data.ProtoLens.Encoding.Bytes.getVarInt)
+                                       "rebuild"
+                                loop (Lens.Family2.set (Data.ProtoLens.Field.field @"rebuild") y x)
                         wire
                           -> do !y <- Data.ProtoLens.Encoding.Wire.parseTaggedValueFromWire
                                         wire
@@ -1049,14 +1075,28 @@ instance Data.ProtoLens.Message RebuildRequest where
                                     (Prelude.fromIntegral (Data.ByteString.length bs)))
                                  (Data.ProtoLens.Encoding.Bytes.putBytes bs))
                          Data.Text.Encoding.encodeUtf8 _v))
-             (Data.ProtoLens.Encoding.Wire.buildFieldSet
-                (Lens.Family2.view Data.ProtoLens.unknownFields _x))
+             ((Data.Monoid.<>)
+                (let
+                   _v = Lens.Family2.view (Data.ProtoLens.Field.field @"rebuild") _x
+                 in
+                   if (Prelude.==) _v Data.ProtoLens.fieldDefault then
+                       Data.Monoid.mempty
+                   else
+                       (Data.Monoid.<>)
+                         (Data.ProtoLens.Encoding.Bytes.putVarInt 16)
+                         ((Prelude..)
+                            Data.ProtoLens.Encoding.Bytes.putVarInt (\ b -> if b then 1 else 0)
+                            _v))
+                (Data.ProtoLens.Encoding.Wire.buildFieldSet
+                   (Lens.Family2.view Data.ProtoLens.unknownFields _x)))
 instance Control.DeepSeq.NFData RebuildRequest where
   rnf
     = \ x__
         -> Control.DeepSeq.deepseq
              (_RebuildRequest'_unknownFields x__)
-             (Control.DeepSeq.deepseq (_RebuildRequest'target x__) ())
+             (Control.DeepSeq.deepseq
+                (_RebuildRequest'target x__)
+                (Control.DeepSeq.deepseq (_RebuildRequest'rebuild x__) ()))
 data Instrument = Instrument {}
 instance Data.ProtoLens.Service.Types.Service Instrument where
   type ServiceName Instrument = "Instrument"
@@ -1117,9 +1157,10 @@ packedFileDescriptor
     \\ENQEvent\DC2\CAN\n\
     \\aencoded\CAN\SOH \SOH(\fR\aencoded\"5\n\
     \\aOptions\DC2*\n\
-    \\DC1extra_ghc_options\CAN\SOH \SOH(\tR\SIextraGhcOptions\"(\n\
+    \\DC1extra_ghc_options\CAN\SOH \SOH(\tR\SIextraGhcOptions\"B\n\
     \\SORebuildRequest\DC2\SYN\n\
-    \\ACKtarget\CAN\SOH \SOH(\tR\ACKtarget\"\197\SOH\n\
+    \\ACKtarget\CAN\SOH \SOH(\tR\ACKtarget\DC2\CAN\n\
+    \\arebuild\CAN\STX \SOH(\bR\arebuild\"\197\SOH\n\
     \\rBcoCacheEntry\DC2\ETB\n\
     \\aunit_id\CAN\SOH \SOH(\tR\ACKunitId\DC2\US\n\
     \\vmodule_name\CAN\STX \SOH(\tR\n\
@@ -1143,8 +1184,8 @@ packedFileDescriptor
     \\SOTriggerRebuild\DC2\SUB.instrument.RebuildRequest\SUB\DC1.instrument.Empty\"\NUL\DC2A\n\
     \\SOTriggerExecute\DC2\SUB.instrument.RebuildRequest\SUB\DC1.instrument.Empty\"\NUL\DC2B\n\
     \\DLEGetBytecodeState\DC2\DC1.instrument.Empty\SUB\EM.instrument.BytecodeState\"\NUL\DC2F\n\
-    \\rEvictBytecode\DC2 .instrument.EvictBytecodeRequest\SUB\DC1.instrument.Empty\"\NULJ\162\r\n\
-    \\ACK\DC2\EOT\NUL\NUL0\SOH\n\
+    \\rEvictBytecode\DC2 .instrument.EvictBytecodeRequest\SUB\DC1.instrument.Empty\"\NULJ\172\DLE\n\
+    \\ACK\DC2\EOT\NUL\NUL5\SOH\n\
     \\b\n\
     \\SOH\f\DC2\ETX\NUL\NUL\DC2\n\
     \\b\n\
@@ -1186,7 +1227,7 @@ packedFileDescriptor
     \\ENQ\EOT\STX\STX\NUL\ETX\DC2\ETX\v\GS\RS\n\
     \\n\
     \\n\
-    \\STX\EOT\ETX\DC2\EOT\SO\NUL\DLE\SOH\n\
+    \\STX\EOT\ETX\DC2\EOT\SO\NUL\NAK\SOH\n\
     \\n\
     \\n\
     \\ETX\EOT\ETX\SOH\DC2\ETX\SO\b\SYN\n\
@@ -1198,157 +1239,169 @@ packedFileDescriptor
     \\ENQ\EOT\ETX\STX\NUL\SOH\DC2\ETX\SI\t\SI\n\
     \\f\n\
     \\ENQ\EOT\ETX\STX\NUL\ETX\DC2\ETX\SI\DC2\DC3\n\
+    \\221\STX\n\
+    \\EOT\EOT\ETX\STX\SOH\DC2\ETX\DC4\STX\DC3\SUB\207\STX Force a full rebuild of the requested scope: discard the stored source-digest record first, so every\n\
+    \ source is treated as changed (see the incremental-recompilation design's Phase 0). False means an ordinary\n\
+    \ incremental recompile, which still forces the named targets into the stale closure but reuses digests for\n\
+    \ everything else.\n\
+    \\n\
+    \\f\n\
+    \\ENQ\EOT\ETX\STX\SOH\ENQ\DC2\ETX\DC4\STX\ACK\n\
+    \\f\n\
+    \\ENQ\EOT\ETX\STX\SOH\SOH\DC2\ETX\DC4\a\SO\n\
+    \\f\n\
+    \\ENQ\EOT\ETX\STX\SOH\ETX\DC2\ETX\DC4\DC1\DC2\n\
     \\n\
     \\n\
-    \\STX\EOT\EOT\DC2\EOT\DC2\NUL\FS\SOH\n\
+    \\STX\EOT\EOT\DC2\EOT\ETB\NUL!\SOH\n\
     \\n\
     \\n\
-    \\ETX\EOT\EOT\SOH\DC2\ETX\DC2\b\NAK\n\
+    \\ETX\EOT\EOT\SOH\DC2\ETX\ETB\b\NAK\n\
     \\v\n\
-    \\EOT\EOT\EOT\STX\NUL\DC2\ETX\DC3\STX\NAK\n\
+    \\EOT\EOT\EOT\STX\NUL\DC2\ETX\CAN\STX\NAK\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\NUL\ENQ\DC2\ETX\DC3\STX\b\n\
+    \\ENQ\EOT\EOT\STX\NUL\ENQ\DC2\ETX\CAN\STX\b\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\NUL\SOH\DC2\ETX\DC3\t\DLE\n\
+    \\ENQ\EOT\EOT\STX\NUL\SOH\DC2\ETX\CAN\t\DLE\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\NUL\ETX\DC2\ETX\DC3\DC3\DC4\n\
+    \\ENQ\EOT\EOT\STX\NUL\ETX\DC2\ETX\CAN\DC3\DC4\n\
     \\v\n\
-    \\EOT\EOT\EOT\STX\SOH\DC2\ETX\DC4\STX\EM\n\
+    \\EOT\EOT\EOT\STX\SOH\DC2\ETX\EM\STX\EM\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\SOH\ENQ\DC2\ETX\DC4\STX\b\n\
+    \\ENQ\EOT\EOT\STX\SOH\ENQ\DC2\ETX\EM\STX\b\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\SOH\SOH\DC2\ETX\DC4\t\DC4\n\
+    \\ENQ\EOT\EOT\STX\SOH\SOH\DC2\ETX\EM\t\DC4\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\SOH\ETX\DC2\ETX\DC4\ETB\CAN\n\
+    \\ENQ\EOT\EOT\STX\SOH\ETX\DC2\ETX\EM\ETB\CAN\n\
     \\v\n\
-    \\EOT\EOT\EOT\STX\STX\DC2\ETX\NAK\STX\DC1\n\
+    \\EOT\EOT\EOT\STX\STX\DC2\ETX\SUB\STX\DC1\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\STX\ENQ\DC2\ETX\NAK\STX\a\n\
+    \\ENQ\EOT\EOT\STX\STX\ENQ\DC2\ETX\SUB\STX\a\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\STX\SOH\DC2\ETX\NAK\b\f\n\
+    \\ENQ\EOT\EOT\STX\STX\SOH\DC2\ETX\SUB\b\f\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\STX\ETX\DC2\ETX\NAK\SI\DLE\n\
+    \\ENQ\EOT\EOT\STX\STX\ETX\DC2\ETX\SUB\SI\DLE\n\
     \\v\n\
-    \\EOT\EOT\EOT\STX\ETX\DC2\ETX\SYN\STX\CAN\n\
+    \\EOT\EOT\EOT\STX\ETX\DC2\ETX\ESC\STX\CAN\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\ETX\ENQ\DC2\ETX\SYN\STX\a\n\
+    \\ENQ\EOT\EOT\STX\ETX\ENQ\DC2\ETX\ESC\STX\a\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\ETX\SOH\DC2\ETX\SYN\b\DC3\n\
+    \\ENQ\EOT\EOT\STX\ETX\SOH\DC2\ETX\ESC\b\DC3\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\ETX\ETX\DC2\ETX\SYN\SYN\ETB\n\
+    \\ENQ\EOT\EOT\STX\ETX\ETX\DC2\ETX\ESC\SYN\ETB\n\
     \{\n\
-    \\EOT\EOT\EOT\STX\EOT\DC2\ETX\CAN\STX\DC4\SUBn Whether the module is currently present in the worker's loader state (home package table), i.e. not evicted.\n\
+    \\EOT\EOT\EOT\STX\EOT\DC2\ETX\GS\STX\DC4\SUBn Whether the module is currently present in the worker's loader state (home package table), i.e. not evicted.\n\
     \\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\EOT\ENQ\DC2\ETX\CAN\STX\ACK\n\
+    \\ENQ\EOT\EOT\STX\EOT\ENQ\DC2\ETX\GS\STX\ACK\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\EOT\SOH\DC2\ETX\CAN\a\SI\n\
+    \\ENQ\EOT\EOT\STX\EOT\SOH\DC2\ETX\GS\a\SI\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\EOT\ETX\DC2\ETX\CAN\DC2\DC3\n\
+    \\ENQ\EOT\EOT\STX\EOT\ETX\DC2\ETX\GS\DC2\DC3\n\
     \\150\SOH\n\
-    \\EOT\EOT\EOT\STX\ENQ\DC2\ETX\ESC\STX\FS\SUB\136\SOH Whether the module has been requested for eviction but the request hasn't been applied yet (see\n\
+    \\EOT\EOT\EOT\STX\ENQ\DC2\ETX \STX\FS\SUB\136\SOH Whether the module has been requested for eviction but the request hasn't been applied yet (see\n\
     \ 'Types.State.Make.pendingEvictions').\n\
     \\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\ENQ\ENQ\DC2\ETX\ESC\STX\ACK\n\
+    \\ENQ\EOT\EOT\STX\ENQ\ENQ\DC2\ETX \STX\ACK\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\ENQ\SOH\DC2\ETX\ESC\a\ETB\n\
+    \\ENQ\EOT\EOT\STX\ENQ\SOH\DC2\ETX \a\ETB\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\ENQ\ETX\DC2\ETX\ESC\SUB\ESC\n\
+    \\ENQ\EOT\EOT\STX\ENQ\ETX\DC2\ETX \SUB\ESC\n\
     \\n\
     \\n\
-    \\STX\EOT\ENQ\DC2\EOT\RS\NUL \SOH\n\
+    \\STX\EOT\ENQ\DC2\EOT#\NUL%\SOH\n\
     \\n\
     \\n\
-    \\ETX\EOT\ENQ\SOH\DC2\ETX\RS\b\NAK\n\
+    \\ETX\EOT\ENQ\SOH\DC2\ETX#\b\NAK\n\
     \\v\n\
-    \\EOT\EOT\ENQ\STX\NUL\DC2\ETX\US\STX%\n\
+    \\EOT\EOT\ENQ\STX\NUL\DC2\ETX$\STX%\n\
     \\f\n\
-    \\ENQ\EOT\ENQ\STX\NUL\EOT\DC2\ETX\US\STX\n\
+    \\ENQ\EOT\ENQ\STX\NUL\EOT\DC2\ETX$\STX\n\
     \\n\
     \\f\n\
-    \\ENQ\EOT\ENQ\STX\NUL\ACK\DC2\ETX\US\v\CAN\n\
+    \\ENQ\EOT\ENQ\STX\NUL\ACK\DC2\ETX$\v\CAN\n\
     \\f\n\
-    \\ENQ\EOT\ENQ\STX\NUL\SOH\DC2\ETX\US\EM \n\
+    \\ENQ\EOT\ENQ\STX\NUL\SOH\DC2\ETX$\EM \n\
     \\f\n\
-    \\ENQ\EOT\ENQ\STX\NUL\ETX\DC2\ETX\US#$\n\
+    \\ENQ\EOT\ENQ\STX\NUL\ETX\DC2\ETX$#$\n\
     \\n\
     \\n\
-    \\STX\EOT\ACK\DC2\EOT\"\NUL%\SOH\n\
+    \\STX\EOT\ACK\DC2\EOT'\NUL*\SOH\n\
     \\n\
     \\n\
-    \\ETX\EOT\ACK\SOH\DC2\ETX\"\b\FS\n\
+    \\ETX\EOT\ACK\SOH\DC2\ETX'\b\FS\n\
     \\v\n\
-    \\EOT\EOT\ACK\STX\NUL\DC2\ETX#\STX\NAK\n\
+    \\EOT\EOT\ACK\STX\NUL\DC2\ETX(\STX\NAK\n\
     \\f\n\
-    \\ENQ\EOT\ACK\STX\NUL\ENQ\DC2\ETX#\STX\b\n\
+    \\ENQ\EOT\ACK\STX\NUL\ENQ\DC2\ETX(\STX\b\n\
     \\f\n\
-    \\ENQ\EOT\ACK\STX\NUL\SOH\DC2\ETX#\t\DLE\n\
+    \\ENQ\EOT\ACK\STX\NUL\SOH\DC2\ETX(\t\DLE\n\
     \\f\n\
-    \\ENQ\EOT\ACK\STX\NUL\ETX\DC2\ETX#\DC3\DC4\n\
+    \\ENQ\EOT\ACK\STX\NUL\ETX\DC2\ETX(\DC3\DC4\n\
     \\v\n\
-    \\EOT\EOT\ACK\STX\SOH\DC2\ETX$\STX\EM\n\
+    \\EOT\EOT\ACK\STX\SOH\DC2\ETX)\STX\EM\n\
     \\f\n\
-    \\ENQ\EOT\ACK\STX\SOH\ENQ\DC2\ETX$\STX\b\n\
+    \\ENQ\EOT\ACK\STX\SOH\ENQ\DC2\ETX)\STX\b\n\
     \\f\n\
-    \\ENQ\EOT\ACK\STX\SOH\SOH\DC2\ETX$\t\DC4\n\
+    \\ENQ\EOT\ACK\STX\SOH\SOH\DC2\ETX)\t\DC4\n\
     \\f\n\
-    \\ENQ\EOT\ACK\STX\SOH\ETX\DC2\ETX$\ETB\CAN\n\
+    \\ENQ\EOT\ACK\STX\SOH\ETX\DC2\ETX)\ETB\CAN\n\
     \\n\
     \\n\
-    \\STX\ACK\NUL\DC2\EOT'\NUL0\SOH\n\
+    \\STX\ACK\NUL\DC2\EOT,\NUL5\SOH\n\
     \\n\
     \\n\
-    \\ETX\ACK\NUL\SOH\DC2\ETX'\b\DC2\n\
+    \\ETX\ACK\NUL\SOH\DC2\ETX,\b\DC2\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\NUL\DC2\ETX(\STX/\n\
+    \\EOT\ACK\NUL\STX\NUL\DC2\ETX-\STX/\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\SOH\DC2\ETX(\ACK\SO\n\
+    \\ENQ\ACK\NUL\STX\NUL\SOH\DC2\ETX-\ACK\SO\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\STX\DC2\ETX(\SI\DC4\n\
+    \\ENQ\ACK\NUL\STX\NUL\STX\DC2\ETX-\SI\DC4\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\ACK\DC2\ETX(\US%\n\
+    \\ENQ\ACK\NUL\STX\NUL\ACK\DC2\ETX-\US%\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\ETX\DC2\ETX(&+\n\
+    \\ENQ\ACK\NUL\STX\NUL\ETX\DC2\ETX-&+\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\SOH\DC2\ETX)\STX,\n\
+    \\EOT\ACK\NUL\STX\SOH\DC2\ETX.\STX,\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\SOH\DC2\ETX)\ACK\DLE\n\
+    \\ENQ\ACK\NUL\STX\SOH\SOH\DC2\ETX.\ACK\DLE\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\STX\DC2\ETX)\DC1\CAN\n\
+    \\ENQ\ACK\NUL\STX\SOH\STX\DC2\ETX.\DC1\CAN\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\ETX\DC2\ETX)#(\n\
+    \\ENQ\ACK\NUL\STX\SOH\ETX\DC2\ETX.#(\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\STX\DC2\ETX*\STX7\n\
+    \\EOT\ACK\NUL\STX\STX\DC2\ETX/\STX7\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\STX\SOH\DC2\ETX*\ACK\DC4\n\
+    \\ENQ\ACK\NUL\STX\STX\SOH\DC2\ETX/\ACK\DC4\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\STX\STX\DC2\ETX*\NAK#\n\
+    \\ENQ\ACK\NUL\STX\STX\STX\DC2\ETX/\NAK#\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\STX\ETX\DC2\ETX*.3\n\
+    \\ENQ\ACK\NUL\STX\STX\ETX\DC2\ETX/.3\n\
     \\219\SOH\n\
-    \\EOT\ACK\NUL\STX\ETX\DC2\ETX-\STX7\SUB\205\SOH Execute the `main` binding of every module in the given unit (target text is a bare unit name), in\n\
+    \\EOT\ACK\NUL\STX\ETX\DC2\ETX2\STX7\SUB\205\SOH Execute the `main` binding of every module in the given unit (target text is a bare unit name), in\n\
     \ parallel, skipping modules that don't export `main`. Fire-and-forget, same semantics as TriggerRebuild.\n\
     \\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\ETX\SOH\DC2\ETX-\ACK\DC4\n\
+    \\ENQ\ACK\NUL\STX\ETX\SOH\DC2\ETX2\ACK\DC4\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\ETX\STX\DC2\ETX-\NAK#\n\
+    \\ENQ\ACK\NUL\STX\ETX\STX\DC2\ETX2\NAK#\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\ETX\ETX\DC2\ETX-.3\n\
+    \\ENQ\ACK\NUL\STX\ETX\ETX\DC2\ETX2.3\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\EOT\DC2\ETX.\STX8\n\
+    \\EOT\ACK\NUL\STX\EOT\DC2\ETX3\STX8\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\EOT\SOH\DC2\ETX.\ACK\SYN\n\
+    \\ENQ\ACK\NUL\STX\EOT\SOH\DC2\ETX3\ACK\SYN\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\EOT\STX\DC2\ETX.\ETB\FS\n\
+    \\ENQ\ACK\NUL\STX\EOT\STX\DC2\ETX3\ETB\FS\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\EOT\ETX\DC2\ETX.'4\n\
+    \\ENQ\ACK\NUL\STX\EOT\ETX\DC2\ETX3'4\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\ENQ\DC2\ETX/\STX<\n\
+    \\EOT\ACK\NUL\STX\ENQ\DC2\ETX4\STX<\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\ENQ\SOH\DC2\ETX/\ACK\DC3\n\
+    \\ENQ\ACK\NUL\STX\ENQ\SOH\DC2\ETX4\ACK\DC3\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\ENQ\STX\DC2\ETX/\DC4(\n\
+    \\ENQ\ACK\NUL\STX\ENQ\STX\DC2\ETX4\DC4(\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\ENQ\ETX\DC2\ETX/38b\ACKproto3"
+    \\ENQ\ACK\NUL\STX\ENQ\ETX\DC2\ETX438b\ACKproto3"

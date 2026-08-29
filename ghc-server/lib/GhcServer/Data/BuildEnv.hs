@@ -3,8 +3,10 @@ module GhcServer.Data.BuildEnv where
 
 import Control.Concurrent.Chan (Chan)
 import Control.Concurrent.MVar (MVar)
+import Data.Map.Strict (Map)
+import GhcServer.Build.Diff (UnitDiff)
 import GhcServer.Data.BuildEvent (BuildEvents)
-import GhcServer.Data.Unit (Project)
+import GhcServer.Data.Unit (Project, UnitName)
 import System.OsPath (OsPath)
 import Types.Args (Args)
 import Types.Instrument (Event)
@@ -28,5 +30,8 @@ data BuildEnv =
     instrChan :: Maybe (Chan Event),
     -- | Memoized result of building the project's external Cabal dependencies into the store, shared by
     -- all units so the build only runs once per server lifetime. 'Nothing' until first requested.
-    extDepsDb :: MVar (Maybe (Either String FilePath))
+    extDepsDb :: MVar (Maybe (Either String FilePath)),
+    -- | Per-unit incremental analysis results (Phase 0 source diff + old module graph), written at
+    -- classification time and consumed on metadata completion and at digest-commit time.
+    diff :: MVar (Map UnitName UnitDiff)
   }

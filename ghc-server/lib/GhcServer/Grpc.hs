@@ -65,14 +65,12 @@ notifyMe project stateVar chan callback = do
 -- unit in the project). Fire-and-forget: does not wait for completion, matching the semantics of the worker's own
 -- 'triggerRebuild'.
 --
--- Always forces @rebuild = True@: unlike a scheduled build implicitly triggered by another target's dependency
--- resolution, this is always an explicit user request (from the instrument UI's 'b'/'r' keys, or 'ghc-client'
--- without flags), so metadata must actually be recomputed rather than silently skipped because the unit's cache
--- from a previous build looks up to date (see 'GhcServer.Build.Propagate.dispatchTask').
---
--- A malformed target string (one that fails 'parseTarget', e.g. an unknown unit name) is rejected by logging an
--- @"error"@-level 'Types.Instrument.LogMessage' on the instrument channel (visible in the @instrument@ app's
--- @L@ log viewer) and returning early -- it must never crash the gRPC handler thread.
+-- Always forces @recompile = True@: unlike a scheduled build implicitly triggered by another target's dependency
+-- resolution, this is always an explicit user request (from the instrument UI's 'b'\/'m'\/'r' keys, or
+-- 'ghc-client' without flags), so the named targets must be forced into the stale closure rather than silently
+-- skipped because Phase 0\/2's diff sees no change. @rebuild@ (the request's own field, no longer hardcoded)
+-- additionally discards the stored source-digest record first, forcing every source in scope to be treated as
+-- changed -- this is the \'force full rebuild\' request, as opposed to an ordinary incremental recompile.
 triggerRebuild ::
   Chan Event ->
   Build ->
@@ -85,7 +83,7 @@ triggerRebuild chan build project req = do
     Left err ->
       emitLog (Just chan) targetText "error" ("Rejected rebuild request: " ++ err)
     Right steps ->
-      scheduleBatch build ScheduleRequest {steps, recompile = True, rebuild = True}
+      scheduleBatch build ScheduleRequest {steps, recompile = True, rebuild = req.rebuild}
   pure defMessage
 
 -- | Trigger execution of @main@ for the given target, using the same target grammar as 'triggerRebuild'\/

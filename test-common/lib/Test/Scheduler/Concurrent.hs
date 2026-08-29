@@ -226,6 +226,15 @@ recordResult key result =
     record state =
       state {
         completed = Set.insert key state.completed,
+        -- Remove the key from 'accepted' now that it has actually finished: the guards in
+        -- 'classifyTask'\/'resolveTask' only need to dedupe a key while it is in flight
+        -- (unsatisfied\/ready\/active), to protect against two concurrent requests within the
+        -- same in-flight window both resolving to it. Once completed, a later, separate request
+        -- for the same key (e.g. a UI-triggered rebuild of an already-built module) must be able
+        -- to re-activate it -- otherwise, on a long-lived scheduler state that outlives a single
+        -- batch (as used by 'GhcServer.Build'), any key is permanently inert after its first
+        -- completion.
+        accepted = Set.delete key state.accepted,
         failures = case result of
           TaskSuccess _ -> state.failures
           TaskFailed f -> Map.insert key f state.failures,

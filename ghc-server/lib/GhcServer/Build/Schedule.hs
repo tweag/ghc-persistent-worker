@@ -89,12 +89,12 @@ instance Ord (TaskKey 'Resolved) where
 -- The 'Task' record pairs the key with this status.
 --
 -- * @rebuild@: when 'True', skip cache and run the step unconditionally.
--- * @cached@: whether the unit has a cache directory from a prior build.
+-- * @runMeta@: whether the metadata step must actually run (decided by the Phase 0 analysis).
 --   Only meaningful for metadata tasks — compile tasks ignore it.
 data BuildStatus =
   BuildStatus {
     rebuild :: Bool,
-    cached :: Bool
+    runMeta :: Bool
   }
   deriving stock (Eq, Show)
 
@@ -112,9 +112,10 @@ lookupUnitName nameMap uid =
 --
 -- Each metadata task depends on the metadata tasks of its home-unit dependencies.
 -- Metadata tasks are created as active (resolved), not pending.
--- The @cachedUnits@ set marks units that have cache from a prior build.
-metadataTasks :: Project -> Set UnitName -> Bool -> [UnitName] -> [Task TaskKey 'Resolved BuildStatus]
-metadataTasks project cachedUnits rebuild =
+-- The @runMeta@ predicate carries the Phase 0 analysis decision of whether the unit's
+-- metadata step must actually run; dispatch executes it blindly.
+metadataTasks :: Project -> (UnitName -> Bool) -> Bool -> [UnitName] -> [Task TaskKey 'Resolved BuildStatus]
+metadataTasks project runMeta rebuild =
   map metaTask
   where
     metaTask name =
@@ -123,7 +124,7 @@ metadataTasks project cachedUnits rebuild =
         deps = Set.fromList
           [MetaTask dep | dep <- depUnits],
         enabled = True,
-        value = BuildStatus {rebuild, cached = Set.member name cachedUnits}
+        value = BuildStatus {rebuild, runMeta = runMeta name}
       }
       where
         depUnits = maybe [] (.depUnits) (Map.lookup name project.units)
@@ -151,7 +152,7 @@ compileTasksFromSources name rebuild isEnabled =
         key = PendingSource name src,
         deps = Set.singleton (MetaTask name),
         enabled = isEnabled src,
-        value = BuildStatus {rebuild, cached = False}
+        value = BuildStatus {rebuild, runMeta = False}
       }
 
 -- | Create pending execute tasks from a unit's source files.
@@ -170,7 +171,7 @@ executeTasksFromSources name rebuild =
         key = PendingExecute name src,
         deps = Set.singleton (MetaTask name),
         enabled = True,
-        value = BuildStatus {rebuild, cached = False}
+        value = BuildStatus {rebuild, runMeta = False}
       }
 
 
@@ -289,13 +290,16 @@ data BuildExt =
   BuildExt {
     -- | Unified module map: scheduler identity, direct deps, and interface path per module.
     -- Built incrementally as each unit's resolutions are computed.
-    moduleMap :: Map ModuleKey ModuleInfo
+    moduleMap :: Map ModuleKey ModuleInfo,
+    -- | Accumulated stale closure: modules that must be recompiled in this server session.
+    -- Grows as each unit's metadata completes and its Phase 2 analysis runs.
+    stale :: Set ModuleKey
   }
 
 -- | Initial (empty) 'BuildExt'.
 emptyBuildExt :: BuildExt
 emptyBuildExt =
-  BuildExt {moduleMap = Map.empty}
+  BuildExt {moduleMap = Map.empty, stale = Set.empty}
 
 -- | Assemble deduplicated, topologically sorted 'CachedDeps' for a module
 -- from the full module map.
@@ -335,30 +339,38 @@ buildModuleCachedDeps allModules target =
         interfaces = info.hiPath :| []
       }
 
--- | Derive scheduler 'Resolutions' from a module map.
+-- | Derive scheduler 'Resolutions' from a module map, restricted to the stale closure.
 --
--- Maps each pending compile key to a resolved key with direct module-level
--- dependencies, and each pending execute key to its 'ExecuteModule' resolution,
--- which depends on the module's own compile task ('ResolvedModule') via the
--- pending-dep set (resolved transitively by the scheduler's promotion machinery).
+-- Compile resolutions are created only for modules in the @stale@ set (the Phase 2 closure result) --
+-- up-to-date modules keep no resolution, so their pending tasks are never promoted and no compile
+-- task ever exists for them.  Dependency sets are likewise filtered to stale modules: a stale
+-- module's up-to-date dependencies need no scheduling edge because their artifacts already exist
+-- on disk (HPT pre-population loads them via 'buildModuleCachedDeps' at compile time).
+--
+-- Execute resolutions are created for every module; the dependency on the module's own compile
+-- task is only included when that module is stale (otherwise its artifacts are current and the
+-- execute task can run immediately).
 resolutionsFromModuleMap ::
+  Set ModuleKey ->
   Map ModuleKey ModuleInfo ->
   Map ModuleKey ModuleInfo ->
   Resolutions
-resolutionsFromModuleMap priorModules newModules =
+resolutionsFromModuleMap stale priorModules newModules =
   Map.fromList (compileEntries ++ executeEntries)
   where
     allModules = Map.union newModules priorModules
 
     compileEntries =
-      [ (info.task, (ResolvedModule key.unit key.name, BuildStatus {rebuild = False, cached = False}, depTasks info))
+      [ (info.task, (ResolvedModule key.unit key.name, BuildStatus {rebuild = False, runMeta = False}, depTasks info))
       | (key, info) <- Map.toList newModules
+      , Set.member key stale
       ]
 
     executeEntries =
-      [ (PendingExecute key.unit src, (ExecuteModule key.unit key.name, BuildStatus {rebuild = False, cached = False}, Set.singleton info.task))
+      [ (PendingExecute key.unit src, (ExecuteModule key.unit key.name, BuildStatus {rebuild = False, runMeta = False}, execDeps))
       | (key, info) <- Map.toList newModules
       , PendingSource _ src <- [info.task]
+      , let execDeps = if Set.member key stale then Set.singleton info.task else Set.empty
       ]
 
     depTasks :: ModuleInfo -> Set (TaskKey 'Pending)
@@ -366,5 +378,6 @@ resolutionsFromModuleMap priorModules newModules =
       Set.fromList
         [ depInfo.task
         | depKey <- Set.toList info.deps
+        , Set.member depKey stale
         , Just depInfo <- [Map.lookup depKey allModules]
         ]

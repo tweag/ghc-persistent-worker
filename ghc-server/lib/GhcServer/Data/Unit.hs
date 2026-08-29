@@ -39,7 +39,11 @@ data UnitCache =
     -- | Path to @unit_args@.
     unitArgsPath :: OsPath,
     -- | Path to @dep_units.json@.
-    depUnitsPath :: OsPath
+    depUnitsPath :: OsPath,
+    -- | Path to @source_digests.json@ (per-unit Phase 0 digest record).
+    sourceDigestsPath :: OsPath,
+    -- | Path to @source_hashes.json@ (current digests fed to the incremental metadata step).
+    sourceHashesPath :: OsPath
   }
   deriving stock (Show)
 
@@ -112,7 +116,9 @@ mkUnitCache projectRoot name =
     dir = cDir,
     cachedUnitPath = cDir </> osPath "cached_unit.json",
     unitArgsPath = cDir </> osPath "unit_args",
-    depUnitsPath = cDir </> osPath "dep_units.json"
+    depUnitsPath = cDir </> osPath "dep_units.json",
+    sourceDigestsPath = cDir </> osPath "source_digests.json",
+    sourceHashesPath = cDir </> osPath "source_hashes.json"
   }
   where
     cDir = projectRoot </> cacheDirName </> osPath name.string

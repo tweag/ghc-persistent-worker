@@ -47,7 +47,7 @@ import Data.Time (UTCTime (..), fromGregorian)
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Graphics.Vty qualified as V
 import Graphics.Vty.Attributes.Color
-import Grpc (evictBytecode, sendOptions, triggerExecuteText, triggerRebuild, triggerRebuildText)
+import Grpc (evictBytecode, sendOptions, triggerExecuteText, triggerRebuildText)
 import Internal.Debug (debugSocketPath)
 import Lens.Micro.Platform (
   Lens',
@@ -98,12 +98,13 @@ data Event
   = SendOptions (Maybe WorkerId)
   | SetTime UTCTime
   | SessionSelectorEvent SessionSelector.Event
-  | TriggerRebuild WorkerId TargetSpec
-  | -- | Trigger a build for the given target text (the 'b' key, one event per module when a unit header is
-    -- selected), equivalent to @ghc-client $project TARGET@. The target is always @unitName:moduleName@; the
-    -- 'm' key dispatches the same event constructor but with an @unitName:metadata@ target instead, as computed
-    -- by 'TaskTree.selectedCompileTargets'\/'TaskTree.selectedMetadataTarget'.
-    TriggerBuild WorkerId Text.Text
+  | -- | Trigger a build for the given target text ('b' forces an incremental recompile of the target, 'm'
+    -- targets the owning unit's metadata, 'r' forces a full rebuild of the target that discards the server's
+    -- stored source-digest record first -- see 'GhcServer.Build.Diff'). One event per module when a unit
+    -- header\/the project root is selected, equivalent to @ghc-client $project TARGET@\/@ghc-client --rebuild
+    -- $project TARGET@. The 'Bool' is forwarded verbatim as the RPC's @rebuild@ field. Targets are computed by
+    -- 'TaskTree.selectedCompileTargets'\/'TaskTree.selectedMetadataTargets'.
+    TriggerBuild WorkerId Text.Text Bool
   | -- | Trigger execution of all modules in a unit (the 'x' key). Only fires when a unit header is selected in
   -- the project view, as computed by 'TaskTree.selectedExecuteTarget'. The target text is a bare unit name,
   -- @unitName:moduleName@ for a single module, or the sentinel @"*"@ for the whole project.
@@ -494,8 +495,8 @@ requestQuit = do
   action <- use shutdown
   liftIO action
 
--- | Runs 'handler' against the currently selected active-task target, or beeps if none is selected. Shared by the
--- 'd' (debug) and 'r' (rebuild) key handlers.
+-- | Runs 'handler' against the currently selected active-task target, or beeps if none is selected. Used by the
+-- 'd' (debug) key handler.
 withTarget :: (WorkerId -> TargetSpec -> EventM Name State ()) -> EventM Name State ()
 withTarget handler = do
   current <- use currentFocus
@@ -530,14 +531,10 @@ handleEvent (AppEvent (SendOptions mwid)) = do
     liftIO $
       handle @IOError (\_ -> pure ()) $
         sendOptions (Session._connection worker) (formState opts)
-handleEvent (AppEvent (TriggerRebuild wid target)) = do
+handleEvent (AppEvent (TriggerBuild wid target rebuild)) = do
   mworker <- preuse (currentSession . Session.workers . each . filtered (\w -> Session._workerId w == wid))
   for_ mworker $ \worker -> do
-    liftIO $ triggerRebuild (Session._connection worker) target
-handleEvent (AppEvent (TriggerBuild wid target)) = do
-  mworker <- preuse (currentSession . Session.workers . each . filtered (\w -> Session._workerId w == wid))
-  for_ mworker $ \worker -> do
-    liftIO $ triggerRebuildText (Session._connection worker) target
+    liftIO $ triggerRebuildText (Session._connection worker) target rebuild
 handleEvent (AppEvent (TriggerExecute wid target)) = do
   mworker <- preuse (currentSession . Session.workers . each . filtered (\w -> Session._workerId w == wid))
   case mworker of
@@ -641,19 +638,22 @@ handleEvent (VtyEvent evt) = do
           suspendAndResume' $
             debug (debugSocketPath target)
       V.EvKey (V.KChar 'r') [] -> do
-        withTarget $ \wid target ->
-          handleEvent (AppEvent (TriggerRebuild wid target))
+        mtree <- preuse (currentSession . Session.taskTree)
+        mfirst <- firstWorker
+        case (mtree >>= TaskTree.selectedCompileTargets, mfirst) of
+          (Just targets, Just (wid, _)) -> for_ targets \target -> handleEvent (AppEvent (TriggerBuild wid target True))
+          _ -> beep
       V.EvKey (V.KChar 'b') [] -> do
         mtree <- preuse (currentSession . Session.taskTree)
         mfirst <- firstWorker
         case (mtree >>= TaskTree.selectedCompileTargets, mfirst) of
-          (Just targets, Just (wid, _)) -> for_ targets \target -> handleEvent (AppEvent (TriggerBuild wid target))
+          (Just targets, Just (wid, _)) -> for_ targets \target -> handleEvent (AppEvent (TriggerBuild wid target False))
           _ -> beep
       V.EvKey (V.KChar 'm') [] -> do
         mtree <- preuse (currentSession . Session.taskTree)
         mfirst <- firstWorker
         case (mtree >>= TaskTree.selectedMetadataTargets, mfirst) of
-          (Just targets, Just (wid, _)) -> for_ targets \target -> handleEvent (AppEvent (TriggerBuild wid target))
+          (Just targets, Just (wid, _)) -> for_ targets \target -> handleEvent (AppEvent (TriggerBuild wid target False))
           _ -> beep
       V.EvKey (V.KChar 'x') [] -> do
         mtree <- preuse (currentSession . Session.taskTree)

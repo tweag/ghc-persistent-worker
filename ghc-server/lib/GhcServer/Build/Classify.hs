@@ -9,11 +9,13 @@
 -- This module does not interact with GHC, the worker, or the cache.
 module GhcServer.Build.Classify where
 
+import Control.Concurrent.MVar (modifyMVar_)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC (ModuleName)
+import GhcServer.Build.Diff (UnitDiff (..), computeUnitDiff)
 import GhcServer.Build.Schedule (
   BuildStatus,
   TaskKey (..),
@@ -56,27 +58,48 @@ effectiveRequests project request
 
 -- | Classify a 'ScheduleRequest' into active metadata tasks and pending compile tasks.
 --
--- All units receive a metadata task and pending compile tasks, regardless of cache state.
--- Whether to actually run metadata is decided at dispatch time based on the @cached@ flag
--- embedded in 'Metadata' (computed here from the @cachedUnits@ set).
--- Whether to promote compile tasks is decided by the 'enabled' flag set here, which
--- reflects whether the unit was explicitly requested for compilation.
+-- Runs the Phase 0 analysis ('computeUnitDiff') for every effective unit: sources are diffed
+-- against the stored digest record and the previous module graph is reloaded from disk.  The
+-- results are stored in 'BuildEnv.diff' for consumption at metadata-completion time (Phase 2)
+-- and digest-commit time.  Whether a unit's metadata step runs is decided here and embedded as
+-- the @runMeta@ flag in the task value; dispatch executes it blindly.
 --
--- The @rebuild@ and @cached@ flags are embedded in the task values
--- for dispatch-time skip decisions, eliminating the need for mutable per-request state.
+-- Whether to promote compile tasks is decided by the 'enabled' flag set here (request scope)
+-- in combination with the stale closure computed in Phase 2 (only stale modules receive
+-- resolutions).
 classifyBuildRequest ::
-  Set UnitName ->
   BuildEnv ->
   ScheduleRequest ->
   IO ([Task TaskKey 'Resolved BuildStatus], [Task TaskKey 'Pending BuildStatus])
-classifyBuildRequest cachedUnits env request =
+classifyBuildRequest env request = do
+  diffs <- Map.fromList <$> traverse unitDiff reqs
+  modifyMVar_ env.diff (pure . Map.union diffs)
+  let
+    runMeta name = maybe True (.runMeta) (Map.lookup name diffs)
+    metaTasks = metadataTasks env.project runMeta request.rebuild (map effectiveUnitName reqs)
   pure (metaTasks, pendingTasks)
   where
     reqs = effectiveRequests env.project request
 
-    rebuild = request.recompile
+    unitDiff eu = do
+      let name = effectiveUnitName eu
+      d <- case Map.lookup name env.project.units of
+        Just unit -> computeUnitDiff env.outputDir request.rebuild (forceAll eu) unit
+        Nothing -> pure UnitDiff {
+          changed = Set.empty,
+          newDigests = Map.empty,
+          oldModules = Map.empty,
+          runMeta = True,
+          forceAll = False
+        }
+      pure (name, d)
 
-    metaTasks = metadataTasks env.project cachedUnits request.rebuild (map effectiveUnitName reqs)
+    -- @--recompile@ forces explicitly named units' entire module sets into the stale closure.
+    forceAll = \case
+      Explicit _ req -> request.recompile && isCompileRequest req
+      ImplicitDep _ -> False
+
+    rebuild = request.recompile
 
     pendingTasks = concatMap unitCompileTasks reqs ++ concatMap unitExecuteTasks reqs
 

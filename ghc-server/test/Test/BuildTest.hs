@@ -30,18 +30,18 @@ import GhcServer.Build (
   scheduleBatch,
   stopBuild,
   )
+import GhcServer.Build.Execute (executeModuleTask)
+import GhcServer.Build.Schedule (emptyBuildExt)
 import GhcServer.Cache (cacheExists)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (BuildEvent (..), BuildEvents, newBuildEvents, readEvents)
 import GhcServer.Data.Request (ScheduleRequest (..), UnitRequest (..))
 import GhcServer.Data.Unit (ClientModule (..), Project (..), Unit (..), UnitCache (..), UnitName (..))
 import GhcServer.Data.UnitConfig (UnitConfig (..))
-import GhcServer.Build.Execute (executeModuleTask)
-import GhcServer.Build.Schedule (emptyBuildExt)
-import GhcServer.Scheduler (TaskResult (..))
 import GhcServer.Log (newLogger)
 import GhcServer.Path (osPath)
 import GhcServer.Project (discoverProject)
+import GhcServer.Scheduler (TaskResult (..))
 import Hedgehog (TestT, annotate, assert, diff, property, test, withTests, (===))
 import Prelude hiding (log)
 import System.Directory (createDirectoryIfMissing, listDirectory, removeFile, removePathForcibly)
@@ -109,6 +109,7 @@ newBuildEnv tp stateVar = do
   log <- newLogger False
   events <- newBuildEvents
   extDepsDb <- newMVar Nothing
+  diffVar <- newMVar Map.empty
   pure (BuildEnv {
     baseArgs = emptyArgs Map.empty,
     projectRoot = tp.rootOs,
@@ -119,7 +120,8 @@ newBuildEnv tp stateVar = do
     log,
     events,
     instrChan = Nothing,
-    extDepsDb
+    extDepsDb,
+    diff = diffVar
   }, events)
 
 -- ---------------------------------------------------------------------------
@@ -145,14 +147,22 @@ timedBuild action =
     Just a  -> pure a
     Nothing -> fail ("Build deadlocked (timed out after " ++ show (testBuildTimeoutUs `div` 1_000_000) ++ "s)")
 
--- | Run a fresh build with the given schedule steps.
-runFresh :: MonadIO m => TestProject -> Steps -> m (BuildResult, [BuildEvent])
-runFresh tp steps = liftIO $ timedBuild do
+-- | Run a fresh build with the given steps and explicit @recompile@\/@rebuild@ flags.
+runFreshWith :: MonadIO m => Bool -> Bool -> TestProject -> Steps -> m (BuildResult, [BuildEvent])
+runFreshWith recompile rebuild tp steps = liftIO $ timedBuild do
   stateVar <- newBuildState
   (env, events) <- newBuildEnv tp stateVar
-  result <- runBuild 4 testTaskTimeout env ScheduleRequest {steps, recompile = False, rebuild = False}
+  result <- runBuild 4 testTaskTimeout env ScheduleRequest {steps, recompile, rebuild}
   evs <- readEvents events
   pure (result, evs)
+
+-- | Run a fresh build with the given schedule steps.
+runFresh :: MonadIO m => TestProject -> Steps -> m (BuildResult, [BuildEvent])
+runFresh = runFreshWith False False
+
+-- | Run a fresh build with @--recompile@ semantics (force explicitly named units stale).
+runFreshRecompile :: MonadIO m => TestProject -> Steps -> m (BuildResult, [BuildEvent])
+runFreshRecompile = runFreshWith True False
 
 -- | Run a fresh build with empty request (build everything).
 runFreshAll :: MonadIO m => TestProject -> m (BuildResult, [BuildEvent])
@@ -173,20 +183,28 @@ newTestBuild tp = liftIO do
 
 -- | Run a fresh build with @maxJobs=1@ and return both the result and recorded events.
 runFreshWithEvents :: MonadIO m => TestProject -> Steps -> m (BuildResult, [BuildEvent])
-runFreshWithEvents tp steps = liftIO $ timedBuild do
+runFreshWithEvents = runFreshWithEvents' False False
+
+-- | 'runFreshWithEvents' with explicit @recompile@\/@rebuild@ flags.
+runFreshWithEvents' :: MonadIO m => Bool -> Bool -> TestProject -> Steps -> m (BuildResult, [BuildEvent])
+runFreshWithEvents' recompile rebuild tp steps = liftIO $ timedBuild do
   stateVar <- newBuildState
   (env, events) <- newBuildEnv tp stateVar
-  result <- runBuild 1 testTaskTimeout env ScheduleRequest {steps, recompile = False, rebuild = False}
+  result <- runBuild 1 testTaskTimeout env ScheduleRequest {steps, recompile, rebuild}
   evs <- readEvents events
   pure (result, evs)
 
 -- | Run a fresh build and return the 'WorkerState' MVar alongside the result and events.
 -- The returned 'MVar' can be used to inspect the post-build HPT.
 runFreshWithState :: MonadIO m => TestProject -> Steps -> m (BuildResult, [BuildEvent], MVar WorkerState)
-runFreshWithState tp steps = liftIO $ timedBuild do
+runFreshWithState = runFreshWithState' False False
+
+-- | 'runFreshWithState' with explicit @recompile@\/@rebuild@ flags.
+runFreshWithState' :: MonadIO m => Bool -> Bool -> TestProject -> Steps -> m (BuildResult, [BuildEvent], MVar WorkerState)
+runFreshWithState' recompile rebuild tp steps = liftIO $ timedBuild do
   stateVar <- newBuildState
   (env, events) <- newBuildEnv tp stateVar
-  result <- runBuild 1 testTaskTimeout env ScheduleRequest {steps, recompile = False, rebuild = False}
+  result <- runBuild 1 testTaskTimeout env ScheduleRequest {steps, recompile, rebuild}
   evs <- readEvents events
   pure (result, evs, stateVar)
 
@@ -220,11 +238,6 @@ eventCompiled events =
 eventCompiledUnits :: [BuildEvent] -> [String]
 eventCompiledUnits events =
   sort $ Set.toList $ Set.fromList [name.string | ModuleCompiled name _ <- events]
-
--- | Extract unit names that had at least one module skipped.
-eventSkippedUnits :: [BuildEvent] -> [String]
-eventSkippedUnits events =
-  sort $ Set.toList $ Set.fromList [name.string | CompileSkipped name _ <- events]
 
 -- ---------------------------------------------------------------------------
 -- Assertions
@@ -265,16 +278,6 @@ assertNoCompiled :: HasCallStack => String -> [BuildEvent] -> TestT IO ()
 assertNoCompiled unitName events =
   withFrozenCallStack do
     diff unitName notElem (eventCompiledUnits events)
-
-assertHasSkipped :: HasCallStack => String -> [BuildEvent] -> TestT IO ()
-assertHasSkipped unitName events =
-  withFrozenCallStack do
-    diff unitName elem (eventSkippedUnits events)
-
-assertNoSkipped :: HasCallStack => String -> [BuildEvent] -> TestT IO ()
-assertNoSkipped unitName events =
-  withFrozenCallStack do
-    diff unitName notElem (eventSkippedUnits events)
 
 assertCacheExists :: HasCallStack => TestProject -> String -> TestT IO ()
 assertCacheExists tp name =
@@ -559,6 +562,8 @@ test_cacheRestoreAll =
     (result2, events2) <- runFreshAll tp
     assertSuccess "second build" result2
     [] === eventMetadata events2
+    -- Sources unchanged: nothing is stale, so no module is recompiled.
+    [] === eventCompiled events2
 
 test_cacheMetadataNoOp :: TestTree
 test_cacheMetadataNoOp =
@@ -575,11 +580,18 @@ test_cacheModulesOnly =
   smallTest "modules-only for cached unit" \ tp -> do
     (result1, _) <- runFreshAll tp
     assertSuccess "initial build" result1
+    -- Unchanged sources: nothing stale, nothing compiled.
     (result2, events2) <- runFresh tp [(UnitName "unit1", UnitModulesOnly)]
     assertSuccess "cached modules-only" result2
     assertNoMetadata "unit1" events2
-    assertHasCompiled "unit1" events2
-    assertNoMetadata "unit0" events2
+    assertNoCompiled "unit1" events2
+    -- With --recompile, the explicitly named unit's modules are forced stale and recompiled.
+    (result3, events3) <- runFreshRecompile tp [(UnitName "unit1", UnitModulesOnly)]
+    assertSuccess "forced modules-only" result3
+    assertNoMetadata "unit1" events3
+    assertHasCompiled "unit1" events3
+    assertNoMetadata "unit0" events3
+    assertNoCompiled "unit0" events3
 
 test_cacheMixedFreshAndCached :: TestTree
 test_cacheMixedFreshAndCached =
@@ -599,7 +611,7 @@ test_cacheSpecificModules =
   smallTest "specific modules for cached unit" \ tp -> do
     (result1, _) <- runFreshAll tp
     assertSuccess "initial build" result1
-    (result2, events2) <- runFresh tp [(UnitName "unit1", UnitModules [ClientModule "B"])]
+    (result2, events2) <- runFreshRecompile tp [(UnitName "unit1", UnitModules [ClientModule "B"])]
     assertSuccess "cached specific module" result2
     assertNoMetadata "unit0" events2
     assertNoMetadata "unit1" events2
@@ -616,7 +628,7 @@ test_cacheSpecificModuleDoesNotCompileSiblings =
   largeTest "requesting a specific module does not compile independent sibling modules" \ tp -> do
     (result1, _) <- runFreshAll tp
     assertSuccess "initial build" result1
-    (result2, events2) <- runFresh tp [(UnitName "unit1", UnitModules [ClientModule "B1"])]
+    (result2, events2) <- runFreshRecompile tp [(UnitName "unit1", UnitModules [ClientModule "B1"])]
     assertSuccess "cached specific module" result2
     assertNoMetadata "unit1" events2
     assertEventsContain [ModuleCompiled (UnitName "unit1") (mkModuleName "B1")] events2
@@ -628,15 +640,16 @@ test_cacheSpecificModuleDoesNotCompileSiblings =
 
 test_cacheDeleteLeafRebuildsChain :: TestTree
 test_cacheDeleteLeafRebuildsChain =
-  smallTest "deleting leaf cache: leaf interface present, skip compile" \ tp -> do
+  smallTest "deleting leaf cache: leaf and dependents recompiled" \ tp -> do
     (result1, _) <- runFreshAll tp
     assertSuccess "initial build" result1
     deleteUnitCache tp "unit0"
     (result2, events2) <- runFresh tp [(UnitName "unit1", UnitAll)]
     assertSuccess "chain rebuild" result2
     assertHasMetadata "unit0" events2
-    -- unit0's .dyn_hi files still exist in the output dir, so compile is skipped
-    assertHasSkipped "unit0" events2
+    -- unit0 has no previous module graph, so all of its modules are stale and recompiled,
+    -- along with the downstream closure in unit1.
+    assertHasCompiled "unit0" events2
     assertNoMetadata "unit1" events2
     assertHasCompiled "unit1" events2
 
@@ -888,12 +901,14 @@ test_cachedUnitIntraDep =
     assertCacheExists tp "unit1"
 
     -- Phase 2: fresh WorkerState + fresh scheduler.
+    -- unit1's digest record was not committed in phase 1 (its stale modules were never
+    -- compiled), so metadata re-runs and all unit1 modules are stale.
     (result2, events2) <- runFresh tp
       [(UnitName "unit1", UnitModules [ClientModule "U1M1"])]
     annotate (prettyBuildResult "phase 2" result2)
     assertSuccess "phase 2" result2
     assertHasCompiled "unit1" events2
-    assertNoMetadata "unit1" events2
+    assertHasMetadata "unit1" events2
 
 test_homeUnitDep :: TestTree
 test_homeUnitDep =
@@ -1032,41 +1047,38 @@ test_eventFlow =
 -- Test group: Implicit dep compile skip
 -- ---------------------------------------------------------------------------
 
--- | Both units fully cached. Request @unit1:modules@.
--- unit0 is an implicit dep with compilation artifacts cached (CachedDeps exist).
--- Expected: unit0's modules are skipped (CompileSkipped), unit1's modules are compiled.
+-- | Both units fully cached and unchanged. Request @unit1:modules@ with @--recompile@.
+-- unit0 is an implicit dep with unchanged sources: it is not stale, so no compile task is
+-- created for it at all. unit1 is explicitly requested with force, so its modules recompile.
 test_implicitDepCachedSkip :: TestTree
 test_implicitDepCachedSkip =
-  smallTest "implicit dep: cached modules skipped" \ tp -> do
+  smallTest "implicit dep: unchanged modules not recompiled" \ tp -> do
     -- Phase 1: full build to populate all caches
     (result1, _) <- runFreshAll tp
     assertSuccess "initial build" result1
     assertCacheExists tp "unit0"
     assertCacheExists tp "unit1"
-    -- Phase 2: fresh WorkerState, request unit1:modules
-    (result2, events2) <- runFreshWithEvents tp [(UnitName "unit1", UnitModulesOnly)]
+    -- Phase 2: fresh WorkerState, request unit1:modules with force
+    (result2, events2) <- runFreshWithEvents' True False tp [(UnitName "unit1", UnitModulesOnly)]
     assertSuccess "cached skip" result2
     let u0 = UnitName "unit0"
         u1 = UnitName "unit1"
-    -- unit0 metadata skipped (cached)
+    -- unit0 metadata skipped (unchanged)
     assertEventsContain [MetadataSkipped u0] events2
-    -- unit1 metadata skipped (cached, UnitModulesOnly skips metadata)
+    -- unit1 metadata skipped (unchanged, --recompile does not force metadata)
     assertEventsContain [MetadataSkipped u1] events2
-    -- unit0's modules skipped because CachedDeps exist and it's not explicitly requested
-    assertEventsContain [CompileSkipped u0 (mkModuleName "A")] events2
-    assertHasSkipped "unit0" events2
+    -- unit0's modules are not stale: no compile tasks exist for them
     assertNoCompiled "unit0" events2
-    -- unit1's modules compiled because it's explicitly requested
+    -- unit1's modules recompiled because it's explicitly requested with force
     assertEventsContain [ModuleCompiled u1 (mkModuleName "B")] events2
     assertHasCompiled "unit1" events2
-    assertNoSkipped "unit1" events2
 
--- | Both units have metadata cached. Request @unit1:modules@.
--- unit0's @.dyn_hi@ interface files are deleted (compilation artifacts unavailable).
--- Expected: unit0's modules are compiled (not skipped), unit1's modules are compiled.
+-- | Both units have metadata cached, but the compiled artifacts are deleted behind the
+-- server's back.  Digest-based invalidation cannot see this (sources are unchanged), so
+-- recovery requires @--rebuild@, which invalidates everything.
 test_implicitDepNoCacheCompiled :: TestTree
 test_implicitDepNoCacheCompiled =
-  smallTest "implicit dep: uncached modules compiled" \ tp -> do
+  smallTest "deleted artifacts recovered via rebuild" \ tp -> do
     -- Phase 1: full build to populate all caches
     (result1, _) <- runFreshAll tp
     assertSuccess "initial build" result1
@@ -1074,22 +1086,15 @@ test_implicitDepNoCacheCompiled =
     assertCacheExists tp "unit1"
     -- Delete unit0's interface files but keep metadata cache
     deleteModuleHiFiles tp "unit0"
-    -- Phase 2: fresh WorkerState, request unit1:modules
-    (result2, events2) <- runFreshWithEvents tp [(UnitName "unit1", UnitModulesOnly)]
-    assertSuccess "uncached compile" result2
+    -- Phase 2: fresh WorkerState, full rebuild
+    (result2, events2) <- runFreshWithEvents' False True tp []
+    assertSuccess "rebuild" result2
     let u0 = UnitName "unit0"
         u1 = UnitName "unit1"
-    -- unit0 metadata skipped (metadata cache still exists)
-    assertEventsContain [MetadataSkipped u0] events2
-    -- unit1 metadata skipped (cached)
-    assertEventsContain [MetadataSkipped u1] events2
-    -- unit0's modules compiled because .dyn_hi files don't exist
+    -- Everything re-runs: metadata and all modules
+    assertEventsContain [MetadataRan u0, MetadataRan u1] events2
     assertEventsContain [ModuleCompiled u0 (mkModuleName "A")] events2
-    assertHasCompiled "unit0" events2
-    assertNoSkipped "unit0" events2
-    -- unit1's modules compiled because it's explicitly requested
     assertEventsContain [ModuleCompiled u1 (mkModuleName "B")] events2
-    assertHasCompiled "unit1" events2
 
 test_implicitDepCompileSkip :: TestTree
 test_implicitDepCompileSkip =
@@ -1102,11 +1107,8 @@ test_implicitDepCompileSkip =
 -- Test group: HPT assembly
 -- ---------------------------------------------------------------------------
 
--- | After a full cache restore (both metadata and some compiles skipped),
--- verify that cross-unit dep modules are present in the HPT.
---
--- This is the scenario that triggers the @hugSomeThingsBelowUs@ warning:
--- unit0:A is skipped (implicit dep, cached), unit1:B is compiled.
+-- | Cache restore with a forced recompile of the dependent unit:
+-- unit0:A is unchanged (restored from cache, not recompiled), unit1:B is forced stale.
 -- If the HPT is correctly assembled, unit0:A should be present in unit0's HPT
 -- because 'loadCachedDeps' (or 'loadHomeUnit') loaded it before compiling B.
 test_hptCacheRestore :: TestTree
@@ -1115,20 +1117,18 @@ test_hptCacheRestore =
     -- Phase 1: full build to populate cache and CachedDeps
     (result1, _) <- runFreshAll tp
     assertSuccess "initial build" result1
-    -- Phase 2: fresh WorkerState, full cache restore
-    (result2, events, stateVar) <- runFreshWithState tp []
+    -- Phase 2: fresh WorkerState, force unit1's modules stale
+    (result2, events, stateVar) <- runFreshWithState' True False tp [(UnitName "unit1", UnitAll)]
     assertSuccess "cache restore" result2
-    -- Both metadata skipped (cached)
+    -- Both metadata skipped (unchanged)
     assertEventsContain [MetadataSkipped (UnitName "unit0"), MetadataSkipped (UnitName "unit1")] events
-    -- unit1:B was compiled (either fresh or from cache)
-    -- unit0:A should be in unit0's HPT so that unit1:B compilation
+    -- unit1:B was compiled; unit0:A should be in unit0's HPT so that unit1:B compilation
     -- can find it via hugSomeThingsBelowUs
     assertHptHasModule stateVar "unit0" "A"
     assertHptHasModule stateVar "unit1" "B"
 
--- | After a cache restore where the leaf unit's @.dyn_hi@ files are
--- deleted, the HPT should still be correctly populated because the
--- compile step runs (not skipped) and adds the module to the HPT.
+-- | After deleting the leaf unit's @.dyn_hi@ files, a @--rebuild@ restores the HPT
+-- because every module is recompiled.
 test_hptCacheRestoreNoCachedDeps :: TestTree
 test_hptCacheRestoreNoCachedDeps =
   smallTest "HPT: cache restore without interface files" \ tp -> do
@@ -1137,17 +1137,17 @@ test_hptCacheRestoreNoCachedDeps =
     assertSuccess "initial build" result1
     -- Delete unit0's interface files but keep metadata cache
     deleteModuleHiFiles tp "unit0"
-    -- Phase 2: fresh WorkerState
-    (result2, _events, stateVar) <- runFreshWithState tp []
+    -- Phase 2: fresh WorkerState, full rebuild (digests cannot detect deleted outputs)
+    (result2, _events, stateVar) <- runFreshWithState' False True tp []
     assertSuccess "cache restore" result2
-    -- unit0:A should still be in the HPT (it was recompiled, not skipped)
+    -- unit0:A should still be in the HPT (it was recompiled)
     assertHptHasModule stateVar "unit0" "A"
     assertHptHasModule stateVar "unit1" "B"
 
 -- | Build only @unit0@ in session 1, then @unit1@ in session 2 (fresh 'WorkerState').
 -- @unit1:B@ imports @unit0:A@, so the compilation of @B@ needs @A@'s interface in the HPT.
--- Since @unit0@ was fully built in session 1, its @.dyn_hi@ is on disk and the implicit
--- dep's compile task is skipped.  @B@ still compiles because 'CachedDeps' are assembled
+-- Since @unit0@ was fully built in session 1 and is unchanged, it is not stale and no
+-- compile task exists for it.  @B@ still compiles because 'CachedDeps' are assembled
 -- from the module map (populated from @cached_unit.json@).
 test_hptCrossSessionCachedDeps :: TestTree
 test_hptCrossSessionCachedDeps =
@@ -1165,13 +1165,11 @@ test_hptCrossSessionCachedDeps =
     assertSuccess "session 2" result2
     assertHasMetadata "unit1" events2
     assertHasCompiled "unit1" events2
-    let u0 = UnitName "unit0"
-        u1 = UnitName "unit1"
-        modA = mkModuleName "A"
+    let u1 = UnitName "unit1"
         modB = mkModuleName "B"
-    -- unit0 is an implicit dep with cached artifacts from session 1.
-    -- Its compile task is skipped since the .dyn_hi exists.
-    assertEventsContain [CompileSkipped u0 modA] events2
+    -- unit0 is an implicit dep with cached artifacts from session 1 and unchanged sources:
+    -- it is not stale, so no compile task exists for it.
+    assertNoCompiled "unit0" events2
     -- B imports A from unit0 — compilation succeeds because CachedDeps are
     -- assembled from the module map (populated from cached_unit.json).
     assertEventsContain [ModuleCompiled u1 modB] events2
@@ -1362,6 +1360,101 @@ test_executeNonexistentModuleFails =
       Just (TaskFailed _) -> pure ()
       other -> fail ("Expected Just (TaskFailed _), got " ++ show other)
 
+-- ---------------------------------------------------------------------------
+-- Test group: Incremental recompilation
+-- ---------------------------------------------------------------------------
+
+-- | Project for partial-invalidation tests:
+--
+-- @
+-- unit0: A, B (imports A), C (standalone)
+-- unit1 (deps unit0): D (imports B), E (standalone)
+-- @
+createIncrementalProject :: FilePath -> IO ()
+createIncrementalProject root = do
+  createDirectoryIfMissing True (root ++ "/unit0")
+  createDirectoryIfMissing True (root ++ "/unit1")
+  writeUnitConfig root "unit0" UnitConfig {deps = [], args = baseGhcArgs}
+  writeProjectFile root "unit0/A.hs" $ unlines
+    [ "module A where"
+    , "a :: String"
+    , "a = \"a\""
+    ]
+  writeProjectFile root "unit0/B.hs" $ unlines
+    [ "module B where"
+    , "import A (a)"
+    , "b :: String"
+    , "b = a ++ \"_b\""
+    ]
+  writeProjectFile root "unit0/C.hs" $ unlines
+    [ "module C where"
+    , "c :: String"
+    , "c = \"c\""
+    ]
+  writeUnitConfig root "unit1" UnitConfig {deps = ["unit0"], args = baseGhcArgs}
+  writeProjectFile root "unit1/D.hs" $ unlines
+    [ "module D where"
+    , "import B (b)"
+    , "d :: String"
+    , "d = b ++ \"_d\""
+    ]
+  writeProjectFile root "unit1/E.hs" $ unlines
+    [ "module E where"
+    , "e :: String"
+    , "e = \"e\""
+    ]
+
+incrementalTest :: TestName -> (TestProject -> TestT IO ()) -> TestTree
+incrementalTest =
+  projectTest "ghc-server-incremental" createIncrementalProject
+
+-- | Editing one module recompiles exactly its downstream closure, across unit boundaries:
+-- @B@ (edited) and @D@ (imports @B@, in a different unit), but not @A@ (dependency of @B@),
+-- @C@ or @E@ (unrelated).
+test_partialInvalidation :: TestTree
+test_partialInvalidation =
+  incrementalTest "editing a module recompiles only its downstream closure" \ tp -> do
+    -- Session 1: full build, commits digest records.
+    (result1, events1) <- runFreshAll tp
+    assertSuccess "initial build" result1
+    ["unit0:A", "unit0:B", "unit0:C", "unit1:D", "unit1:E"] === eventCompiled events1
+    -- Edit B without changing its interface to the module graph.
+    liftIO $ writeProjectFile tp.root "unit0/B.hs" $ unlines
+      [ "module B where"
+      , "import A (a)"
+      , "b :: String"
+      , "b = a ++ \"_b_edited\""
+      ]
+    -- Session 2: fresh scheduler and WorkerState over the same on-disk state.
+    (result2, events2) <- runFreshAll tp
+    assertSuccess "incremental build" result2
+    -- unit0 has a changed source: metadata re-runs (incrementally).
+    assertEventsContain [MetadataRan (UnitName "unit0")] events2
+    -- unit1 is unchanged: metadata skipped.
+    assertEventsContain [MetadataSkipped (UnitName "unit1")] events2
+    -- Exactly the downstream closure of B is recompiled.
+    ["unit0:B", "unit1:D"] === eventCompiled events2
+
+-- | A touch without a content change (same digest, new mtime) invalidates nothing.
+test_touchWithoutChange :: TestTree
+test_touchWithoutChange =
+  incrementalTest "touching a file without changing content recompiles nothing" \ tp -> do
+    (result1, _) <- runFreshAll tp
+    assertSuccess "initial build" result1
+    content <- liftIO (readFile (tp.root ++ "/unit0/B.hs"))
+    liftIO (length content `seq` writeProjectFile tp.root "unit0/B.hs" content)
+    (result2, events2) <- runFreshAll tp
+    assertSuccess "touch build" result2
+    [] === eventMetadata events2
+    [] === eventCompiled events2
+
+test_incrementalRecompilation :: TestTree
+test_incrementalRecompilation =
+  dependentTestGroup "Incremental recompilation" AllFinish
+    [ test_partialInvalidation
+    , test_touchWithoutChange
+    ]
+
 test_serverBuild :: TestTree
 test_serverBuild =
   dependentTestGroup "GhcServer.Build" AllFinish
@@ -1374,6 +1467,7 @@ test_serverBuild =
     , test_implicitDepCompileSkip
     , test_hptAssembly
     , test_transitiveDepRestore
+    , test_incrementalRecompilation
     , test_executeModule
     ]
 

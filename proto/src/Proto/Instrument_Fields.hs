@@ -61,6 +61,11 @@ pendingEviction ::
    Data.ProtoLens.Field.HasField s "pendingEviction" a) =>
   Lens.Family2.LensLike' f s a
 pendingEviction = Data.ProtoLens.Field.field @"pendingEviction"
+rebuild ::
+  forall f s a.
+  (Prelude.Functor f, Data.ProtoLens.Field.HasField s "rebuild" a) =>
+  Lens.Family2.LensLike' f s a
+rebuild = Data.ProtoLens.Field.field @"rebuild"
 resident ::
   forall f s a.
   (Prelude.Functor f,
