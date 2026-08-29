@@ -42,6 +42,7 @@ executable instrument
     TypeFamilies
   build-depends:
     async,
+    aeson,
     base ==4.*,
     binary,
     brick,

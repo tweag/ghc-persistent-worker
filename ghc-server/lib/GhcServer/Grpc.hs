@@ -10,8 +10,8 @@ import Control.Concurrent.Chan (Chan)
 import Control.Concurrent.MVar (MVar)
 import Data.Binary (encode)
 import Data.ByteString (toStrict)
+import Data.Functor (($>))
 import qualified Data.Map.Strict as Map
-import qualified Data.Text as Text
 import GhcServer.Build (Build, scheduleBatch)
 import GhcServer.Data.Request (ScheduleRequest (..), UnitRequest (..))
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
@@ -19,7 +19,6 @@ import GhcServer.Handler (parseTarget)
 import GhcServer.Log (emitLog)
 import GhcServer.Path (fp)
 import GhcWorker.Grpc qualified as Worker
-import GhcWorker.Grpc (evictBytecode, getBytecodeState, setOptions)
 import Network.GRPC.Common (NextElem (NextElem))
 import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
 import Network.GRPC.Server.Protobuf (ProtobufMethodsOf)
@@ -28,7 +27,8 @@ import qualified Proto.Instrument as Instr
 import Proto.Instrument (Instrument)
 import Proto.Instrument_Fields qualified as Instr
 import System.FilePath (takeBaseName)
-import Types.Instrument (Event (..), UnitSummary (..))
+import Types.Instrument (Event (..), TaskKind (..), TaskTrigger (..), UnitSummary (..))
+import Types.Instrument qualified as Instrument
 import Types.State (WorkerState)
 
 -- | Build a snapshot of the project's units and modules for the instrument UI's task tree, from the units
@@ -60,66 +60,73 @@ notifyMe project stateVar chan callback = do
       & Instr.encoded .~ toStrict (encode (projectStructureEvent project))
   Worker.notifyMe stateVar chan callback
 
--- | Trigger a build for the given target, parsed and scheduled the same way 'ghc-client' would from its argv
--- (@unitName@, @unitName:metadata@, @unitName:modules@, @unitName:ModuleName@, or the @"*"@ wildcard for every
--- unit in the project). Fire-and-forget: does not wait for completion, matching the semantics of the worker's own
--- 'triggerRebuild'.
+-- | Trigger a build task (recompile, or execute @main@) for the given target, parsed and scheduled the same way
+-- 'ghc-client' would from its argv (@unitName@, @unitName:metadata@, @unitName:modules@, @unitName:ModuleName@, or
+-- the @"*"@ wildcard for every unit in the project). Fire-and-forget: does not wait for completion, matching the
+-- semantics of the worker's own 'GhcWorker.Grpc.triggerTask'. Merges the former separate
+-- 'triggerRebuild'\/'triggerExecute' handlers into a single operation parameterized on 'TaskKind'.
 --
 -- Always forces @recompile = True@: unlike a scheduled build implicitly triggered by another target's dependency
 -- resolution, this is always an explicit user request (from the instrument UI's 'b'\/'m'\/'r' keys, or
 -- 'ghc-client' without flags), so the named targets must be forced into the stale closure rather than silently
--- skipped because Phase 0\/2's diff sees no change. @rebuild@ (the request's own field, no longer hardcoded)
--- additionally discards the stored source-digest record first, forcing every source in scope to be treated as
--- changed -- this is the \'force full rebuild\' request, as opposed to an ordinary incremental recompile.
-triggerRebuild ::
-  Chan Event ->
-  Build ->
-  Project ->
-  Proto Instr.RebuildRequest ->
-  IO (Proto Instr.Empty)
-triggerRebuild chan build project req = do
-  let targetText = Text.unpack req.target
-  case parseTarget project targetText of
-    Left err ->
-      emitLog (Just chan) targetText "error" ("Rejected rebuild request: " ++ err)
-    Right steps ->
-      scheduleBatch build ScheduleRequest {steps, recompile = True, rebuild = req.rebuild}
-  pure defMessage
-
--- | Trigger execution of @main@ for the given target, using the same target grammar as 'triggerRebuild'\/
--- 'parseTarget', with an added @:execute@ selector\/\@"*"@ sentinel:
+-- skipped because Phase 0\/2's diff sees no change. For 'Rebuild', @rebuild@ (the request's own field, no longer
+-- hardcoded) additionally discards the stored source-digest record first, forcing every source in scope to be
+-- treated as changed -- this is the \'force full rebuild\' request, as opposed to an ordinary incremental
+-- recompile. 'Execute' always forces @rebuild = True@ and additionally rewrites every step to its
+-- execute-variant, using the same target grammar with an added @:execute@ selector\/@"*"@ sentinel:
 --
 -- * @"*"@ (project-root node selected) -- execute every module of every unit in the project.
 -- * @unitName@ or @unitName:execute@ (unit header row selected) -- execute every module of that unit.
 -- * @unitName:moduleName@ (module row selected) -- execute only that module.
 --
 -- Dispatched as an ordinary scheduler batch ('GhcServer.Build.Schedule.ExecuteModule' tasks, depending on their
--- module's compile task), rather than a raw 'forkIO'\/'Control.Concurrent.Async.forConcurrently_' fan-out.
--- Fire-and-forget, like 'triggerRebuild': does not await completion. A malformed target string is rejected the
--- same way 'triggerRebuild' rejects one -- logged on the instrument channel, never crashing the handler thread.
-triggerExecute ::
+-- module's compile task), rather than a raw 'forkIO'\/'Control.Concurrent.Async.forConcurrently_' fan-out. A
+-- malformed target string is rejected the same way for both kinds -- logged on the instrument channel, never
+-- crashing the handler thread.
+triggerTask ::
   Chan Event ->
   Build ->
   Project ->
-  Proto Instr.RebuildRequest ->
-  IO (Proto Instr.Empty)
-triggerExecute chan build project req = do
-  let targetText = Text.unpack req.target
-  case parseTarget project targetText of
+  TaskTrigger ->
+  IO ()
+triggerTask chan build project TaskTrigger{target, task, rebuild} =
+  case parseTarget project target of
     Left err ->
-      emitLog (Just chan) targetText "error" ("Rejected execute request: " ++ err)
+      emitLog (Just chan) target "error" ("Rejected " ++ label ++ " request: " ++ err)
     Right steps ->
-      scheduleBatch build ScheduleRequest {steps = map toExecuteStep steps, recompile = True, rebuild = True}
-  pure defMessage
+      scheduleBatch build (request steps)
   where
+    label = case task of
+      Rebuild -> "rebuild"
+      Execute -> "execute"
+
+    request steps = case task of
+      Rebuild -> ScheduleRequest {steps, recompile = True, rebuild}
+      Execute -> ScheduleRequest {steps = map toExecuteStep steps, recompile = True, rebuild = True}
+
     toExecuteStep (name, unitReq) = (name, executeVariant unitReq)
 
     executeVariant = \case
       UnitModules mods -> UnitExecuteModules mods
       _ -> UnitExecute
 
--- | A grapesy server that streams instrumentation data and serves the bytecode-cache browser RPCs, backed by
--- 'ghc-server'\'s persistent 'WorkerState' and scheduler.
+-- | Dispatch a single decoded 'Instrument.Command' to the appropriate handler, reusing 'GhcWorker.Grpc''s
+-- 'setOptions'\/'evictBytecode'\/'getBytecodeState' (which only depend on 'WorkerState') and this module's own
+-- 'triggerTask' (which needs the scheduler and parsed project, unlike the worker's target-args lookup).
+runCommand ::
+  Chan Event ->
+  Build ->
+  Project ->
+  MVar WorkerState ->
+  Instrument.Command ->
+  IO Instrument.Response
+runCommand chan build project stateVar = \case
+  Instrument.SetOptions opts -> Worker.setOptions stateVar opts $> Instrument.Ack
+  Instrument.TriggerTask trigger -> triggerTask chan build project trigger $> Instrument.Ack
+  Instrument.EvictBytecode req -> Worker.evictBytecode stateVar req $> Instrument.Ack
+
+-- | A grapesy server that streams instrumentation data and dispatches every other 'Instrument' operation through
+-- the unified @Send@ RPC, backed by 'ghc-server'\'s persistent 'WorkerState' and scheduler.
 instrumentMethods ::
   Chan Event ->
   MVar WorkerState ->
@@ -128,9 +135,5 @@ instrumentMethods ::
   Methods IO (ProtobufMethodsOf Instrument)
 instrumentMethods chan stateVar build project =
   simpleMethods
-    (mkNonStreaming (evictBytecode stateVar))
-    (mkNonStreaming (getBytecodeState stateVar))
     (mkServerStreaming (const (notifyMe project stateVar chan)))
-    (mkNonStreaming (setOptions stateVar))
-    (mkNonStreaming (triggerExecute chan build project))
-    (mkNonStreaming (triggerRebuild chan build project))
+    (mkNonStreaming (Worker.handleCommand (runCommand chan build project stateVar)))

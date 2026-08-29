@@ -1,9 +1,12 @@
 {-# LANGUAGE DeriveAnyClass #-}
+
 module Types.Instrument where
 
+import Data.Aeson (FromJSON, ToJSON)
 import Data.Binary (Binary)
 import Data.Map (Map)
 import GHC.Generics (Generic)
+import Types.State (Options)
 
 -- | A unit and its module names, as discovered by @ghc-server@'s project discovery (unit directories /
 -- @unit.json@ files, or @.cabal@ parsing) at startup. Module names come from source file basenames, not from a
@@ -15,8 +18,7 @@ data UnitSummary
 
 -- | Cache-tracking info for a single lazily-loaded bytecode-cache entry, mirroring the @BcoCacheEntry@ proto
 -- message. Unlike that message, values of this type are constructed directly from 'Types.State.Make.MakeState'
--- (see @GhcWorker.Grpc.bytecodeEntries@) and are used both to build the @GetBytecodeState@ RPC's response and to
--- construct 'BytecodeSnapshot' events.
+-- (see @GhcWorker.Grpc.bytecodeEntries@) and are used both to construct 'BytecodeSnapshot' events.
 data BcoEntryInfo
   = BcoEntryInfo
       { unitId :: String
@@ -27,7 +29,49 @@ data BcoEntryInfo
       , pendingEviction :: Bool
       }
   deriving stock (Eq, Show, Generic)
-  deriving anyclass (Binary)
+  deriving anyclass (Binary, FromJSON, ToJSON)
+
+-- | Kind of task to trigger for a target: an ordinary recompile, or compiling and then executing @main@.
+-- Merges the former separate @TriggerRebuild@\/@TriggerExecute@ RPCs into a single parameterized operation.
+data TaskKind = Rebuild | Execute
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (Binary, FromJSON, ToJSON)
+
+-- | Request to trigger a build task for a target, replacing the identically-shaped @RebuildRequest@ payload
+-- that the former @TriggerRebuild@\/@TriggerExecute@ RPCs both used.
+data TaskTrigger
+  = TaskTrigger
+      { target :: String
+      , task :: TaskKind
+      , rebuild :: Bool
+      }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (Binary, FromJSON, ToJSON)
+
+-- | Request to evict a module (or, if 'moduleName' is empty, an entire unit) from the bytecode cache. Replaces
+-- the former @EvictBytecodeRequest@ proto message.
+data EvictRequest
+  = EvictRequest { unitId :: String, moduleName :: String }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (Binary, FromJSON, ToJSON)
+
+-- | The single sum type all non-streaming 'Instrument' RPC payloads are mapped to, JSON-encoded into the
+-- unified @Send@ RPC's @Command@ message. Each constructor wraps the pure data type corresponding to the
+-- request message the given operation used before the RPCs were merged.
+data Command
+  = SetOptions Options
+  | TriggerTask TaskTrigger
+  | EvictBytecode EvictRequest
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- | The response counterpart to 'Command', JSON-encoded into the @Send@ RPC's @CommandResponse@ message.
+-- 'Ack' answers every command.
+data Response
+  = Ack
+  | BytecodeState [BcoEntryInfo]
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON, ToJSON)
 
 data Event
   = CompileStart { target :: String, canDebug :: Bool }

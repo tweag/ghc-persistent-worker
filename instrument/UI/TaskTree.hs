@@ -136,8 +136,8 @@ selectedMetadataTargets State{rows, units} = do
     Root -> pure [unitName e <> ":metadata" | e <- units]
     _ -> pure [rowUnit row <> ":metadata"]
 
--- | The target text for the 'x' execute action, used verbatim as the @triggerExecute@ RPC's target field (see
--- 'GhcServer.Grpc.triggerExecute'):
+-- | The target text for the 'x' execute action, used verbatim as the 'TaskTrigger''s @target@ field for an
+-- @Execute@-kind task (see 'GhcServer.Grpc.triggerTask'):
 --
 -- * Project-root node selected -- the sentinel @"*"@, requesting execution of every module of every unit.
 -- * Unit header row selected -- the bare unit name, requesting execution of every module of that unit.

@@ -20,6 +20,7 @@
         enable = true;
         dependencies = [
           "async"
+          "aeson"
           "binary"
           "bytestring"
           "buck-worker-grpc"
@@ -147,6 +148,7 @@
       executable = {
         dependencies = [
           "async"
+          "aeson"
           "binary"
           "brick"
           "buck-worker-internal"

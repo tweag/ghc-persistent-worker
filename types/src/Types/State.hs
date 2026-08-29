@@ -1,8 +1,11 @@
+{-# LANGUAGE DeriveAnyClass #-}
 module Types.State where
 
+import Data.Aeson (FromJSON, ToJSON)
 import Data.Map.Strict (Map)
 import Data.Set (Set)
 import GHC (HscEnv)
+import GHC.Generics (Generic)
 import Types.Grpc (CommandEnv, RequestArgs)
 import Types.State.Make (MakeState (..))
 import Types.Target (TargetSpec)
@@ -19,6 +22,8 @@ data Options =
   Options {
     extraGhcOptions :: String
   }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON, ToJSON)
 
 defaultOptions :: Options
 defaultOptions =

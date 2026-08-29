@@ -29,8 +29,7 @@ import Lens.Micro.Platform (Lens', lens)
 import UI.Types (Name (BytecodeBrowser), evictedAttr, disabledAttr, pendingEvictionAttr)
 import UI.Utils (formatBytes)
 
--- | A single tracked bytecode cache entry, as reported by the worker's @GetBytecodeState@ RPC. Historic: may refer
--- to a module that is no longer resident (see 'resident').
+-- | A single tracked bytecode cache entry. Historic: may refer to a module that is no longer resident (see 'resident').
 data Entry = Entry
   { unitId :: Text
   , moduleName :: Text
