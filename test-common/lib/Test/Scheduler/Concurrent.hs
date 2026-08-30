@@ -146,14 +146,7 @@ data Resolution (key :: Phase -> Type) task =
 deriving stock instance (Show (key 'Pending), Show (key 'Resolved), Show task) => Show (Resolution key task)
 deriving stock instance (Eq (key 'Pending), Eq (key 'Resolved), Eq task) => Eq (Resolution key task)
 
--- | Whether the scheduler records its decisions for introspection.
---
--- 'TracingOff' is the production setting: 'traceDecision' then matches on 'Nothing' and
--- returns the state unchanged, so no decision value is ever constructed or retained.
-data Tracing = TracingOff | TracingOn
-  deriving stock (Eq, Show)
-
--- | A scheduling decision, recorded only when 'Tracing' is 'TracingOn'.
+-- | A scheduling decision, forwarded to 'Handlers.reportDecision' as it is recorded.
 --
 -- These are deliberately the /negative/ decisions as well as the positive ones: \"nothing was
 -- compiled\" is indistinguishable from \"the work was silently dropped\" unless the reason for
@@ -228,7 +221,15 @@ data Handlers request (key :: Phase -> Type) task f ext =
       key 'Resolved ->
       TaskResult f ->
       SchedulerState key task f ext ->
-      IO (SchedulerState key task f ext)
+      IO (SchedulerState key task f ext),
+    -- | Observe a scheduler decision as it is recorded, in chronological order.
+    --
+    -- Called once per processed event (see 'flushTrace'), after that event's state transition has
+    -- been committed. Domain layers use this to make the decision log observable from the outside
+    -- (e.g. appending to an 'Data.IORef.IORef' in tests, or forwarding to an instrumentation
+    -- channel in production); a handler that does nothing (@\\ _ -> pure ()@) disables tracing
+    -- entirely at negligible cost.
+    reportDecision :: SchedulerDecision key -> IO ()
   }
 
 -- | All mutable scheduler state.
@@ -264,9 +265,12 @@ data SchedulerState (key :: Phase -> Type) task f ext =
     resolutions :: Map (key 'Pending) (Resolution key task),
     -- | The generation of the most recent request (see 'Generation').
     generation :: Generation,
-    -- | Decision log, or 'Nothing' when tracing is disabled.  Stored in reverse order;
-    -- use 'schedulerDecisions' to read it.
-    trace :: Maybe [SchedulerDecision key],
+    -- | Decisions recorded since the last 'flushTrace', in reverse order.
+    --
+    -- Purely a transient buffer: 'flushTrace' drains it and forwards each entry, in chronological
+    -- order, to 'Handlers.reportDecision' after every processed event, so it is always empty when a new
+    -- event's state transition begins.
+    trace :: [SchedulerDecision key],
     -- | Domain-specific state threaded through 'propagate'.
     ext :: ext
   }
@@ -294,19 +298,13 @@ bumpGeneration state =
   where
     generation = nextGeneration state.generation
 
--- | Record a decision, or do nothing if tracing is disabled.
+-- | Buffer a decision for the next 'flushTrace'.
 traceDecision ::
   SchedulerDecision key ->
   SchedulerState key task f ext ->
   SchedulerState key task f ext
 traceDecision decision state =
-  case state.trace of
-    Nothing -> state
-    Just decisions -> state {trace = Just (decision : decisions)}
-
--- | Read the decision log in chronological order.  Empty when tracing is disabled.
-schedulerDecisions :: SchedulerState key task f ext -> [SchedulerDecision key]
-schedulerDecisions state = maybe [] reverse state.trace
+  state {trace = decision : state.trace}
 
 -- | Whether a resolution should activate its task.
 data Activation =
@@ -631,10 +629,28 @@ processEvent env resources = \case
     (activeTasks, pendingTasks) <- env.handlers.classify req
     atomically do
       modifyTVar' resources.state (enqueuePending pendingTasks . enqueueTasks activeTasks . bumpGeneration)
+    flushTrace env.handlers resources.state
   CompletionEvent key result -> do
     propagated <- env.handlers.propagate key result =<< readTVarIO resources.state
     atomically do
       writeTVar resources.state (recordResult key result propagated)
+    flushTrace env.handlers resources.state
+
+-- | Drain decisions buffered since the last flush and forward each, in chronological order, to
+-- the handlers' 'reportDecision' callback.
+--
+-- Called once per processed event, right after its state transition has been committed (see
+-- 'processEvent'), so the buffer is always empty when a new event's transition begins.
+flushTrace ::
+  Handlers request key task f ext ->
+  TVar (SchedulerState key task f ext) ->
+  IO ()
+flushTrace handlers stateVar = do
+  decisions <- atomically (stateTVar stateVar \ s -> (reverse s.trace, clearTrace s))
+  traverse_ handlers.reportDecision decisions
+  where
+    clearTrace :: SchedulerState key task f ext -> SchedulerState key task f ext
+    clearTrace s = s {trace = []}
 
 -- | Take ready tasks from the pool up to the job limit and start them.
 --
@@ -693,8 +709,8 @@ runScheduler env resources =
 -- Use this when the 'SchedulerEnv' callbacks need access to the scheduler state
 -- (e.g. dispatch callbacks that submit follow-up requests to the inbox).
 -- After creating the env with references to this state, call 'runScheduler'.
-newSchedulerState :: Tracing -> ext -> IO (SchedulerResources request key task f ext)
-newSchedulerState tracing initialExt = do
+newSchedulerState :: ext -> IO (SchedulerResources request key task f ext)
+newSchedulerState initialExt = do
   events <- newTQueueIO
   state <- newTVarIO SchedulerState {
     unsatisfied = Map.empty,
@@ -706,9 +722,7 @@ newSchedulerState tracing initialExt = do
     failures = Map.empty,
     resolutions = Map.empty,
     generation = initialGeneration,
-    trace = case tracing of
-      TracingOff -> Nothing
-      TracingOn -> Just [],
+    trace = [],
     ext = initialExt
   }
   pure SchedulerResources {events, state}

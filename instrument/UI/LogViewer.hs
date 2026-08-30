@@ -174,8 +174,8 @@ handleEvent = \case
   V.EvKey V.KDown [] -> moveSelection 1
   V.EvKey (V.KChar 'k') [] -> moveSelection (-1)
   V.EvKey V.KUp [] -> moveSelection (-1)
-  V.EvKey (V.KChar 'd') [] -> vScrollBy (viewportScroll LogViewer) 1
-  V.EvKey (V.KChar 'u') [] -> vScrollBy (viewportScroll LogViewer) (-1)
+  V.EvKey (V.KChar 'd') [] -> vScrollBy (viewportScroll LogViewer) 10
+  V.EvKey (V.KChar 'u') [] -> vScrollBy (viewportScroll LogViewer) (-10)
   _ -> pure ()
 
 -- | Renders only the list content; the surrounding frame/title is supplied by the caller

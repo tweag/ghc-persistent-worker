@@ -12,6 +12,7 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Aeson (encode)
 import qualified Data.ByteString.Lazy as LBS
 import Data.Char (toLower)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.List (isSuffixOf, sort)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -23,9 +24,7 @@ import GHC.Unit.Types (stringToUnit, toUnitId)
 import GhcServer.Build (
   Build (..),
   BuildResult (..),
-  Tracing (..),
   awaitBuild,
-  buildDecisions,
   newBuild,
   newBuildState,
   runBuild,
@@ -177,14 +176,20 @@ timedStop cb = timedBuild (stopBuild cb)
 
 -- | Create a new 'Build' for multi-batch tests.
 --
--- Tracing is always enabled here so that tests can assert on the scheduler's decisions
--- (see 'buildDecisions'), not merely on the compilation events that resulted from them.
-newTestBuild :: MonadIO m => TestProject -> m (Build, BuildEvents)
+-- Every scheduler decision is accumulated into the returned 'IORef', in chronological order, so
+-- tests can assert on the scheduler's decisions (see 'buildDecisions'), not merely on the
+-- compilation events that resulted from them.
+newTestBuild :: MonadIO m => TestProject -> m (Build, BuildEvents, IORef [SchedulerDecision TaskKey])
 newTestBuild tp = liftIO do
   stateVar <- newBuildState
   (env, events) <- newBuildEnv tp stateVar
-  cb <- newBuild TracingOn 4 testTaskTimeout env
-  pure (cb, events)
+  decisionsRef <- newIORef []
+  cb <- newBuild (\ decision -> atomicModifyIORef' decisionsRef \ ds -> (decision : ds, ())) 4 testTaskTimeout env
+  pure (cb, events, decisionsRef)
+
+-- | Read a 'newTestBuild' decision log in chronological order.
+buildDecisions :: IORef [SchedulerDecision TaskKey] -> IO [SchedulerDecision TaskKey]
+buildDecisions = fmap reverse . readIORef
 
 -- | Run a fresh build with @maxJobs=1@ and return both the result and recorded events.
 runFreshWithEvents :: MonadIO m => TestProject -> Steps -> m (BuildResult, [BuildEvent])
@@ -760,7 +765,7 @@ test_implicitDeps =
 test_pendingThenEnable :: TestTree
 test_pendingThenEnable =
   smallTest "pending tasks enabled by later batch" \ tp -> do
-    (cb, evRef) <- newTestBuild tp
+    (cb, evRef, _decisions) <- newTestBuild tp
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps = [(UnitName "unit0", UnitMetadata)],
       recompile = False, rebuild = False
@@ -778,7 +783,7 @@ test_pendingThenEnable =
 test_metadataOnlyLeavesTasksPending :: TestTree
 test_metadataOnlyLeavesTasksPending =
   smallTest "metadata-only leaves compile tasks pending" \ tp -> do
-    (cb, evRef) <- newTestBuild tp
+    (cb, evRef, _decisions) <- newTestBuild tp
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps = [(UnitName "unit0", UnitMetadata)],
       recompile = False, rebuild = False
@@ -792,7 +797,7 @@ test_metadataOnlyLeavesTasksPending =
 test_enabledNotDowngraded :: TestTree
 test_enabledNotDowngraded =
   smallTest "enabled flag not downgraded by metadata request" \ tp -> do
-    (cb, evRef) <- newTestBuild tp
+    (cb, evRef, _decisions) <- newTestBuild tp
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps = [(UnitName "unit1", UnitAll)],
       recompile = False, rebuild = False
@@ -849,7 +854,7 @@ test_pendingPool =
 test_multiBatch :: TestTree
 test_multiBatch =
   largeTest "three batches with overlapping deps" \ tp -> do
-    (cb, evRef) <- newTestBuild tp
+    (cb, evRef, _decisions) <- newTestBuild tp
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps = [(UnitName "unit0", UnitAll)],
       recompile = False, rebuild = False
@@ -870,7 +875,7 @@ test_multiBatch =
 test_redundantBatch :: TestTree
 test_redundantBatch =
   smallTest "redundant batch for completed units" \ tp -> do
-    (cb, _) <- newTestBuild tp
+    (cb, _, _) <- newTestBuild tp
     liftIO $ scheduleBatch cb ScheduleRequest {steps = [], recompile = False, rebuild = False}
     result1 <- liftIO (awaitBuild cb)
     assertSuccess "first batch" result1
@@ -882,7 +887,7 @@ test_redundantBatch =
 test_stateAccumulation :: TestTree
 test_stateAccumulation =
   smallTest "state accumulates across batches" \ tp -> do
-    (cb, evRef) <- newTestBuild tp
+    (cb, evRef, _decisions) <- newTestBuild tp
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps = [(UnitName "unit0", UnitAll)],
       recompile = False, rebuild = False
@@ -906,7 +911,7 @@ test_multiBatchWithCache =
   largeTest "batches with cache in same scheduler" \ tp -> do
     (result1, _) <- runFreshAll tp
     assertSuccess "round 1" result1
-    (cb, evRef) <- newTestBuild tp
+    (cb, evRef, _decisions) <- newTestBuild tp
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps = [(UnitName "unit0", UnitAll)],
       recompile = False, rebuild = False
@@ -1544,14 +1549,14 @@ persistentBatch cb evRef = do
 test_persistentRepeatedRequest :: TestTree
 test_persistentRepeatedRequest =
   incrementalTest "an identical repeated request on a live scheduler compiles nothing" \ tp -> do
-    (cb, evRef) <- newTestBuild tp
+    (cb, evRef, _decisions) <- newTestBuild tp
     (result1, events1) <- persistentBatch cb evRef
     assertSuccess "batch 1" result1
     allModules === eventCompiled events1
     (result2, events2) <- persistentBatch cb evRef
     assertSuccess "batch 2" result2
     [] === eventCompiled events2
-    decisions <- liftIO (buildDecisions cb)
+    decisions <- liftIO (buildDecisions _decisions)
     let batch2 = decisionBatch 2 decisions
     allModules === decisionSkipped batch2
     [] === decisionActivated batch2
@@ -1568,7 +1573,7 @@ test_persistentRepeatedRequest =
 test_persistentEditBetweenRequests :: TestTree
 test_persistentEditBetweenRequests =
   incrementalTest "an edit between requests on a live scheduler recompiles only the closure" \ tp -> do
-    (cb, evRef) <- newTestBuild tp
+    (cb, evRef, _decisions) <- newTestBuild tp
     (result1, _) <- persistentBatch cb evRef
     assertSuccess "batch 1" result1
     liftIO $ writeProjectFile tp.root "unit0/B.hs" $ unlines
@@ -1579,7 +1584,7 @@ test_persistentEditBetweenRequests =
       ]
     (result2, events2) <- persistentBatch cb evRef
     assertSuccess "batch 2" result2
-    decisions <- liftIO (buildDecisions cb)
+    decisions <- liftIO (buildDecisions _decisions)
     let batch2 = decisionBatch 2 decisions
     ["unit0:B", "unit1:D"] === decisionActivated batch2
     ["unit0:A", "unit0:C", "unit1:E"] === decisionSkipped batch2
@@ -1596,7 +1601,7 @@ test_persistentEditBetweenRequests =
 test_concurrentOverlappingRequests :: TestTree
 test_concurrentOverlappingRequests =
   incrementalTest "two overlapping in-flight requests do not drop or duplicate a rebuild" \ tp -> do
-    (cb, evRef) <- newTestBuild tp
+    (cb, evRef, _decisions) <- newTestBuild tp
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps =
         [ (UnitName "unit0", UnitModules [ClientModule "A", ClientModule "B"])
@@ -1620,7 +1625,7 @@ test_concurrentOverlappingRequests =
     -- from this list, and a double-dispatched one would appear twice, breaking the equality either
     -- way.
     ["unit0:A", "unit0:B", "unit0:C", "unit1:D", "unit1:E"] === eventCompiled events
-    decisions <- liftIO (buildDecisions cb)
+    decisions <- liftIO (buildDecisions _decisions)
     -- unit0:B, requested by both batches, must have been activated exactly once: whichever
     -- request's classification observes the other as already accepted/completed must dedupe or
     -- skip, never both independently activate it.
@@ -1646,7 +1651,7 @@ test_failedTaskNotRetried =
       , "c :: String"
       , "c = (((("
       ]
-    (cb, evRef) <- newTestBuild tp
+    (cb, evRef, _decisions) <- newTestBuild tp
     (result1, events1) <- persistentBatch cb evRef
     assert (not result1.success)
     1 === length result1.compileErrors
@@ -1662,7 +1667,7 @@ test_failedTaskNotRetried =
     assert (not result2.success)
     result1.compileErrors === result2.compileErrors
     ["unit0:C"] === eventCompiled events2
-    decisions <- liftIO (buildDecisions cb)
+    decisions <- liftIO (buildDecisions _decisions)
     let batch2 = decisionBatch 2 decisions
     diff "unit0:C" elem (decisionActivated batch2)
     diff "unit0:A" elem (decisionSkipped batch2)

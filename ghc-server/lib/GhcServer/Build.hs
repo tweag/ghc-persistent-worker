@@ -10,18 +10,16 @@ module GhcServer.Build (
   newBuild,
   scheduleBatch,
   awaitBuild,
-  buildDecisions,
   stopBuild,
   runBuild,
   newBuildState,
   -- * Re-exports
   BuildResult (..),
-  Tracing (..),
 ) where
 
 import Control.Concurrent.Async (Async, cancel)
 import Control.Concurrent.MVar (MVar, readMVar)
-import Control.Concurrent.STM (atomically, readTVar, readTVarIO)
+import Control.Concurrent.STM (atomically, readTVar)
 import Data.Foldable (traverse_)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -29,11 +27,15 @@ import Data.Void (Void)
 import GHC.Utils.Outputable (text)
 import GhcServer.Build.Classify (BuildResult (..), classifyBuildRequest, collectBuildResult)
 import GhcServer.Build.Diff (commitDigests)
-import GhcServer.Build.Propagate (
-  dispatchTask,
-  propagateCompletion,
+import GhcServer.Build.Propagate (dispatchTask, propagateCompletion)
+import GhcServer.Build.Schedule (
+  BuildExt (..),
+  BuildStatus,
+  ModuleInfo (..),
+  ModuleKey (..),
+  TaskKey (..),
+  emptyBuildExt,
   )
-import GhcServer.Build.Schedule (BuildExt (..), BuildStatus, ModuleInfo (..), ModuleKey (..), TaskKey (..), emptyBuildExt)
 import GhcServer.Cache (mkBuildCache)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.Request (ScheduleRequest)
@@ -44,11 +46,9 @@ import GhcServer.Scheduler (
   SchedulerEnv (..),
   SchedulerResources (..),
   SchedulerState (..),
-  Tracing (..),
   awaitIdle,
   newSchedulerState,
   runScheduler,
-  schedulerDecisions,
   schedulerInvariantViolations,
   submitRequest,
   )
@@ -74,20 +74,22 @@ data Build =
 -- and dispatches tasks.  Metadata completion triggers resolution and promotion
 -- of pending compile tasks via the 'propagate' callback.
 --
--- The 'Tracing' flag enables the scheduler's internal decision log, readable with
--- 'buildDecisions'.  It is meant for tests and diagnostics; production callers pass
--- 'TracingOff', for which recording is a no-op.
-newBuild :: Tracing -> Int -> Int -> BuildEnv -> IO Build
-newBuild tracing maxJobs taskTimeout buildEnv = do
+-- @trace@ is invoked for every scheduler decision, in chronological order (see
+-- 'GhcServer.Scheduler.Handlers'). Production callers forward it to the instrument channel;
+-- tests typically accumulate it into an 'Data.IORef.IORef'. Pass @\\ _ -> pure ()@ to disable
+-- tracing, which is free.
+newBuild :: (SchedulerDecision TaskKey -> IO ()) -> Int -> Int -> BuildEnv -> IO Build
+newBuild trace maxJobs taskTimeout buildEnv = do
   let cache = mkBuildCache buildEnv.outputDir buildEnv.project
-  scheduler <- newSchedulerState tracing emptyBuildExt
+  scheduler <- newSchedulerState emptyBuildExt
   let
     env = SchedulerEnv {
       maxJobs,
       handlers = Handlers {
         dispatch = dispatchTask buildEnv,
         classify = classifyBuildRequest buildEnv,
-        propagate = propagateCompletion cache buildEnv
+        propagate = propagateCompletion cache buildEnv,
+        reportDecision = trace
       },
       taskTimeout,
       mkFailure = id,
@@ -136,13 +138,6 @@ reportInvariantViolations :: Logger -> [String] -> IO ()
 reportInvariantViolations log =
   traverse_ (log.fatal . text . ("scheduler invariant violation: " ++))
 
--- | Read the scheduler's internal decision log in chronological order.
---
--- Empty unless the build was created with 'TracingOn'.
-buildDecisions :: Build -> IO [SchedulerDecision TaskKey]
-buildDecisions cb =
-  schedulerDecisions <$> readTVarIO cb.scheduler.state
-
 -- | Wait for all submitted tasks, collect results, and cancel the scheduler thread.
 --
 -- Use this for one-shot builds and tests to avoid leaking the background thread.
@@ -159,7 +154,7 @@ stopBuild cb = do
 -- 'scheduleBatch', and 'awaitBuild' directly.
 runBuild :: Int -> Int -> BuildEnv -> ScheduleRequest -> IO BuildResult
 runBuild maxJobs taskTimeout env schedule = do
-  cb <- newBuild TracingOff maxJobs taskTimeout env
+  cb <- newBuild (\ _ -> pure ()) maxJobs taskTimeout env
   scheduleBatch cb schedule
   stopBuild cb
 

@@ -11,7 +11,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Text as Text
 import Data.Text.Encoding (decodeUtf8Lenient)
 import GHC (moduleNameString)
-import GhcServer.Build (Build, BuildResult (..), Tracing (..), awaitBuild, newBuild, newBuildState, scheduleBatch)
+import GhcServer.Build (Build, BuildResult (..), awaitBuild, newBuild, newBuildState, scheduleBatch)
 import GhcServer.Cabal (discoverCabalProject, findCabalFile)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (newBuildEvents)
@@ -19,7 +19,7 @@ import GhcServer.Data.Config (ServerConfig (..))
 import qualified GhcServer.Data.Request as Request
 import GhcServer.Data.Request (ScheduleRequest (ScheduleRequest), UnitRequest (..))
 import GhcServer.Data.Unit (ClientModule (..), Project (..), UnitName (..))
-import GhcServer.Log (newLogger)
+import GhcServer.Log (emitLog, newLogger)
 import GhcServer.Path (cacheDirName, fp, outputDirName, tmpDirName)
 import GhcServer.Project (discoverProject)
 import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
@@ -247,7 +247,11 @@ serverContext config = do
       extDepsDb,
       diff
     }
-  build <- newBuild TracingOff config.maxJobs 300 env
+  -- Tracing is tied to the instrument feature flag rather than a dedicated CLI flag: 'instrChan' is 'Just'
+  -- exactly when there's an instrument UI to exfiltrate the scheduler's decision log to, and that's also
+  -- exactly when 'spawnGhcServer' starts this process. 'emitLog' itself no-ops on a 'Nothing' channel, so
+  -- forwarding decisions to it is otherwise a no-op cost not worth guarding separately in production.
+  build <- newBuild (\ decision -> emitLog instrChan "scheduler" "debug" (show decision)) config.maxJobs 300 env
   let
     grpcHandler = GrpcHandler \ _commandEnv (RequestArgs argv) ->
       case parseScheduleArgs project argv of

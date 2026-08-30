@@ -76,7 +76,7 @@ runScheduler ::
   SchedulerState key task ->
   IO (SchedulerState key task)
 runScheduler env initialState = do
-  resources <- C.newSchedulerState C.TracingOff ()
+  resources <- C.newSchedulerState ()
   atomically $ modifyTVar' resources.state \ s ->
     s {C.completed = Map.fromSet (const C.initialGeneration) (Set.map SK initialState.completed)}
   let
@@ -89,7 +89,8 @@ runScheduler env initialState = do
     handlers = C.Handlers {
       dispatch = wrapDispatch,
       classify = \ tasks -> pure (tasks, []),
-      propagate = \ _ _ s -> pure s
+      propagate = \ _ _ s -> pure s,
+reportDecision = \ _ -> pure ()
     }
 
     cEnv = C.SchedulerEnv {

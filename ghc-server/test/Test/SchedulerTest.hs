@@ -77,7 +77,7 @@ emptyState =
     failures = Map.empty,
     resolutions = Map.empty,
     generation = testGeneration,
-    trace = Nothing,
+    trace = [],
     ext = ()
   }
 
