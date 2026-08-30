@@ -884,6 +884,74 @@ test_redundantBatch =
     assertSuccess "redundant batch" result2
     liftIO (cancel cb.thread)
 
+-- | Regression test for a bug where an identical single-module request submitted twice in a
+-- row against a persistent scheduler recompiles the requested module's entire cross-unit
+-- dependency chain again on the second batch, even though nothing changed on disk and the
+-- metadata step reports zero changed sources.
+--
+-- Root cause: 'GhcServer.Build.Propagate.propagateCompletion' recomputes and re-adds resolution
+-- entries for every module in the request's stale closure on every batch, and
+-- 'Test.Scheduler.Concurrent.addResolutions' unconditionally stamps every entry it (re-)inserts
+-- with the current generation. If the stale closure is wrongly non-empty for unchanged modules,
+-- 'activation''s version comparison (@resolution.computedAt <= completedGeneration@) is
+-- defeated: a resolution re-stamped with the new (higher) generation always looks newer than
+-- the key's prior completion, so the up-to-date module is reactivated and recompiled again.
+-- | Regression test mirroring the instrument UI's project-root and unit-header 'b' (build)
+-- actions, which fire one separate 'ScheduleRequest' per module (see
+-- 'UI.TaskTree.selectedCompileTargets') without waiting for any of them to complete before
+-- submitting the next. Pressing 'b' twice in a row on an unchanged project must not recompile
+-- anything the second time.
+test_repeatedRootBuildNoRecompile :: TestTree
+test_repeatedRootBuildNoRecompile =
+  chainTest "repeated root-build (one request per module, fired concurrently) is a no-op" \ tp -> do
+    (cb, evRef, _decisions) <- newTestBuild tp
+    let
+      moduleRequest unit modName = ScheduleRequest {
+        steps = [(UnitName unit, UnitModules [ClientModule modName])],
+        recompile = False, rebuild = False
+      }
+      rootBuild :: [ScheduleRequest]
+      rootBuild = [
+        moduleRequest "unit0" "A0", moduleRequest "unit0" "B0",
+        moduleRequest "unit1" "A1", moduleRequest "unit1" "B1",
+        moduleRequest "unit2" "A2", moduleRequest "unit2" "B2"
+        ]
+    liftIO $ mapM_ (scheduleBatch cb) rootBuild
+    result1 <- liftIO (awaitBuild cb)
+    assertSuccess "first root build" result1
+    events1 <- liftIO (readEvents evRef)
+    sort (eventCompiled events1) ===
+      ["unit0:A0", "unit0:B0", "unit1:A1", "unit1:B1", "unit2:A2", "unit2:B2"]
+    liftIO $ mapM_ (scheduleBatch cb) rootBuild
+    result2 <- liftIO (timedStop cb)
+    assertSuccess "repeated root build" result2
+    events2 <- liftIO (drop (length events1) <$> readEvents evRef)
+    [] === eventCompiled events2
+
+test_repeatedModuleRequestNoRecompile :: TestTree
+test_repeatedModuleRequestNoRecompile =
+  chainTest "repeated single-module request against a persistent scheduler is a no-op" \ tp -> do
+    (cb, evRef, _decisions) <- newTestBuild tp
+    let request = ScheduleRequest {
+          steps = [(UnitName "unit0", UnitModules [ClientModule "A0"])],
+          recompile = False, rebuild = False
+        }
+    liftIO $ scheduleBatch cb request
+    result1 <- liftIO (awaitBuild cb)
+    assertSuccess "first build" result1
+    events1 <- liftIO (readEvents evRef)
+    -- Sanity check: the first build actually compiles the whole chain (unit2:A2, unit1:A1,
+    -- unit0:A0), otherwise the second assertion below would pass vacuously.
+    ["unit0:A0", "unit1:A1", "unit2:A2"] === eventCompiled events1
+    liftIO $ scheduleBatch cb request
+    result2 <- liftIO (timedStop cb)
+    assertSuccess "repeated build" result2
+    -- 'readEvents' returns the full accumulated log, not just events from the latest batch (see
+    -- 'test_stateAccumulation'), so the second batch's own events are the suffix past what the
+    -- first batch already produced.
+    events2 <- liftIO (drop (length events1) <$> readEvents evRef)
+    [] === eventCompiled events2
+
 test_stateAccumulation :: TestTree
 test_stateAccumulation =
   smallTest "state accumulates across batches" \ tp -> do
@@ -939,6 +1007,8 @@ test_multiBatchScheduling =
   dependentTestGroup "Multi-batch scheduling" AllFinish
     [ test_multiBatch
     , test_redundantBatch
+    , test_repeatedModuleRequestNoRecompile
+    , test_repeatedRootBuildNoRecompile
     , test_stateAccumulation
     , test_multiBatchWithCache
     , test_largeFreshBuild
