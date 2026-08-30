@@ -11,7 +11,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Text as Text
 import Data.Text.Encoding (decodeUtf8Lenient)
 import GHC (moduleNameString)
-import GhcServer.Build (Build, BuildResult (..), awaitBuild, newBuild, newBuildState, scheduleBatch)
+import GhcServer.Build (Build, BuildResult (..), Tracing (..), awaitBuild, newBuild, newBuildState, scheduleBatch)
 import GhcServer.Cabal (discoverCabalProject, findCabalFile)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (newBuildEvents)
@@ -247,7 +247,7 @@ serverContext config = do
       extDepsDb,
       diff
     }
-  build <- newBuild config.maxJobs 300 env
+  build <- newBuild TracingOff config.maxJobs 300 env
   let
     grpcHandler = GrpcHandler \ _commandEnv (RequestArgs argv) ->
       case parseScheduleArgs project argv of

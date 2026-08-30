@@ -158,9 +158,9 @@ computeResolutions cache env name _state =
 --
 -- On successful metadata completion, runs the Phase 2 analysis: seeds the staleness set with
 -- the unit's changed modules (Phase 0), the module-graph delta against the pre-refresh graph,
--- and (for @--recompile@) the unit's entire module set; extends the accumulated stale closure
--- by downstream reachability over the merged module graph; and derives resolutions restricted
--- to stale modules.  For all other completions the state is returned unchanged.
+-- and (for @--recompile@) the unit's entire module set; extends the current generation's stale
+-- closure by downstream reachability over the merged module graph; and derives resolutions
+-- restricted to stale modules.  For all other completions the state is returned unchanged.
 propagateCompletion ::
   BuildCache ->
   BuildEnv ->
@@ -184,9 +184,17 @@ propagateCompletion cache env (MetaTask name) (TaskSuccess _) state =
             <> moduleGraphDelta d.oldModules newModules
             <> (if d.forceAll then Map.keysSet newModules else Set.empty)
         merged = Map.union newModules state.ext.moduleMap
-        stale = staleClosure (seeds <> state.ext.stale) merged
+        -- Staleness accumulates within a generation (so a later unit's closure can follow
+        -- edges into an earlier unit's stale modules) but must not survive across
+        -- generations: each request re-derives its own staleness from the digest records on
+        -- disk, and inheriting the previous request's set would re-schedule work that has
+        -- already been done.
+        priorStale
+          | state.ext.staleGen == state.generation = state.ext.stale
+          | otherwise = Set.empty
+        stale = staleClosure (seeds <> priorStale) merged
         newResolutions = resolutionsFromModuleMap stale state.ext.moduleMap newModules
-        ext' = BuildExt {moduleMap = merged, stale}
+        ext' = BuildExt {moduleMap = merged, stale, staleGen = state.generation}
       pure (addResolutions newResolutions state {ext = ext'})
 propagateCompletion _ _ _ _ state =
   pure state

@@ -5,13 +5,18 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Set (Set)
 import GhcServer.Scheduler (
+  Generation,
   Phase (..),
+  Resolution (..),
   SchedulerState (..),
   Task (..),
   TaskResult (..),
   addResolutions,
+  bumpGeneration,
   classifyTask,
+  initialGeneration,
   insertPending,
+  nextGeneration,
   promote,
   promoteEnabled,
   recordResult,
@@ -52,17 +57,27 @@ unitTest :: TestName -> TestT IO () -> TestTree
 unitTest desc t =
   testProperty desc (withTests 1 (property (test t)))
 
+-- | The generation the pure tests operate in.
+--
+-- Deliberately one past 'initialGeneration', so that resolutions stamped with it are newer
+-- than completions stamped with 'initialGeneration' -- mirroring the production shape, where a
+-- request's resolutions are always computed after the completions of earlier requests.
+testGeneration :: Generation
+testGeneration = nextGeneration initialGeneration
+
 emptyState :: State
 emptyState =
   SchedulerState {
     unsatisfied = Map.empty,
     ready = [],
     pending = Map.empty,
-    completed = Set.empty,
-    accepted = Set.empty,
+    completed = Map.empty,
+    accepted = Map.empty,
     activeCount = 0,
     failures = Map.empty,
     resolutions = Map.empty,
+    generation = testGeneration,
+    trace = Nothing,
     ext = ()
   }
 
@@ -79,9 +94,19 @@ unsatisfiedKeys = Set.map (\(TK k) -> k) . Map.keysSet . (.unsatisfied)
 readyKeys :: State -> Set Key
 readyKeys = Set.fromList . map (\(TK k) -> k) . map (.key) . (.ready)
 
--- | Build resolution map from raw (key, (resolvedValue, pendingDeps)) entries.
-mkResolutions :: [(Key, (TestTask, Set Key))] -> Map.Map (TestKey 'Pending) (TestKey 'Resolved, TestTask, Set (TestKey 'Pending))
+-- | Build resolution map from raw (key, (resolvedValue, pendingDeps)) entries, stamped with
+-- 'testGeneration'.
+mkResolutions :: [(Key, (TestTask, Set Key))] -> Map.Map (TestKey 'Pending) (Resolution TestKey TestTask)
 mkResolutions =
+  Map.fromList . map \(k, (v, deps)) ->
+    (TK k, Resolution {key = TK k, value = v, deps = Set.map TK deps, computedAt = testGeneration})
+
+-- | Raw resolution input in the shape 'addResolutions' accepts (it stamps the generation
+-- itself).
+rawResolutions ::
+  [(Key, (TestTask, Set Key))] ->
+  Map.Map (TestKey 'Pending) (TestKey 'Resolved, TestTask, Set (TestKey 'Pending))
+rawResolutions =
   Map.fromList . map \(k, (v, deps)) -> (TK k, (TK k, v, Set.map TK deps))
 
 
@@ -127,8 +152,8 @@ specState :: PromoteSpec -> State
 specState spec =
   emptyState {
     pending = Map.fromList [(TK k, pendingTask k deps en val) | (k, deps, en, val) <- spec.pending_],
-    completed = Set.map TK spec.completed_,
-    accepted = Set.map TK spec.accepted_,
+    completed = Map.fromSet (const initialGeneration) (Set.map TK spec.completed_),
+    accepted = Map.fromSet (const testGeneration) (Set.map TK spec.accepted_),
     resolutions = mkResolutions spec.resolutions_
   }
 
@@ -253,7 +278,7 @@ test_promoteUpdatesAccepted =
         promoteKeys = Set.singleton 1
       }
       result = promote (Set.map TK spec.promoteKeys) (specState spec)
-    Set.member (TK 1) result.accepted === True
+    Set.member (TK 1) (Map.keysSet result.accepted) === True
 
 -- ---------------------------------------------------------------------------
 -- Tests for 'promoteEnabled'
@@ -363,7 +388,7 @@ test_addResolutionsPromotesPending =
           , (TK 2, pendingTask 2 Set.empty False 20)
           ]
       }
-      result = addResolutions (mkResolutions [(1, (ResolvedVal 10, Set.empty)), (2, (ResolvedVal 20, Set.empty))]) state
+      result = addResolutions (rawResolutions [(1, (ResolvedVal 10, Set.empty)), (2, (ResolvedVal 20, Set.empty))]) state
     pendingKeys result === Set.singleton 2
     readyKeys result === Set.singleton 1
 
@@ -375,10 +400,10 @@ test_recordResultRemovesFromAccepted :: TestTree
 test_recordResultRemovesFromAccepted =
   unitTest "recordResult removes the completed key from accepted" do
     let
-      state = emptyState {accepted = Set.singleton (TK 1)}
+      state = emptyState {accepted = Map.singleton (TK 1) testGeneration}
       result = recordResult (TK 1) (TaskSuccess Nothing) state
-    Set.member (TK 1) result.accepted === False
-    Set.member (TK 1) result.completed === True
+    Map.member (TK 1) result.accepted === False
+    Map.member (TK 1) result.completed === True
 
 -- Regression test for the actual UI bug: a scheduler state that outlives a single batch (as
 -- GhcServer.Build does across repeated TriggerBuild RPCs from the instrument UI per-module
@@ -434,6 +459,76 @@ test_sharedDependencyResolvedOnceAcrossManySiblings =
     Map.null final.pending === True
 
 -- ---------------------------------------------------------------------------
+-- Tests for generation-based eligibility
+-- ---------------------------------------------------------------------------
+
+-- | The redundant-rebuild case, in pure form: a second request re-submits a pending task whose
+-- resolution is a leftover from the first request, and whose key already completed then.  The
+-- resolution is not newer than the completion, so there is nothing to do.
+--
+-- The task must stay pending rather than being dropped, so that a later generation which does
+-- find it stale can still activate it -- that is what
+-- 'test_staleResolutionReactivatesCompletedKey' checks.
+test_upToDateResolutionDoesNotReactivate :: TestTree
+test_upToDateResolutionDoesNotReactivate =
+  unitTest "a resolution no newer than the key's completion does not re-activate it" do
+    let
+      state = emptyState {
+        completed = Map.singleton (TK 1) testGeneration,
+        resolutions = mkResolutions [(1, (ResolvedVal 10, Set.empty))]
+      }
+      result = insertPending (pendingTask 1 Set.empty True 10) state
+    readyKeys result === Set.empty
+    unsatisfiedKeys result === Set.empty
+    pendingKeys result === Set.singleton 1
+
+-- | The complement: once a newer generation supplies a resolution for the same key (i.e. the
+-- staleness analysis of a later request found it stale again, e.g. after an edit), the
+-- completed key is activated again.
+test_staleResolutionReactivatesCompletedKey :: TestTree
+test_staleResolutionReactivatesCompletedKey =
+  unitTest "a resolution newer than the key's completion re-activates it" do
+    let
+      state = emptyState {
+        completed = Map.singleton (TK 1) testGeneration,
+        generation = nextGeneration testGeneration,
+        pending = Map.singleton (TK 1) (pendingTask 1 Set.empty True 10)
+      }
+      result = addResolutions (rawResolutions [(1, (ResolvedVal 10, Set.empty))]) state
+    readyKeys result === Set.singleton 1
+    pendingKeys result === Set.empty
+
+-- | The in-flight dedup path is generation-independent: a key that is currently being built is
+-- never dispatched twice, no matter how new the resolution is.  Unlike the up-to-date case, the
+-- pending entry is consumed, because the work it asks for is already happening.
+test_inFlightKeyIsDedupedRegardlessOfGeneration :: TestTree
+test_inFlightKeyIsDedupedRegardlessOfGeneration =
+  unitTest "an in-flight key is deduped even for a newer resolution" do
+    let
+      state = emptyState {
+        accepted = Map.singleton (TK 1) initialGeneration,
+        resolutions = mkResolutions [(1, (ResolvedVal 10, Set.empty))]
+      }
+      result = insertPending (pendingTask 1 Set.empty True 10) state
+    readyKeys result === Set.empty
+    unsatisfiedKeys result === Set.empty
+    pendingKeys result === Set.empty
+
+-- | Completions are stamped with the generation the task was /activated/ in, not the one
+-- current when it finished.  A request that arrived while the task was already running did not
+-- influence it, so crediting the task with satisfying that request would silently serve a
+-- result computed from older inputs.
+test_completionUsesActivationGeneration :: TestTree
+test_completionUsesActivationGeneration =
+  unitTest "a completion is stamped with the generation it was activated in" do
+    let
+      activated = classifyTask (Task {key = TK 1, deps = Set.empty, enabled = True, value = ResolvedVal 10}) emptyState
+      -- A further request arrives while the task is in flight.
+      later = (bumpGeneration activated) {ready = []}
+      result = recordResult (TK 1) (TaskSuccess Nothing) later
+    Map.lookup (TK 1) result.completed === Just testGeneration
+
+-- ---------------------------------------------------------------------------
 -- Test tree
 -- ---------------------------------------------------------------------------
 
@@ -468,5 +563,11 @@ test_scheduler =
         [ test_recordResultRemovesFromAccepted
         , test_classifyTaskCanReactivateAfterCompletion
         , test_sharedDependencyResolvedOnceAcrossManySiblings
+        ]
+    , dependentTestGroup "generations" AllFinish
+        [ test_upToDateResolutionDoesNotReactivate
+        , test_staleResolutionReactivatesCompletedKey
+        , test_inFlightKeyIsDedupedRegardlessOfGeneration
+        , test_completionUsesActivationGeneration
         ]
     ]

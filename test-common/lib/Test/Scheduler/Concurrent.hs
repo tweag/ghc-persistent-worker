@@ -1,3 +1,5 @@
+{-# LANGUAGE UndecidableInstances #-}
+
 -- | Generic concurrent scheduler with inbox-based architecture.
 --
 -- External clients submit work via 'submitRequest'.  The scheduler loop
@@ -71,6 +73,31 @@ data Phase = Pending | Resolved
 type OrdKey :: (Phase -> Type) -> Constraint
 type OrdKey key = (Ord (key 'Pending), Ord (key 'Resolved))
 
+-- | Monotonically increasing version stamp, bumped once per external request
+-- (see 'bumpGeneration', called from 'processEvent').
+--
+-- This is the scheduler's answer to \"as of when\": every activation and every
+-- resolution entry carries the generation it was computed at, so a later request
+-- can distinguish \"this key completed and its result is still current\" from
+-- \"this key completed, but a newer staleness analysis supersedes that result\".
+-- Without it, the permanently accumulating 'accepted'\/'completed'\/'resolutions'
+-- sets can only express \"ever\" and \"never\", which is why a persistent scheduler
+-- either re-ran everything on every request or went permanently inert after the
+-- first completion.
+newtype Generation =
+  Generation Int
+  deriving stock (Eq, Ord, Show)
+
+-- | The generation of a scheduler state that has not yet seen a request.
+--
+-- Strictly smaller than every generation a task can be activated in, so a
+-- resolution recorded before the first request never counts as up to date.
+initialGeneration :: Generation
+initialGeneration = Generation 0
+
+nextGeneration :: Generation -> Generation
+nextGeneration (Generation n) = Generation (n + 1)
+
 -- | Result of executing a build task.
 data TaskResult f =
   -- | The task succeeded, optionally carrying a result payload (e.g. the value produced by an evaluated
@@ -100,6 +127,62 @@ data Task (key :: Phase -> Type) (p :: Phase) a =
 
 deriving stock instance (Show (key p), Show (key 'Resolved), Show a) => Show (Task key p a)
 deriving stock instance (Eq (key p), Eq (key 'Resolved), Eq a) => Eq (Task key p a)
+
+-- | A resolution entry: what a pending key resolves to, and when that was computed.
+--
+-- The @generation@ stamp is what makes eligibility decisions version-based rather than
+-- membership-based: an entry is only a reason to run the task if it is /newer/ than the
+-- key's last completion (see 'activation').
+data Resolution (key :: Phase -> Type) task =
+  Resolution {
+    key :: key 'Resolved,
+    value :: task,
+    -- | Module-level dependencies, still in pending form.
+    deps :: Set (key 'Pending),
+    -- | The generation in which this entry was computed.
+    computedAt :: Generation
+  }
+
+deriving stock instance (Show (key 'Pending), Show (key 'Resolved), Show task) => Show (Resolution key task)
+deriving stock instance (Eq (key 'Pending), Eq (key 'Resolved), Eq task) => Eq (Resolution key task)
+
+-- | Whether the scheduler records its decisions for introspection.
+--
+-- 'TracingOff' is the production setting: 'traceDecision' then matches on 'Nothing' and
+-- returns the state unchanged, so no decision value is ever constructed or retained.
+data Tracing = TracingOff | TracingOn
+  deriving stock (Eq, Show)
+
+-- | A scheduling decision, recorded only when 'Tracing' is 'TracingOn'.
+--
+-- These are deliberately the /negative/ decisions as well as the positive ones: \"nothing was
+-- compiled\" is indistinguishable from \"the work was silently dropped\" unless the reason for
+-- not scheduling is observable.
+data SchedulerDecision (key :: Phase -> Type) =
+  -- | A new request was accepted, starting the given generation.
+  DecisionGeneration Generation
+  |
+  -- | A pending key was resolved and activated in the given generation.
+  DecisionActivated (key 'Resolved) Generation
+  |
+  -- | A pending key resolved to a key that is already in flight (activated in the given
+  -- generation), so the duplicate submission was deduped instead of dispatched.
+  DecisionDeduped (key 'Resolved) Generation
+  |
+  -- | A pending key resolved to a key whose completion (second generation) is at least as
+  -- recent as its resolution (first generation), so it is already up to date.  The task stays
+  -- in the pending pool so a future generation's resolution can still activate it.
+  DecisionUpToDate (key 'Resolved) Generation Generation
+  |
+  -- | A resolution entry was recorded for a pending key in the given generation, replacing an
+  -- entry from the generation in the last field (if any).
+  DecisionResolution (key 'Pending) Generation (Maybe Generation)
+  |
+  -- | A resolved task completed; the generation is the one it was activated in.
+  DecisionCompleted (key 'Resolved) Generation
+
+deriving stock instance (Show (key 'Pending), Show (key 'Resolved)) => Show (SchedulerDecision key)
+deriving stock instance (Eq (key 'Pending), Eq (key 'Resolved)) => Eq (SchedulerDecision key)
 
 -- | Events processed by the scheduler loop.
 data SchedulerEvent request (key :: Phase -> Type) f =
@@ -164,19 +247,96 @@ data SchedulerState (key :: Phase -> Type) task f ext =
     ready :: [Task key 'Resolved task],
     -- | Pre-resolution tasks awaiting promotion. Excluded from 'awaitIdle'.
     pending :: Map (key 'Pending) (Task key 'Pending task),
-    completed :: Set (key 'Resolved),
-    -- | All resolved keys that have been activated (i.e. moved to unsatisfied\/ready).
-    -- Used for idempotent enqueue.
-    accepted :: Set (key 'Resolved),
+    -- | Keys that have finished, mapped to the generation their run was /activated/ in.
+    --
+    -- Deliberately the activation generation rather than the completion generation: a task
+    -- that was already running when a new request arrived did not take that request's newer
+    -- inputs into account, so it must not be credited with satisfying it.
+    completed :: Map (key 'Resolved) Generation,
+    -- | All resolved keys that are currently in flight (unsatisfied\/ready\/active), mapped to
+    -- the generation they were activated in.  Used for idempotent enqueue.
+    accepted :: Map (key 'Resolved) Generation,
     activeCount :: Int,
     failures :: Map (key 'Resolved) f,
     -- | Resolution map: converts pending keys to resolved keys, values, and
     -- pending dep sets.  Populated by the build layer via 'addResolutions'
     -- after metadata completes.
-    resolutions :: Map (key 'Pending) (key 'Resolved, task, Set (key 'Pending)),
+    resolutions :: Map (key 'Pending) (Resolution key task),
+    -- | The generation of the most recent request (see 'Generation').
+    generation :: Generation,
+    -- | Decision log, or 'Nothing' when tracing is disabled.  Stored in reverse order;
+    -- use 'schedulerDecisions' to read it.
+    trace :: Maybe [SchedulerDecision key],
     -- | Domain-specific state threaded through 'propagate'.
     ext :: ext
   }
+
+-- | The set of keys that have completed, discarding their generation stamps.
+completedKeys :: SchedulerState key task f ext -> Set (key 'Resolved)
+completedKeys state = Map.keysSet state.completed
+
+-- | The keys whose completion currently holds, i.e. that a dependent may treat as satisfied.
+--
+-- A completed key that has since been re-activated does /not/ qualify: its recorded completion
+-- describes a run whose inputs a later request already found stale, so a dependent scheduled now
+-- must wait for the new run instead of proceeding against the old artifacts.  Checking only
+-- 'completed' would let a dependent overtake its dependency across requests, since completions
+-- are never cleared in a scheduler that outlives a single request.
+satisfiedKeys :: Ord (key 'Resolved) => SchedulerState key task f ext -> Set (key 'Resolved)
+satisfiedKeys state = Set.difference (Map.keysSet state.completed) (Map.keysSet state.accepted)
+
+-- | Start a new generation.  Called once per external request.
+bumpGeneration ::
+  SchedulerState key task f ext ->
+  SchedulerState key task f ext
+bumpGeneration state =
+  traceDecision (DecisionGeneration generation) state {generation}
+  where
+    generation = nextGeneration state.generation
+
+-- | Record a decision, or do nothing if tracing is disabled.
+traceDecision ::
+  SchedulerDecision key ->
+  SchedulerState key task f ext ->
+  SchedulerState key task f ext
+traceDecision decision state =
+  case state.trace of
+    Nothing -> state
+    Just decisions -> state {trace = Just (decision : decisions)}
+
+-- | Read the decision log in chronological order.  Empty when tracing is disabled.
+schedulerDecisions :: SchedulerState key task f ext -> [SchedulerDecision key]
+schedulerDecisions state = maybe [] reverse state.trace
+
+-- | Whether a resolution should activate its task.
+data Activation =
+  -- | The key is not in flight and no completion supersedes the resolution.
+  ActivateNow
+  |
+  -- | The key is already in flight, activated in this generation.
+  SkipInFlight Generation
+  |
+  -- | The key completed in a generation at least as recent as the resolution.
+  SkipUpToDate Generation
+
+-- | Decide whether a resolution entry justifies (re-)activating its resolved key.
+--
+-- The in-flight check comes first and is pure deduplication: two requests within the same
+-- in-flight window must not both dispatch the key.
+--
+-- The up-to-date check is the version comparison: the entry is only a reason to run if the
+-- staleness analysis that produced it is /newer/ than the last run of the key.
+activation ::
+  Ord (key 'Resolved) =>
+  Resolution key task ->
+  SchedulerState key task f ext ->
+  Activation
+activation resolution state
+  | Just g <- Map.lookup resolution.key state.accepted = SkipInFlight g
+  | Just g <- Map.lookup resolution.key state.completed
+  , resolution.computedAt <= g
+  = SkipUpToDate g
+  | otherwise = ActivateNow
 
 -- | Mutable scheduler state, shared across worker threads and external callers.
 data SchedulerResources request (key :: Phase -> Type) task f ext =
@@ -197,20 +357,35 @@ promoteReady state =
 
 -- | Classify a single active task: skip if already enqueued, otherwise insert into 'unsatisfied'
 -- and promote if ready.
+--
+-- @batch@ is the set of keys enqueued together with this task.  Those count as unmet
+-- dependencies even if they carry a completion record, because they are about to be activated
+-- again; without this, whether a dependent waits for its dependency would hinge on the order in
+-- which the batch happens to be folded over.
+classifyTaskIn ::
+  Ord (key 'Resolved) =>
+  Set (key 'Resolved) ->
+  Task key 'Resolved task ->
+  SchedulerState key task f ext ->
+  SchedulerState key task f ext
+classifyTaskIn batch task state =
+  if Map.member task.key state.accepted
+  then state
+  else promoteReady (traceDecision (DecisionActivated task.key state.generation) state {
+    unsatisfied = Map.insert task.key (task, unmet) state.unsatisfied,
+    accepted = Map.insert task.key state.generation state.accepted
+  })
+  where
+    unmet = Set.difference task.deps (Set.difference (satisfiedKeys state) batch)
+
+-- | 'classifyTaskIn' for a task that is not part of a batch.
 classifyTask ::
   Ord (key 'Resolved) =>
   Task key 'Resolved task ->
   SchedulerState key task f ext ->
   SchedulerState key task f ext
-classifyTask task state =
-  if Set.member task.key state.accepted
-  then state
-  else promoteReady state {
-    unsatisfied = Map.insert task.key (task, unmet) state.unsatisfied,
-    accepted = Set.insert task.key state.accepted
-  }
-  where
-    unmet = Set.difference task.deps state.completed
+classifyTask =
+  classifyTaskIn Set.empty
 
 -- | Record a task result: update completed set, decrement active count,
 -- remove key from dep sets, promote newly ready tasks.
@@ -224,23 +399,28 @@ recordResult key result =
   promoteReady . record
   where
     record state =
-      state {
-        completed = Set.insert key state.completed,
-        -- Remove the key from 'accepted' now that it has actually finished: the guards in
-        -- 'classifyTask'\/'resolveTask' only need to dedupe a key while it is in flight
-        -- (unsatisfied\/ready\/active), to protect against two concurrent requests within the
-        -- same in-flight window both resolving to it. Once completed, a later, separate request
-        -- for the same key (e.g. a UI-triggered rebuild of an already-built module) must be able
-        -- to re-activate it -- otherwise, on a long-lived scheduler state that outlives a single
-        -- batch (as used by 'GhcServer.Build'), any key is permanently inert after its first
-        -- completion.
-        accepted = Set.delete key state.accepted,
+      traceDecision (DecisionCompleted key generation) state {
+        -- Stamp the completion with the generation the task was *activated* in, not the
+        -- current one: a request that arrived while the task was already running was not
+        -- taken into account by it, and must still be able to re-activate the key.
+        completed = Map.insert key generation state.completed,
+        -- Remove the key from 'accepted' now that it has actually finished: that map only
+        -- dedupes a key while it is in flight (unsatisfied\/ready\/active), to protect against
+        -- two concurrent requests within the same in-flight window both resolving to it.
+        -- Re-activation by a later request is instead governed by the generation comparison
+        -- in 'activation'.
+        accepted = Map.delete key state.accepted,
+        -- A later success must clear any earlier failure entry for the same key: otherwise a
+        -- persistent scheduler that recompiles a previously-failed key successfully would keep
+        -- reporting it as failed indefinitely, since 'failures' is never pruned anywhere else.
         failures = case result of
-          TaskSuccess _ -> state.failures
+          TaskSuccess _ -> Map.delete key state.failures
           TaskFailed f -> Map.insert key f state.failures,
         unsatisfied = Map.map (fmap (Set.delete key)) state.unsatisfied,
         activeCount = state.activeCount - 1
       }
+      where
+        generation = Map.findWithDefault state.generation key state.accepted
 
 -- | Insert a task into the pending pool, or resolve it immediately.
 --
@@ -295,6 +475,11 @@ promote keys =
 -- Returns 'Nothing' if the key is not pending or has no resolution entry.
 -- On success, returns the updated state and a list of the task's own
 -- dependencies that are still in the pending pool (for transitive promotion).
+--
+-- Whether the resolution actually activates the task is decided by 'activation'.  Note the
+-- asymmetry between the two negative outcomes: a deduped key is removed from the pending pool
+-- (it /is/ being built, right now), whereas an up-to-date key stays pending, so that a later
+-- generation which finds it stale again can still activate it.
 resolveTask ::
   OrdKey key =>
   key 'Pending ->
@@ -302,30 +487,29 @@ resolveTask ::
   Maybe (SchedulerState key task f ext, [key 'Pending])
 resolveTask k s = do
   task <- Map.lookup k s.pending
-  (resolvedKey, resolved, pendingDeps) <- Map.lookup k s.resolutions
+  resolution <- Map.lookup k s.resolutions
   let
     -- Convert pending deps to resolved keys via 'resolutions'.
     -- Deps whose resolution is not yet available are silently dropped;
     -- in practice this doesn't happen because metadata completes in
     -- dependency order.
     resolvedDeps = Set.fromList
-      [rk | pk <- Set.toList pendingDeps, Just (rk, _, _) <- [Map.lookup pk s.resolutions]]
+      [r.key | pk <- Set.toList resolution.deps, Just r <- [Map.lookup pk s.resolutions]]
     allDeps = Set.union task.deps resolvedDeps
-    resolvedTask = Task {key = resolvedKey, deps = allDeps, enabled = task.enabled, value = resolved}
+    resolvedTask =
+      Task {key = resolution.key, deps = allDeps, enabled = task.enabled, value = resolution.value}
     withoutPending = s {pending = Map.delete k s.pending}
-    -- Guard against reprocessing a key that was already activated by an earlier resolution reachable
-    -- via a different pending key (e.g. an implicit cross-unit dependency task re-enqueued by several
-    -- independent requests once its resolution is already cached). Without this guard, a resolved key
-    -- already sitting in 'unsatisfied'/'ready' would be reinserted and re-promoted, appending a
-    -- duplicate entry to the unguarded 'ready' list -- mirrors the guard 'classifyTask' already applies
-    -- via 'state.accepted' for active tasks.
-    s'
-      | Set.member resolvedKey s.accepted = withoutPending
-      | otherwise = withoutPending {
-        unsatisfied = Map.insert resolvedKey (resolvedTask, Set.difference allDeps s.completed) s.unsatisfied,
-        accepted = Set.insert resolvedKey s.accepted
+    activated =
+      traceDecision (DecisionActivated resolution.key s.generation) withoutPending {
+        unsatisfied =
+          Map.insert resolution.key (resolvedTask, Set.difference allDeps (satisfiedKeys s)) s.unsatisfied,
+        accepted = Map.insert resolution.key s.generation s.accepted
       }
-  pure (s', [pk | pk <- Set.toList pendingDeps, Map.member pk s'.pending])
+    transitive s' = [pk | pk <- Set.toList resolution.deps, Map.member pk s'.pending]
+  pure case activation resolution s of
+    ActivateNow -> (activated, transitive activated)
+    SkipInFlight g -> (traceDecision (DecisionDeduped resolution.key g) withoutPending, transitive withoutPending)
+    SkipUpToDate g -> (traceDecision (DecisionUpToDate resolution.key resolution.computedAt g) s, [])
 
 -- | Promote all pending tasks that have @enabled = True@ and have an entry
 -- in 'resolutions'.
@@ -351,15 +535,26 @@ promoteEnabled state =
 -- | Merge new resolution entries into state and promote eligible pending tasks.
 --
 -- This is the primary interface for the build layer to supply resolution data
--- after metadata completes.  After merging, all enabled pending tasks that
--- now have resolutions are promoted (transitively through deps).
+-- after metadata completes.  Entries are stamped with the current generation here, so the
+-- build layer does not need to know about versioning; "this key is stale" is expressed simply
+-- by supplying an entry for it in the current generation.
+--
+-- After merging, all enabled pending tasks that now have current resolutions are promoted
+-- (transitively through deps).
 addResolutions ::
   OrdKey key =>
   Map (key 'Pending) (key 'Resolved, task, Set (key 'Pending)) ->
   SchedulerState key task f ext ->
   SchedulerState key task f ext
 addResolutions newResolutions state =
-  promoteEnabled state {resolutions = Map.union newResolutions state.resolutions}
+  promoteEnabled traced {resolutions = Map.union stamped state.resolutions}
+  where
+    -- 'Map.union' is left-biased, so the freshly stamped entries replace older ones.
+    stamped = Map.map stamp newResolutions
+    stamp (key, value, deps) = Resolution {key, value, deps, computedAt = state.generation}
+    traced = foldr' recordDecision state (Map.keys newResolutions)
+    recordDecision k =
+      traceDecision (DecisionResolution k state.generation ((.computedAt) <$> Map.lookup k state.resolutions))
 
 -- | Execute the task's dispatch function with timeout and exception handling.
 runTask ::
@@ -410,8 +605,10 @@ enqueueTasks ::
   [Task key 'Resolved task] ->
   SchedulerState key task f ext ->
   SchedulerState key task f ext
-enqueueTasks =
-  flip (foldr' classifyTask)
+enqueueTasks tasks =
+  flip (foldr' (classifyTaskIn batch)) tasks
+  where
+    batch = Set.fromList [task.key | task <- tasks]
 
 -- | Insert tasks into the pending pool, merging the @enabled@ flag for duplicate keys.
 enqueuePending ::
@@ -433,7 +630,7 @@ processEvent env resources = \case
   RequestEvent req -> do
     (activeTasks, pendingTasks) <- env.handlers.classify req
     atomically do
-      modifyTVar' resources.state (enqueuePending pendingTasks . enqueueTasks activeTasks)
+      modifyTVar' resources.state (enqueuePending pendingTasks . enqueueTasks activeTasks . bumpGeneration)
   CompletionEvent key result -> do
     propagated <- env.handlers.propagate key result =<< readTVarIO resources.state
     atomically do
@@ -496,18 +693,22 @@ runScheduler env resources =
 -- Use this when the 'SchedulerEnv' callbacks need access to the scheduler state
 -- (e.g. dispatch callbacks that submit follow-up requests to the inbox).
 -- After creating the env with references to this state, call 'runScheduler'.
-newSchedulerState :: ext -> IO (SchedulerResources request key task f ext)
-newSchedulerState initialExt = do
+newSchedulerState :: Tracing -> ext -> IO (SchedulerResources request key task f ext)
+newSchedulerState tracing initialExt = do
   events <- newTQueueIO
   state <- newTVarIO SchedulerState {
     unsatisfied = Map.empty,
     ready = [],
     pending = Map.empty,
-    completed = Set.empty,
-    accepted = Set.empty,
+    completed = Map.empty,
+    accepted = Map.empty,
     activeCount = 0,
     failures = Map.empty,
     resolutions = Map.empty,
+    generation = initialGeneration,
+    trace = case tracing of
+      TracingOff -> Nothing
+      TracingOn -> Just [],
     ext = initialExt
   }
   pure SchedulerResources {events, state}
@@ -529,3 +730,49 @@ awaitIdle resources = do
   check empty
   state <- readTVar resources.state
   check (state.activeCount == 0 && null state.ready && Map.null state.unsatisfied)
+
+-- | Structural invariants that should hold for any 'SchedulerState' once the scheduler has gone
+-- idle (see 'awaitIdle'), independent of any domain-specific interpretation of @key@\/@task@\/@ext@.
+--
+-- Intended to be checked once per external request, right after it drains, so a violation is
+-- reported immediately at the point it was introduced instead of manifesting later as a subtly
+-- stale or inconsistent result. Returns a human-readable description of every violation found;
+-- the empty list means all checked invariants hold.
+--
+-- This deliberately does not attempt to check anything that isn't decidable from the idle state
+-- alone (e.g. it cannot tell whether a 'failures' entry is stale relative to a completion that
+-- superseded it -- 'completed' only stores a generation stamp, not the outcome it stamps).
+schedulerInvariantViolations ::
+  OrdKey key =>
+  Show (key 'Resolved) =>
+  SchedulerState key task f ext ->
+  [String]
+schedulerInvariantViolations state =
+  acceptedEmptyWhenIdle ++ failuresSubsetOfCompleted ++ activeCountNonNegative ++ readyDisjointFromUnsatisfied
+  where
+    acceptedEmptyWhenIdle :: [String]
+    acceptedEmptyWhenIdle
+      | Map.null state.accepted = []
+      | otherwise = ["'accepted' is non-empty at idle: " ++ show (Map.keys state.accepted)]
+
+    -- Every key with a failure entry must also have a completion entry, since both are only ever
+    -- written together by 'recordResult'.
+    failuresSubsetOfCompleted :: [String]
+    failuresSubsetOfCompleted
+      | Set.null stale = []
+      | otherwise = ["'failures' contains keys absent from 'completed': " ++ show (Set.toList stale)]
+      where
+        stale = Map.keysSet state.failures `Set.difference` Map.keysSet state.completed
+
+    activeCountNonNegative :: [String]
+    activeCountNonNegative
+      | state.activeCount >= 0 = []
+      | otherwise = ["negative activeCount: " ++ show state.activeCount]
+
+    -- A key cannot simultaneously be ready for dispatch and waiting on unmet dependencies.
+    readyDisjointFromUnsatisfied :: [String]
+    readyDisjointFromUnsatisfied
+      | Set.null dup = []
+      | otherwise = ["keys present in both 'ready' and 'unsatisfied': " ++ show (Set.toList dup)]
+      where
+        dup = Set.fromList [task.key | task <- state.ready] `Set.intersection` Map.keysSet state.unsatisfied

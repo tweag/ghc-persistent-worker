@@ -60,6 +60,10 @@ data UnitDiff =
     -- | The unit's module graph from before the metadata refresh, reloaded from the on-disk
     -- @cached_unit.json@.  Empty for units that have never been built.
     oldModules :: Map ModuleKey ModuleInfo,
+    -- | The digest record stored by the previous successful build, before this batch's
+    -- refresh.  Kept so 'commitDigests' can fall back to it for source files whose module
+    -- failed to compile this batch, leaving them recorded as still-changed.
+    oldDigests :: DigestRecord,
     -- | Whether the metadata step must run for this unit (decided here, executed blindly).
     runMeta :: Bool,
     -- | Whether the unit's entire module set is forced into the stale closure (@--recompile@).
@@ -147,6 +151,7 @@ computeUnitDiff outputDir rebuild forceAll unit = do
     changed,
     newDigests,
     oldModules,
+    oldDigests = old,
     runMeta = rebuild || not cached || not (Set.null changed),
     forceAll
   }
@@ -196,29 +201,43 @@ changedModuleKeys changedPaths modules =
     , Set.member src changedPaths
     ]
 
--- | Commit the digest records of all units that built successfully.
+-- | Commit the digest records of a batch's units.
 --
--- Called after a batch has drained.  A unit's digests are committed only when it has no failed
--- tasks and all of its stale modules were actually compiled in this session -- otherwise a stale
--- module that was outside the requested scope would be recorded as up to date and never rebuilt.
--- Uncommitted units simply re-detect their changed sources in the next session, which at worst
--- re-runs the (incremental) metadata step.
+-- Called after a batch has drained.  A compiler error is a normal, expected outcome of a build
+-- request, not a reason to withhold bookkeeping for everything else: every module that actually
+-- compiled successfully has its fresh digest committed, so it is correctly seen as up to date on
+-- the next request. Only the source files of modules that were scheduled (part of the stale
+-- closure) but did not complete successfully keep their prior stored digest (or no record, if
+-- new), so they are re-detected as changed and retried indefinitely until fixed.
+--
+-- A unit whose metadata task itself failed is skipped entirely: without a refreshed module
+-- graph there is no reliable way to attribute source files to modules, so nothing is committed
+-- and the next request retries metadata from scratch.
 commitDigests ::
   Map UnitName Unit ->
   Map UnitName UnitDiff ->
-  -- | Units with at least one failed task.
+  -- | Units whose metadata task itself failed.
   Set UnitName ->
+  -- | Source path of every module known to the build.
+  Map ModuleKey OsPath ->
   -- | Modules whose compile task completed successfully.
   Set ModuleKey ->
-  -- | The accumulated stale closure.
+  -- | The accumulated stale closure: modules scheduled to compile this batch.
   Set ModuleKey ->
   IO ()
-commitDigests units diffs failedUnits compiledModules stale =
+commitDigests units diffs metaFailedUnits modulePaths compiledModules stale =
   sequence_
-    [ writeDigestRecord unit.cache d.newDigests
+    [ writeDigestRecord unit.cache record
     | (name, d) <- Map.toList diffs
-    , not (Set.member name failedUnits)
+    , not (Set.member name metaFailedUnits)
     , Just unit <- [Map.lookup name units]
-    , all (`Set.member` compiledModules) [k | k <- Set.toList stale, k.unit == name]
+    , let failedFiles = Set.fromList
+            [ fp src
+            | key <- Set.toList stale
+            , key.unit == name
+            , not (Set.member key compiledModules)
+            , Just src <- [Map.lookup key modulePaths]
+            ]
+    , let record = Map.union (Map.withoutKeys d.newDigests failedFiles) d.oldDigests
     ]
 

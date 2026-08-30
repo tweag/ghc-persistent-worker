@@ -6,13 +6,15 @@
 module GhcServer.Grpc where
 
 import Common.Grpc ()
+import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (Chan)
 import Control.Concurrent.MVar (MVar)
+import Control.Monad (void)
 import Data.Binary (encode)
 import Data.ByteString (toStrict)
 import Data.Functor (($>))
 import qualified Data.Map.Strict as Map
-import GhcServer.Build (Build, scheduleBatch)
+import GhcServer.Build (Build, awaitBuild, scheduleBatch)
 import GhcServer.Data.Request (ScheduleRequest (..), UnitRequest (..))
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
 import GhcServer.Handler (parseTarget)
@@ -68,7 +70,7 @@ notifyMe project stateVar chan callback = do
 --
 -- Always forces @recompile = True@: unlike a scheduled build implicitly triggered by another target's dependency
 -- resolution, this is always an explicit user request (from the instrument UI's 'b'\/'m'\/'r' keys, or
--- 'ghc-client' without flags), so the named targets must be forced into the stale closure rather than silently
+-- request, so the named targets must be forced into the stale closure rather than silently
 -- skipped because Phase 0\/2's diff sees no change. For 'Rebuild', @rebuild@ (the request's own field, no longer
 -- hardcoded) additionally discards the stored source-digest record first, forcing every source in scope to be
 -- treated as changed -- this is the \'force full rebuild\' request, as opposed to an ordinary incremental
@@ -83,6 +85,13 @@ notifyMe project stateVar chan callback = do
 -- module's compile task), rather than a raw 'forkIO'\/'Control.Concurrent.Async.forConcurrently_' fan-out. A
 -- malformed target string is rejected the same way for both kinds -- logged on the instrument channel, never
 -- crashing the handler thread.
+--
+-- Being fire-and-forget only means the gRPC response doesn't wait for the batch: the batch's completion is
+-- still awaited on a background thread so that 'GhcServer.Build.awaitBuild' runs its post-batch bookkeeping
+-- (committing Phase 0's source-digest records via 'GhcServer.Build.Diff.commitDigests', which is otherwise
+-- only triggered by the @ghc-client@\/Buck request path's optional @--wait@ flag). Without this, every source
+-- file touched by a UI-triggered build would be re-detected as \"changed\" on every subsequent build, forcing
+-- a full unnecessary recompile of the same modules on every request.
 triggerTask ::
   Chan Event ->
   Build ->
@@ -93,8 +102,9 @@ triggerTask chan build project TaskTrigger{target, task, rebuild} =
   case parseTarget project target of
     Left err ->
       emitLog (Just chan) target "error" ("Rejected " ++ label ++ " request: " ++ err)
-    Right steps ->
+    Right steps -> do
       scheduleBatch build (request steps)
+      void (forkIO (void (awaitBuild build)))
   where
     label = case task of
       Rebuild -> "rebuild"

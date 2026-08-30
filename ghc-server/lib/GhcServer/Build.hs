@@ -10,43 +10,52 @@ module GhcServer.Build (
   newBuild,
   scheduleBatch,
   awaitBuild,
+  buildDecisions,
   stopBuild,
   runBuild,
   newBuildState,
   -- * Re-exports
   BuildResult (..),
+  Tracing (..),
 ) where
 
 import Control.Concurrent.Async (Async, cancel)
 import Control.Concurrent.MVar (MVar, readMVar)
-import Control.Concurrent.STM (atomically, readTVar)
+import Control.Concurrent.STM (atomically, readTVar, readTVarIO)
+import Data.Foldable (traverse_)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
+import GHC.Utils.Outputable (text)
 import GhcServer.Build.Classify (BuildResult (..), classifyBuildRequest, collectBuildResult)
 import GhcServer.Build.Diff (commitDigests)
 import GhcServer.Build.Propagate (
   dispatchTask,
   propagateCompletion,
   )
-import GhcServer.Build.Schedule (BuildExt (..), BuildStatus, ModuleKey (..), TaskKey (..), emptyBuildExt)
+import GhcServer.Build.Schedule (BuildExt (..), BuildStatus, ModuleInfo (..), ModuleKey (..), TaskKey (..), emptyBuildExt)
 import GhcServer.Cache (mkBuildCache)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.Request (ScheduleRequest)
-import GhcServer.Data.Unit (Project (..), UnitName)
+import GhcServer.Data.Unit (Project (..))
 import GhcServer.Scheduler (
   Handlers (..),
-  Phase (..),
+  SchedulerDecision,
   SchedulerEnv (..),
   SchedulerResources (..),
   SchedulerState (..),
+  Tracing (..),
   awaitIdle,
   newSchedulerState,
   runScheduler,
+  schedulerDecisions,
+  schedulerInvariantViolations,
   submitRequest,
   )
 import Internal.State (newState)
 import Prelude hiding (log)
+import System.OsPath (OsPath)
+import Types.Log (Logger (..))
 import Types.State (WorkerState)
 
 -- | Shared state for a build session.
@@ -64,10 +73,14 @@ data Build =
 -- Starts the scheduler loop in a background thread.  The loop classifies requests
 -- and dispatches tasks.  Metadata completion triggers resolution and promotion
 -- of pending compile tasks via the 'propagate' callback.
-newBuild :: Int -> Int -> BuildEnv -> IO Build
-newBuild maxJobs taskTimeout buildEnv = do
+--
+-- The 'Tracing' flag enables the scheduler's internal decision log, readable with
+-- 'buildDecisions'.  It is meant for tests and diagnostics; production callers pass
+-- 'TracingOff', for which recording is a no-op.
+newBuild :: Tracing -> Int -> Int -> BuildEnv -> IO Build
+newBuild tracing maxJobs taskTimeout buildEnv = do
   let cache = mkBuildCache buildEnv.outputDir buildEnv.project
-  scheduler <- newSchedulerState emptyBuildExt
+  scheduler <- newSchedulerState tracing emptyBuildExt
   let
     env = SchedulerEnv {
       maxJobs,
@@ -94,21 +107,41 @@ scheduleBatch cb request =
 -- session's Phase 0 analysis sees them as up to date.
 awaitBuild :: Build -> IO BuildResult
 awaitBuild cb = do
-  SchedulerState {completed, failures, ext} <- atomically do
+  state@SchedulerState {completed, failures, ext} <- atomically do
     awaitIdle cb.scheduler
     readTVar cb.scheduler.state
+  reportInvariantViolations cb.env.log (schedulerInvariantViolations state)
   diffs <- readMVar cb.env.diff
   let
-    failedUnits = Set.fromList (map taskUnit (Map.keys failures))
-    compiledModules = Set.fromList [ModuleKey {unit, name} | ResolvedModule unit name <- Set.toList completed]
-  commitDigests cb.env.project.units diffs failedUnits compiledModules ext.stale
-  pure (collectBuildResult completed failures)
+    metaFailedUnits = Set.fromList [name | MetaTask name <- Map.keys failures]
+    compiledModules = Set.fromList
+      [ ModuleKey {unit, name}
+      | ResolvedModule unit name <- Map.keys completed
+      , not (Map.member (ResolvedModule unit name) failures)
+      ]
+    modulePaths = Map.mapMaybe modulePath ext.moduleMap
+  commitDigests cb.env.project.units diffs metaFailedUnits modulePaths compiledModules ext.stale
+  pure (collectBuildResult (Map.keysSet completed) failures)
   where
-    taskUnit :: TaskKey 'Resolved -> UnitName
-    taskUnit = \case
-      MetaTask name -> name
-      ResolvedModule name _ -> name
-      ExecuteModule name _ -> name
+    modulePath :: ModuleInfo -> Maybe OsPath
+    modulePath info = case info.task of
+      PendingSource _ src -> Just src
+      _ -> Nothing
+
+-- | Log every scheduler-state invariant violation found for the batch that just drained, if any.
+--
+-- These indicate a scheduler bug, not a build failure, so they are reported via the logger's
+-- 'fatal' channel (captured for diagnostics) rather than surfaced as part of the 'BuildResult'.
+reportInvariantViolations :: Logger -> [String] -> IO ()
+reportInvariantViolations log =
+  traverse_ (log.fatal . text . ("scheduler invariant violation: " ++))
+
+-- | Read the scheduler's internal decision log in chronological order.
+--
+-- Empty unless the build was created with 'TracingOn'.
+buildDecisions :: Build -> IO [SchedulerDecision TaskKey]
+buildDecisions cb =
+  schedulerDecisions <$> readTVarIO cb.scheduler.state
 
 -- | Wait for all submitted tasks, collect results, and cancel the scheduler thread.
 --
@@ -126,7 +159,7 @@ stopBuild cb = do
 -- 'scheduleBatch', and 'awaitBuild' directly.
 runBuild :: Int -> Int -> BuildEnv -> ScheduleRequest -> IO BuildResult
 runBuild maxJobs taskTimeout env schedule = do
-  cb <- newBuild maxJobs taskTimeout env
+  cb <- newBuild TracingOff maxJobs taskTimeout env
   scheduleBatch cb schedule
   stopBuild cb
 

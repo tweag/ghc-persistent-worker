@@ -76,9 +76,9 @@ runScheduler ::
   SchedulerState key task ->
   IO (SchedulerState key task)
 runScheduler env initialState = do
-  resources <- C.newSchedulerState ()
+  resources <- C.newSchedulerState C.TracingOff ()
   atomically $ modifyTVar' resources.state \ s ->
-    s {C.completed = Set.map SK initialState.completed}
+    s {C.completed = Map.fromSet (const C.initialGeneration) (Set.map SK initialState.completed)}
   let
     wrapDispatch _ext task = do
       result <- runDispatch env.dispatch task.value
@@ -106,7 +106,7 @@ runScheduler env initialState = do
   cState <- readTVarIO resources.state
   pure SchedulerState {
     schedule = Schedule [],
-    completed = Set.map unwrapKey cState.completed,
+    completed = Set.map unwrapKey (C.completedKeys cState),
     failures = Map.mapKeys unwrapKey cState.failures
   }
 

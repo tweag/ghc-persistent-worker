@@ -23,7 +23,9 @@ import GHC.Unit.Types (stringToUnit, toUnitId)
 import GhcServer.Build (
   Build (..),
   BuildResult (..),
+  Tracing (..),
   awaitBuild,
+  buildDecisions,
   newBuild,
   newBuildState,
   runBuild,
@@ -31,7 +33,7 @@ import GhcServer.Build (
   stopBuild,
   )
 import GhcServer.Build.Execute (executeModuleTask)
-import GhcServer.Build.Schedule (emptyBuildExt)
+import GhcServer.Build.Schedule (TaskKey (..), emptyBuildExt)
 import GhcServer.Cache (cacheExists)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (BuildEvent (..), BuildEvents, newBuildEvents, readEvents)
@@ -41,7 +43,7 @@ import GhcServer.Data.UnitConfig (UnitConfig (..))
 import GhcServer.Log (newLogger)
 import GhcServer.Path (osPath)
 import GhcServer.Project (discoverProject)
-import GhcServer.Scheduler (TaskResult (..))
+import GhcServer.Scheduler (SchedulerDecision (..), TaskResult (..))
 import Hedgehog (TestT, annotate, assert, diff, property, test, withTests, (===))
 import Prelude hiding (log)
 import System.Directory (createDirectoryIfMissing, listDirectory, removeFile, removePathForcibly)
@@ -174,11 +176,14 @@ timedStop :: Build -> IO BuildResult
 timedStop cb = timedBuild (stopBuild cb)
 
 -- | Create a new 'Build' for multi-batch tests.
+--
+-- Tracing is always enabled here so that tests can assert on the scheduler's decisions
+-- (see 'buildDecisions'), not merely on the compilation events that resulted from them.
 newTestBuild :: MonadIO m => TestProject -> m (Build, BuildEvents)
 newTestBuild tp = liftIO do
   stateVar <- newBuildState
   (env, events) <- newBuildEnv tp stateVar
-  cb <- newBuild 4 testTaskTimeout env
+  cb <- newBuild TracingOn 4 testTaskTimeout env
   pure (cb, events)
 
 -- | Run a fresh build with @maxJobs=1@ and return both the result and recorded events.
@@ -238,6 +243,62 @@ eventCompiled events =
 eventCompiledUnits :: [BuildEvent] -> [String]
 eventCompiledUnits events =
   sort $ Set.toList $ Set.fromList [name.string | ModuleCompiled name _ <- events]
+
+-- ---------------------------------------------------------------------------
+-- Scheduler decisions
+-- ---------------------------------------------------------------------------
+
+-- | Split the scheduler's decision log into per-generation segments, in order.
+--
+-- Each segment starts at the 'DecisionGeneration' marker the scheduler records when it accepts
+-- a request, so segment @n@ contains exactly the decisions attributable to the @n@-th batch.
+-- Anything recorded before the first request (there should be nothing) is dropped.
+decisionGenerations :: [SchedulerDecision TaskKey] -> [[SchedulerDecision TaskKey]]
+decisionGenerations =
+  drop 1 . foldr step [[]]
+  where
+    step d@(DecisionGeneration _) (seg : segs) = [] : (d : seg) : segs
+    step d (seg : segs) = (d : seg) : segs
+    step _ [] = []
+
+-- | The decisions of the @n@-th batch (1-based), or the empty list if there was no such batch.
+decisionBatch :: Int -> [SchedulerDecision TaskKey] -> [SchedulerDecision TaskKey]
+decisionBatch n decisions =
+  case drop (n - 1) (decisionGenerations decisions) of
+    seg : _ -> seg
+    [] -> []
+
+-- | \"unit:module\" strings of the compile tasks the scheduler activated.
+decisionActivated :: [SchedulerDecision TaskKey] -> [String]
+decisionActivated decisions =
+  distinct [name.string ++ ":" ++ moduleNameString modName | DecisionActivated (ResolvedModule name modName) _ <- decisions]
+
+-- | \"unit:module\" strings of the compile tasks the scheduler declined to activate because
+-- their resolution was not newer than their last completion.
+--
+-- Deduplicated: a task that stays in the pending pool is re-examined by every promotion pass of
+-- the batch, so the same verdict is legitimately recorded several times.
+decisionUpToDate :: [SchedulerDecision TaskKey] -> [String]
+decisionUpToDate decisions =
+  distinct [name.string ++ ":" ++ moduleNameString modName | DecisionUpToDate (ResolvedModule name modName) _ _ <- decisions]
+
+-- | \"unit:module\" strings of the compile tasks that were deduped against an in-flight run.
+decisionDeduped :: [SchedulerDecision TaskKey] -> [String]
+decisionDeduped decisions =
+  distinct [name.string ++ ":" ++ moduleNameString modName | DecisionDeduped (ResolvedModule name modName) _ <- decisions]
+
+-- | \"unit:module\" strings of the compile tasks that were judged up to date and never activated
+-- during the batch.
+--
+-- The subtraction matters: a module can be judged up to date early in a batch (against the
+-- previous batch's resolution) and be activated later, once the metadata task that finds it
+-- stale has propagated.  Only the modules that were never activated were actually skipped.
+decisionSkipped :: [SchedulerDecision TaskKey] -> [String]
+decisionSkipped decisions =
+  filter (`notElem` decisionActivated decisions) (decisionUpToDate decisions)
+
+distinct :: Ord a => [a] -> [a]
+distinct = Set.toAscList . Set.fromList
 
 -- ---------------------------------------------------------------------------
 -- Assertions
@@ -1455,6 +1516,170 @@ test_incrementalRecompilation =
     , test_touchWithoutChange
     ]
 
+-- ---------------------------------------------------------------------------
+-- Test group: Persistent scheduler sessions
+-- ---------------------------------------------------------------------------
+
+-- | Schedule a full build of both units and wait for it, returning the events and scheduler
+-- decisions recorded by that batch alone.
+persistentBatch :: Build -> BuildEvents -> TestT IO (BuildResult, [BuildEvent])
+persistentBatch cb evRef = do
+  before <- liftIO (readEvents evRef)
+  liftIO $ scheduleBatch cb ScheduleRequest {
+    steps = [(UnitName "unit0", UnitAll), (UnitName "unit1", UnitAll)],
+    recompile = False, rebuild = False
+  }
+  result <- liftIO (awaitBuild cb)
+  after <- liftIO (readEvents evRef)
+  pure (result, drop (length before) after)
+
+-- | Repeating an identical request against a scheduler that survives the first one must compile
+-- nothing the second time.
+--
+-- This is the redundant-rebuild regression in its purest form.  Asserting only on the absence of
+-- compile events would be satisfiable by accident (e.g. by the second request never producing
+-- resolutions at all), so the decision log is checked as well: every module must be explicitly
+-- classified as up to date, which can only happen if resolutions /were/ computed and then
+-- compared against the recorded completions.
+test_persistentRepeatedRequest :: TestTree
+test_persistentRepeatedRequest =
+  incrementalTest "an identical repeated request on a live scheduler compiles nothing" \ tp -> do
+    (cb, evRef) <- newTestBuild tp
+    (result1, events1) <- persistentBatch cb evRef
+    assertSuccess "batch 1" result1
+    allModules === eventCompiled events1
+    (result2, events2) <- persistentBatch cb evRef
+    assertSuccess "batch 2" result2
+    [] === eventCompiled events2
+    decisions <- liftIO (buildDecisions cb)
+    let batch2 = decisionBatch 2 decisions
+    allModules === decisionSkipped batch2
+    [] === decisionActivated batch2
+    liftIO (cancel cb.thread)
+  where
+    allModules = ["unit0:A", "unit0:B", "unit0:C", "unit1:D", "unit1:E"]
+
+-- | The complement of 'test_persistentRepeatedRequest': after an edit, the same live scheduler
+-- must activate exactly the downstream closure of the edited module and leave the rest alone.
+--
+-- 'test_partialInvalidation' covers the same scenario across two /fresh/ schedulers, where the
+-- completion bookkeeping starts empty; here the bookkeeping from batch 1 is still present and
+-- has to be overridden selectively.
+test_persistentEditBetweenRequests :: TestTree
+test_persistentEditBetweenRequests =
+  incrementalTest "an edit between requests on a live scheduler recompiles only the closure" \ tp -> do
+    (cb, evRef) <- newTestBuild tp
+    (result1, _) <- persistentBatch cb evRef
+    assertSuccess "batch 1" result1
+    liftIO $ writeProjectFile tp.root "unit0/B.hs" $ unlines
+      [ "module B where"
+      , "import A (a)"
+      , "b :: String"
+      , "b = a ++ \"_b_edited\""
+      ]
+    (result2, events2) <- persistentBatch cb evRef
+    assertSuccess "batch 2" result2
+    decisions <- liftIO (buildDecisions cb)
+    let batch2 = decisionBatch 2 decisions
+    ["unit0:B", "unit1:D"] === decisionActivated batch2
+    ["unit0:A", "unit0:C", "unit1:E"] === decisionSkipped batch2
+    ["unit0:B", "unit1:D"] === eventCompiled events2
+    liftIO (cancel cb.thread)
+
+-- | Two requests submitted back-to-back, with the second overlapping only part of the first's
+-- target set, must not lose or duplicate any target from either request's union.  Since
+-- 'scheduleBatch' only enqueues (it doesn't await completion), the second request is classified
+-- while the first request's compile tasks are almost certainly still executing -- this exercises
+-- the 'accepted'-based in-flight dedup against a genuinely concurrent scheduler, as opposed to
+-- the sequential-batch tests above, where each 'persistentBatch' call awaits full completion
+-- before the next request is submitted.
+test_concurrentOverlappingRequests :: TestTree
+test_concurrentOverlappingRequests =
+  incrementalTest "two overlapping in-flight requests do not drop or duplicate a rebuild" \ tp -> do
+    (cb, evRef) <- newTestBuild tp
+    liftIO $ scheduleBatch cb ScheduleRequest {
+      steps =
+        [ (UnitName "unit0", UnitModules [ClientModule "A", ClientModule "B"])
+        , (UnitName "unit1", UnitModules [ClientModule "D"])
+        ],
+      recompile = False, rebuild = False
+    }
+    -- Submitted immediately, without awaiting the request above. Overlaps on unit0:B, and
+    -- additionally targets unit0:C and unit1:E, which the first request did not.
+    liftIO $ scheduleBatch cb ScheduleRequest {
+      steps =
+        [ (UnitName "unit0", UnitModules [ClientModule "B", ClientModule "C"])
+        , (UnitName "unit1", UnitModules [ClientModule "E"])
+        ],
+      recompile = False, rebuild = False
+    }
+    result <- liftIO (timedStop cb)
+    events <- liftIO (readEvents evRef)
+    assertSuccess "concurrent overlapping requests" result
+    -- The union of both targets is compiled exactly once each: a dropped module would be missing
+    -- from this list, and a double-dispatched one would appear twice, breaking the equality either
+    -- way.
+    ["unit0:A", "unit0:B", "unit0:C", "unit1:D", "unit1:E"] === eventCompiled events
+    decisions <- liftIO (buildDecisions cb)
+    -- unit0:B, requested by both batches, must have been activated exactly once: whichever
+    -- request's classification observes the other as already accepted/completed must dedupe or
+    -- skip, never both independently activate it.
+    let activatedB =
+          [() | DecisionActivated (ResolvedModule (UnitName "unit0") modName) _ <- decisions, moduleNameString modName == "B"]
+    1 === length activatedB
+    liftIO (cancel cb.thread)
+
+-- | 'GhcServer.Build.Diff.commitDigests' commits the digest of every module that compiled
+-- successfully in a batch, even when other modules in the same request failed: a compiler error
+-- is a normal outcome of a build request, not a reason to withhold bookkeeping for the rest of
+-- the unit. Only the source file of the module that actually failed keeps its prior (or absent)
+-- digest, so it alone is re-detected as "changed" and retried; modules that compiled
+-- successfully, and anything that only depends on them, are correctly treated as up to date on
+-- the next identical request.
+test_failedTaskNotRetried :: TestTree
+test_failedTaskNotRetried =
+  incrementalTest "a request repeated after a compile failure only retries the failed module" \ tp -> do
+    -- Break C (a standalone module: no imports, nothing depends on it) so its compile task
+    -- fails without changing anything else's source.
+    liftIO $ writeProjectFile tp.root "unit0/C.hs" $ unlines
+      [ "module C where"
+      , "c :: String"
+      , "c = (((("
+      ]
+    (cb, evRef) <- newTestBuild tp
+    (result1, events1) <- persistentBatch cb evRef
+    assert (not result1.success)
+    1 === length result1.compileErrors
+    -- 'ModuleCompiled' is logged unconditionally at dispatch time (see 'GhcServer.Build.Propagate.compile'),
+    -- before the actual GHC invocation, so it also appears here for the module that then fails.
+    ["unit0:A", "unit0:B", "unit0:C", "unit1:D", "unit1:E"] === eventCompiled events1
+    (result2, events2) <- persistentBatch cb evRef
+    -- The identical repeated request is not a full no-op, but it is no longer redundant either:
+    -- unit0:A and unit0:B compiled successfully, so their digests were committed and they are
+    -- correctly seen as up to date. unit1:D (which imports unit0:B) is likewise left alone, since
+    -- its dependency did not actually change. Only unit0:C, whose digest was withheld because it
+    -- failed, is redispatched. The build still reports the same failure.
+    assert (not result2.success)
+    result1.compileErrors === result2.compileErrors
+    ["unit0:C"] === eventCompiled events2
+    decisions <- liftIO (buildDecisions cb)
+    let batch2 = decisionBatch 2 decisions
+    diff "unit0:C" elem (decisionActivated batch2)
+    diff "unit0:A" elem (decisionSkipped batch2)
+    diff "unit0:B" elem (decisionSkipped batch2)
+    diff "unit1:D" elem (decisionSkipped batch2)
+    diff "unit1:E" elem (decisionSkipped batch2)
+    liftIO (cancel cb.thread)
+
+test_persistentSessions :: TestTree
+test_persistentSessions =
+  dependentTestGroup "Persistent scheduler sessions" AllFinish
+    [ test_persistentRepeatedRequest
+    , test_persistentEditBetweenRequests
+    , test_concurrentOverlappingRequests
+    , test_failedTaskNotRetried
+    ]
+
 test_serverBuild :: TestTree
 test_serverBuild =
   dependentTestGroup "GhcServer.Build" AllFinish
@@ -1468,6 +1693,7 @@ test_serverBuild =
     , test_hptAssembly
     , test_transitiveDepRestore
     , test_incrementalRecompilation
+    , test_persistentSessions
     , test_executeModule
     ]
 

@@ -28,7 +28,7 @@ import GHC.Unit.Module.Graph (nodeDependencies)
 import GHC.Unit.Types (UnitId, unitIdString)
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..), unitId)
 import GhcServer.Path (osPath)
-import GhcServer.Scheduler (Phase (..), Task (..))
+import GhcServer.Scheduler (Generation, Phase (..), Task (..), initialGeneration)
 import System.OsPath (OsPath, (</>))
 import Types.CachedDeps (
   CachedDep (..),
@@ -88,12 +88,17 @@ instance Ord (TaskKey 'Resolved) where
 -- Identity data (unit name, source path, module name) lives in 'TaskKey'.
 -- The 'Task' record pairs the key with this status.
 --
--- * @rebuild@: when 'True', skip cache and run the step unconditionally.
 -- * @runMeta@: whether the metadata step must actually run (decided by the Phase 0 analysis).
 --   Only meaningful for metadata tasks — compile tasks ignore it.
+--
+-- The request-level @rebuild@ flag deliberately does /not/ appear here.  It is consumed
+-- entirely by the Phase 0 analysis ('GhcServer.Build.Diff.computeUnitDiff', which drops the
+-- stored digest record so every source counts as changed); by the time tasks exist, its effect
+-- is already encoded in @runMeta@ and in the stale closure that produces compile resolutions.
+-- Carrying it into dispatch would be a second, redundant notion of \"must run\" competing with
+-- the generation comparison in 'Test.Scheduler.Concurrent.activation'.
 data BuildStatus =
   BuildStatus {
-    rebuild :: Bool,
     runMeta :: Bool
   }
   deriving stock (Eq, Show)
@@ -114,8 +119,8 @@ lookupUnitName nameMap uid =
 -- Metadata tasks are created as active (resolved), not pending.
 -- The @runMeta@ predicate carries the Phase 0 analysis decision of whether the unit's
 -- metadata step must actually run; dispatch executes it blindly.
-metadataTasks :: Project -> (UnitName -> Bool) -> Bool -> [UnitName] -> [Task TaskKey 'Resolved BuildStatus]
-metadataTasks project runMeta rebuild =
+metadataTasks :: Project -> (UnitName -> Bool) -> [UnitName] -> [Task TaskKey 'Resolved BuildStatus]
+metadataTasks project runMeta =
   map metaTask
   where
     metaTask name =
@@ -124,7 +129,7 @@ metadataTasks project runMeta rebuild =
         deps = Set.fromList
           [MetaTask dep | dep <- depUnits],
         enabled = True,
-        value = BuildStatus {rebuild, runMeta = runMeta name}
+        value = BuildStatus {runMeta = runMeta name}
       }
       where
         depUnits = maybe [] (.depUnits) (Map.lookup name project.units)
@@ -141,10 +146,8 @@ metadataTasks project runMeta rebuild =
 -- requested modules -- e.g. 'GhcServer.Build.Classify.compileEnabledSources' -- so that other
 -- modules in the same unit are still tracked (for dependency propagation) without being
 -- independently promoted.
---
--- The @rebuild@ flag is embedded in the task value for dispatch-time skip decisions.
-compileTasksFromSources :: UnitName -> Bool -> (OsPath -> Bool) -> [OsPath] -> [Task TaskKey 'Pending BuildStatus]
-compileTasksFromSources name rebuild isEnabled =
+compileTasksFromSources :: UnitName -> (OsPath -> Bool) -> [OsPath] -> [Task TaskKey 'Pending BuildStatus]
+compileTasksFromSources name isEnabled =
   map mkTask
   where
     mkTask src =
@@ -152,7 +155,7 @@ compileTasksFromSources name rebuild isEnabled =
         key = PendingSource name src,
         deps = Set.singleton (MetaTask name),
         enabled = isEnabled src,
-        value = BuildStatus {rebuild, runMeta = False}
+        value = BuildStatus {runMeta = False}
       }
 
 -- | Create pending execute tasks from a unit's source files.
@@ -162,8 +165,8 @@ compileTasksFromSources name rebuild isEnabled =
 -- set produced by 'resolutionsFromModuleMap', mirroring 'compileTasksFromSources'\/'PendingSource'.
 --
 -- Always enabled: an execute request implies both compiling and running the selected module(s).
-executeTasksFromSources :: UnitName -> Bool -> [OsPath] -> [Task TaskKey 'Pending BuildStatus]
-executeTasksFromSources name rebuild =
+executeTasksFromSources :: UnitName -> [OsPath] -> [Task TaskKey 'Pending BuildStatus]
+executeTasksFromSources name =
   map mkTask
   where
     mkTask src =
@@ -171,7 +174,7 @@ executeTasksFromSources name rebuild =
         key = PendingExecute name src,
         deps = Set.singleton (MetaTask name),
         enabled = True,
-        value = BuildStatus {rebuild, runMeta = False}
+        value = BuildStatus {runMeta = False}
       }
 
 
@@ -291,15 +294,24 @@ data BuildExt =
     -- | Unified module map: scheduler identity, direct deps, and interface path per module.
     -- Built incrementally as each unit's resolutions are computed.
     moduleMap :: Map ModuleKey ModuleInfo,
-    -- | Accumulated stale closure: modules that must be recompiled in this server session.
-    -- Grows as each unit's metadata completes and its Phase 2 analysis runs.
-    stale :: Set ModuleKey
+    -- | Stale closure for the current generation: modules that must be recompiled to satisfy
+    -- the request that started it.  Grows as each unit's metadata completes and its Phase 2
+    -- analysis runs, so that a later unit's closure can follow edges into an earlier unit's
+    -- stale modules.
+    --
+    -- Reset at generation boundaries (see 'staleGen').  Accumulating it across requests would
+    -- make every request inherit its predecessors' staleness, which is precisely how a
+    -- long-lived scheduler ends up recompiling the previous request's modules again.
+    stale :: Set ModuleKey,
+    -- | The generation 'stale' was accumulated for.  When it differs from the scheduler's
+    -- current generation, 'stale' is stale in the other sense and must be discarded.
+    staleGen :: Generation
   }
 
 -- | Initial (empty) 'BuildExt'.
 emptyBuildExt :: BuildExt
 emptyBuildExt =
-  BuildExt {moduleMap = Map.empty, stale = Set.empty}
+  BuildExt {moduleMap = Map.empty, stale = Set.empty, staleGen = initialGeneration}
 
 -- | Assemble deduplicated, topologically sorted 'CachedDeps' for a module
 -- from the full module map.
@@ -361,13 +373,13 @@ resolutionsFromModuleMap stale priorModules newModules =
     allModules = Map.union newModules priorModules
 
     compileEntries =
-      [ (info.task, (ResolvedModule key.unit key.name, BuildStatus {rebuild = False, runMeta = False}, depTasks info))
+      [ (info.task, (ResolvedModule key.unit key.name, BuildStatus {runMeta = False}, depTasks info))
       | (key, info) <- Map.toList newModules
       , Set.member key stale
       ]
 
     executeEntries =
-      [ (PendingExecute key.unit src, (ExecuteModule key.unit key.name, BuildStatus {rebuild = False, runMeta = False}, execDeps))
+      [ (PendingExecute key.unit src, (ExecuteModule key.unit key.name, BuildStatus {runMeta = False}, execDeps))
       | (key, info) <- Map.toList newModules
       , PendingSource _ src <- [info.task]
       , let execDeps = if Set.member key stale then Set.singleton info.task else Set.empty

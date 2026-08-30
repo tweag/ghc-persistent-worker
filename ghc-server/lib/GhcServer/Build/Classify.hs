@@ -76,7 +76,7 @@ classifyBuildRequest env request = do
   modifyMVar_ env.diff (pure . Map.union diffs)
   let
     runMeta name = maybe True (.runMeta) (Map.lookup name diffs)
-    metaTasks = metadataTasks env.project runMeta request.rebuild (map effectiveUnitName reqs)
+    metaTasks = metadataTasks env.project runMeta (map effectiveUnitName reqs)
   pure (metaTasks, pendingTasks)
   where
     reqs = effectiveRequests env.project request
@@ -89,6 +89,7 @@ classifyBuildRequest env request = do
           changed = Set.empty,
           newDigests = Map.empty,
           oldModules = Map.empty,
+          oldDigests = Map.empty,
           runMeta = True,
           forceAll = False
         }
@@ -99,7 +100,9 @@ classifyBuildRequest env request = do
       Explicit _ req -> request.recompile && isCompileRequest req
       ImplicitDep _ -> False
 
-    rebuild = request.recompile
+    -- @--recompile@ additionally enables implicit dependency units' compile tasks, so that a
+    -- forced rebuild of a target also covers the units it is built against.
+    enableImplicitDeps = request.recompile
 
     pendingTasks = concatMap unitCompileTasks reqs ++ concatMap unitExecuteTasks reqs
 
@@ -108,7 +111,6 @@ classifyBuildRequest env request = do
         Just unit ->
           compileTasksFromSources
             (effectiveUnitName eu)
-            rebuild
             (compileEnabledSources unit eu)
             unit.sources
         Nothing -> []
@@ -124,22 +126,22 @@ classifyBuildRequest env request = do
     -- the UI's project-root or unit-header \'build\' action, redundantly re-resolving
     -- already-dispatched modules into duplicate scheduler entries).
     -- Other explicit request kinds enable either all sources or none, uniformly for the
-    -- whole unit. Implicit deps are controlled by the @recompile@ parameter, as before.
+    -- whole unit. Implicit deps are controlled by @--recompile@, as before.
     compileEnabledSources :: Unit -> EffectiveUnit -> OsPath -> Bool
     compileEnabledSources unit = \case
       Explicit _ (UnitModules mods) -> (`elem` selectedSources unit mods)
       Explicit _ (UnitExecuteModules mods) -> (`elem` selectedSources unit mods)
       Explicit _ req -> const (isCompileRequest req)
-      ImplicitDep _ -> const rebuild
+      ImplicitDep _ -> const enableImplicitDeps
 
     -- | Execute tasks are only produced for units explicitly requested with 'UnitExecute'\/
     -- 'UnitExecuteModules' -- implicit transitive deps and other request kinds never trigger execution.
     unitExecuteTasks eu =
       case (eu, Map.lookup (effectiveUnitName eu) env.project.units) of
         (Explicit name UnitExecute, Just unit) ->
-          executeTasksFromSources name rebuild unit.sources
+          executeTasksFromSources name unit.sources
         (Explicit name (UnitExecuteModules mods), Just unit) ->
-          executeTasksFromSources name rebuild (selectedSources unit mods)
+          executeTasksFromSources name (selectedSources unit mods)
         _ -> []
 
     selectedSources :: Unit -> [ClientModule] -> [OsPath]
