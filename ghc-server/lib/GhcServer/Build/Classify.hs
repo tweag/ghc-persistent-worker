@@ -16,6 +16,7 @@ import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC (ModuleName)
 import GhcServer.Build.Diff (UnitDiff (..), computeUnitDiff)
+import GhcServer.Log (emitLog)
 import GhcServer.Build.Schedule (
   BuildStatus,
   TaskKey (..),
@@ -93,6 +94,11 @@ classifyBuildRequest env request = do
           runMeta = True,
           forceAll = False
         }
+      emitLog env.instrChan (name.string ++ ":diff") "debug" $
+        "classify: runMeta=" ++ show d.runMeta
+          ++ " forceAll=" ++ show d.forceAll
+          ++ " changed=" ++ show (map fp (Set.toList d.changed))
+          ++ " oldModules=" ++ show (Map.keys d.oldModules)
       pure (name, d)
 
     -- @--recompile@ forces explicitly named units' entire module sets into the stale closure.

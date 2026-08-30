@@ -477,6 +477,21 @@ logOp message = do
   currentSession . Session.logViewer %=
     LogViewer.addEntry LogViewer.Entry {target = Text.pack "operational", level = Text.pack "info", message, timestampMs = ms}
 
+-- | Write every log entry captured so far for the current session (server-forwarded scheduler\/build
+-- diagnostics as well as client\/operational entries, see 'UI.LogViewer.Entry') to a hardcoded @ui.log@ file in
+-- the current working directory, oldest first. Triggered by the 'W' key, primarily to capture the full
+-- scheduler decision trace (@GhcServer.Handler@ forwards every 'GhcServer.Scheduler.SchedulerDecision' as a
+-- @\"scheduler\"@-tagged debug entry) for offline bug reports.
+writeLogToFile :: EventM Name State ()
+writeLogToFile = do
+  mentries <- preuse (currentSession . Session.logViewer)
+  case mentries of
+    Nothing -> logOp (Text.pack "W key: no session connected, nothing to write")
+    Just lv -> do
+      let rendered = LogViewer.formatEntry <$> LogViewer.visibleEntries LogViewer.noFilter lv.rawEntries
+      liftIO $ writeFile "ui.log" (unlines rendered)
+      logOp (Text.pack ("Wrote " ++ show (length rendered) ++ " log entries to ui.log"))
+
 beep :: EventM Name State ()
 beep = do
   vty <- getVtyHandle
@@ -633,6 +648,7 @@ handleEvent (VtyEvent evt) = do
         liftIO action
       V.EvKey (V.KChar 'L') [] -> do
         currentFocus .= LogViewer
+      V.EvKey (V.KChar 'W') [] -> writeLogToFile
       V.EvKey (V.KChar 'd') [] -> do
         withTarget $ \_wid target ->
           suspendAndResume' $

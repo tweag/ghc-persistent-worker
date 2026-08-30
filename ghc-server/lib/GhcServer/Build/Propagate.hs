@@ -37,6 +37,7 @@ import GhcServer.Data.BuildCache (BuildCache (..))
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (BuildEvent (..), logEvent)
 import GhcServer.Data.Unit (UnitName (..))
+import GhcServer.Log (emitLog)
 import GhcServer.Scheduler (Phase (..), SchedulerState (..), Task (..), TaskResult (..), addResolutions)
 import GhcWorker.Grpc (pushBytecodeState)
 import Types.Instrument (Event (..))
@@ -195,6 +196,12 @@ propagateCompletion cache env (MetaTask name) (TaskSuccess _) state =
         stale = staleClosure (seeds <> priorStale) merged
         newResolutions = resolutionsFromModuleMap stale state.ext.moduleMap newModules
         ext' = BuildExt {moduleMap = merged, stale, staleGen = state.generation}
+      emitLog env.instrChan (name.string ++ ":propagate") "debug" $
+        "gen=" ++ show state.generation
+          ++ " seeds=" ++ show (Set.toList seeds)
+          ++ " priorStale=" ++ show (Set.toList priorStale)
+          ++ " stale=" ++ show (Set.toList stale)
+          ++ " newResolutions=" ++ show (Map.keys newResolutions)
       pure (addResolutions newResolutions state {ext = ext'})
 propagateCompletion _ _ _ _ state =
   pure state
