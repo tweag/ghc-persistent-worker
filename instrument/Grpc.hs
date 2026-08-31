@@ -40,7 +40,7 @@ triggerRebuildText conn targetText rebuild =
 -- 'UI.TaskTree.selectedExecuteTarget'. Fire-and-forget, mirroring 'triggerRebuildText'.
 triggerExecuteText :: Connection -> Text.Text -> IO ()
 triggerExecuteText conn targetText =
-  sendCommand conn (TriggerTask (TaskTrigger (Text.unpack targetText) Execute True))
+  sendCommand conn (TriggerTask (TaskTrigger (Text.unpack targetText) Execute False))
 
 -- | Request eviction of a module (or, if empty, an entire unit) from the bytecode cache.
 evictBytecode :: Connection -> Text.Text -> Text.Text -> IO ()

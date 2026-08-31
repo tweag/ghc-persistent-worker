@@ -68,14 +68,18 @@ notifyMe project stateVar chan callback = do
 -- semantics of the worker's own 'GhcWorker.Grpc.triggerTask'. Merges the former separate
 -- 'triggerRebuild'\/'triggerExecute' handlers into a single operation parameterized on 'TaskKind'.
 --
--- Always forces @recompile = True@: unlike a scheduled build implicitly triggered by another target's dependency
--- resolution, this is always an explicit user request (from the instrument UI's 'b'\/'m'\/'r' keys, or
--- request, so the named targets must be forced into the stale closure rather than silently
--- skipped because Phase 0\/2's diff sees no change. For 'Rebuild', @rebuild@ (the request's own field, no longer
--- hardcoded) additionally discards the stored source-digest record first, forcing every source in scope to be
--- treated as changed -- this is the \'force full rebuild\' request, as opposed to an ordinary incremental
--- recompile. 'Execute' always forces @rebuild = True@ and additionally rewrites every step to its
--- execute-variant, using the same target grammar with an added @:execute@ selector\/@"*"@ sentinel:
+-- @recompile@ is derived from the same @rebuild@ flag the caller passes (the instrument UI's 'b'\/'m'\/'r'\/'x'
+-- keys, or @ghc-client@'s @--rebuild@): an ordinary press (@rebuild = False@) relies purely on the Phase 0\/2
+-- staleness analysis, so a repeated identical request against unchanged sources is a genuine no-op (no
+-- metadata rerun, no recompile, no re-execute of @main@'s dependencies). Only a forced @rebuild = True@ request
+-- also forces @recompile = True@, pushing the named targets' entire module set into the stale closure
+-- unconditionally (see 'GhcServer.Build.Classify.classifyBuildRequest'\'s @forceAll@) -- this used to be
+-- hardcoded to @True@ unconditionally for both kinds, which meant every UI-triggered request (including
+-- ordinary, unchanged repeats) always recompiled its named targets regardless of the @rebuild@ flag; fixed to
+-- track @rebuild@ instead. For 'Rebuild', @rebuild@ additionally discards the stored source-digest record
+-- first, forcing every source in scope to be treated as changed -- this is the \'force full rebuild\' request,
+-- as opposed to an ordinary incremental recompile. 'Execute' rewrites every step to its execute-variant, using
+-- the same target grammar with an added @:execute@ selector\/@"*"@ sentinel:
 --
 -- * @"*"@ (project-root node selected) -- execute every module of every unit in the project.
 -- * @unitName@ or @unitName:execute@ (unit header row selected) -- execute every module of that unit.
@@ -111,8 +115,8 @@ triggerTask chan build project TaskTrigger{target, task, rebuild} =
       Execute -> "execute"
 
     request steps = case task of
-      Rebuild -> ScheduleRequest {steps, recompile = True, rebuild}
-      Execute -> ScheduleRequest {steps = map toExecuteStep steps, recompile = True, rebuild = True}
+      Rebuild -> ScheduleRequest {steps, recompile = rebuild, rebuild}
+      Execute -> ScheduleRequest {steps = map toExecuteStep steps, recompile = rebuild, rebuild}
 
     toExecuteStep (name, unitReq) = (name, executeVariant unitReq)
 
