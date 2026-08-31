@@ -9,7 +9,7 @@ module UI.TaskTree where
 
 import Brick.Types (EventM, Widget)
 import Brick.Widgets.Core (str, withAttr, (<+>))
-import Brick.Widgets.List (GenericList, list, listSelectedElement, renderList)
+import Brick.Widgets.List (GenericList, list, listElements, listMoveTo, listSelectedElement, renderList)
 import Control.Monad.State (gets, modify)
 import Data.List qualified as List
 import Data.Sequence qualified as Seq
@@ -18,8 +18,7 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Lens.Micro.Platform (Lens', lens)
-import UI.Types (Name (TaskTree), builtMarker, disabledAttr)
-import UI.Utils (wideStr)
+import UI.Types (Name (TaskTree), builtMarker, disabledAttr, failedMarker, taskFailedAttr, taskSucceededAttr)
 
 -- | A unit and its module names, as reported by 'Types.Instrument.ProjectStructure'.
 data Entry = Entry
@@ -43,6 +42,7 @@ data State = State
   , units :: [Entry]
   , expanded :: Set Text
   , built :: Set Text
+  , failed :: Set Text
   }
 
 data Event
@@ -50,7 +50,15 @@ data Event
   | -- | Toggle the expanded state of the unit owning the currently selected row.
     ToggleExpand
   | -- | Mark a unit\/module target (@unitName:metadata@ or @unitName:moduleName@) as successfully built.
+    -- Also clears any prior failure marker for the same target, since a later success supersedes it.
     MarkBuilt Text
+  | -- | Mark a unit\/module target as having failed to build. Also clears any prior success marker for the
+    -- same target.
+    MarkFailed Text
+  | -- | Clear all success\/failure markers for a clean target -- the same three-shape grammar as
+    -- 'selectedCleanTarget': the sentinel @"*"@ (every marker), a bare unit name (every marker whose target is
+    -- prefixed with @unitName:@), or @unitName:moduleName@ (just that single marker).
+    ClearMarks Text
 
 initialState :: State
 initialState =
@@ -59,6 +67,7 @@ initialState =
     , units = []
     , expanded = Set.empty
     , built = Set.empty
+    , failed = Set.empty
     }
 
 -- | The unit name owning a row, whether it's the header itself or one of its module children. The project-root
@@ -102,12 +111,26 @@ handleEvent ToggleExpand = do
     Nothing -> pure ()
     Just row -> do
       let uid = rowUnit row
+      wasExpanded <- gets (Set.member uid . expanded)
       modify \s -> s{expanded = toggle uid s.expanded}
       refreshRows
+      -- Expanding a unit should focus its first module row; collapsing it should keep the selection on the
+      -- unit's own header row -- neither happens automatically, since 'refreshRows'' fresh 'list' call always
+      -- defaults the selection to the top of the tree.
+      if wasExpanded then focusHeader uid else focusFirstModule uid
  where
   toggle x s = if Set.member x s then Set.delete x s else Set.insert x s
 handleEvent (MarkBuilt target) =
-  modify \s -> s{built = Set.insert target s.built}
+  modify \s -> s{built = Set.insert target s.built, failed = Set.delete target s.failed}
+handleEvent (MarkFailed target) =
+  modify \s -> s{failed = Set.insert target s.failed, built = Set.delete target s.built}
+handleEvent (ClearMarks target) =
+  modify \s -> s{built = Set.filter (not . matches) s.built, failed = Set.filter (not . matches) s.failed}
+ where
+  matches t
+    | target == Text.pack "*" = True
+    | Text.isInfixOf (Text.pack ":") target = t == target
+    | otherwise = (target <> Text.pack ":") `Text.isPrefixOf` t
 
 -- | The compile targets for the currently selected row, used by the 'b' build action (changed: no longer
 -- includes metadata, see 'selectedMetadataTargets' for that).
@@ -151,8 +174,45 @@ selectedExecuteTarget State{rows} = do
     Header uid _ -> Just uid
     ModuleRow uid m _ -> Just (uid <> ":" <> m)
 
+-- | Move the list's selection to a row matching the given predicate, if any -- a no-op if no row matches.
+focusRow :: (Row -> Bool) -> EventM Name State ()
+focusRow p =
+  modify \s -> case Seq.findIndexL p (listElements s.rows) of
+    Just i -> s{rows = listMoveTo i s.rows}
+    Nothing -> s
+
+-- | Move the list's selection to the first 'ModuleRow' belonging to the given unit, if any (a no-op if the
+-- unit has no modules or isn't currently expanded). Used by 'handleEvent' to focus a unit's first module right
+-- after expanding it.
+focusFirstModule :: Text -> EventM Name State ()
+focusFirstModule uid = focusRow isFirstModuleOf
+ where
+  isFirstModuleOf (ModuleRow u' _ _) = uid == u'
+  isFirstModuleOf _ = False
+
+-- | Move the list's selection to the given unit's own 'Header' row, if any. Used by 'handleEvent' to keep the
+-- selection on the unit that was just collapsed, instead of leaving it wherever 'refreshRows'' fresh 'list'
+-- call defaults it to (the top of the tree).
+focusHeader :: Text -> EventM Name State ()
+focusHeader uid = focusRow isHeaderOf
+ where
+  isHeaderOf (Header u' _) = uid == u'
+  isHeaderOf _ = False
+
+-- | The target text for the 'C' clean-selected action, using the same three shapes as
+-- 'selectedExecuteTarget': the project-root sentinel @"*"@, a bare unit name, or @unitName:moduleName@.
+-- Kept as its own function (rather than reusing 'selectedExecuteTarget') since clean's targeting is a
+-- separate feature whose semantics may diverge from execute's in the future.
+selectedCleanTarget :: State -> Maybe Text
+selectedCleanTarget State{rows} = do
+  (_, row) <- listSelectedElement rows
+  case row of
+    Root -> Just (Text.pack "*")
+    Header uid _ -> Just uid
+    ModuleRow uid m _ -> Just (uid <> ":" <> m)
+
 draw :: Name -> State -> Widget Name
-draw current State{rows, built} = renderList drawRow (current == TaskTree) rows
+draw current State{rows, built, failed} = renderList drawRow (current == TaskTree) rows
  where
   drawRow isSel row = (if isSel then withAttr disabledAttr else id) (drawRow' row)
   drawRow' Root =
@@ -162,11 +222,11 @@ draw current State{rows, built} = renderList drawRow (current == TaskTree) rows
   drawRow' (ModuleRow uid m isLast) =
     str ("  " ++ (if isLast then "\9492\9472 " else "\9500\9472 ") ++ Text.unpack m) <+> mark (uid <> ":" <> m)
 
-  -- The built marker is a leading space plus a checkmark emoji ('UI.Types.builtMarker'). 'wideStr' builds
-  -- it through vty's low-level 'HorizText' constructor with an explicit display width of 3 (1 for the
-  -- space, 2 for the emoji, which terminals render double-width even though vty's East-Asian-Width-based
-  -- 'textWidth' reports it as 1), bypassing wcwidth entirely.
-  mark target =
-    if Set.member target built
-      then wideStr 3 (Text.unpack builtMarker)
-      else str ""
+  -- The built/failed markers are a leading space plus a plain check mark\/ballot X ('UI.Types.builtMarker'\/
+  -- 'UI.Types.failedMarker'), single-width characters in virtually every terminal font, so no explicit-width
+  -- workaround is needed here. Colored the same way 'UI.ActiveTasks'' outcome markers are (green\/red), reusing
+  -- the same attributes rather than duplicating them.
+  mark target
+    | Set.member target built = withAttr taskSucceededAttr (str (Text.unpack builtMarker))
+    | Set.member target failed = withAttr taskFailedAttr (str (Text.unpack failedMarker))
+    | otherwise = str ""

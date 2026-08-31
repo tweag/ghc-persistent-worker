@@ -136,7 +136,9 @@ handleEvent (InstrEvent wid evt) =
         then do
           zoom activeTasks $ ActiveTasks.completeTask target' (ActiveTasks.Succeeded result)
           zoom taskTree $ TaskTree.handleEvent $ TaskTree.MarkBuilt (Text.pack rawTarget)
-        else zoom activeTasks $ ActiveTasks.completeTask target' (ActiveTasks.Failed content)
+        else do
+          zoom activeTasks $ ActiveTasks.completeTask target' (ActiveTasks.Failed content)
+          zoom taskTree $ TaskTree.handleEvent $ TaskTree.MarkFailed (Text.pack rawTarget)
     Instr.Stats {..} -> do
         modifying (workers . each . filtered (\w -> w._workerId == wid) . stats) \st ->
           st
@@ -152,6 +154,8 @@ handleEvent (InstrEvent wid evt) =
             | u <- units
             ]
     Instr.Halt -> pure ()
+    Instr.RequestCompleted {..} ->
+      zoom activeTasks $ ActiveTasks.addSeparator statusMessage
     Instr.LogMessage {..} ->
       modifying logViewer $
         LogViewer.addEntry

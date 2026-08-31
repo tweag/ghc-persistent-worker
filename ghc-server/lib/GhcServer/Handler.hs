@@ -3,35 +3,40 @@ module GhcServer.Handler where
 
 import Common.Grpc (GrpcHandler (..))
 import Control.Concurrent.Chan (newChan)
-import Control.Concurrent.MVar (newMVar)
+import Control.Concurrent.MVar (modifyMVar_, newMVar, readMVar)
+import Control.Concurrent.STM (atomically, modifyTVar')
 import Control.Exception (SomeException (..), displayException, fromException, try)
 import Control.Monad (filterM, when)
 import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import qualified Data.Text as Text
 import Data.Text.Encoding (decodeUtf8Lenient)
-import GHC (moduleNameString)
-import GhcServer.Build (Build, BuildResult (..), awaitBuild, newBuild, newBuildState, scheduleBatch)
+import GHC (ModuleName, mkModuleName, moduleNameString)
+import GhcServer.Build (Build (..), BuildResult (..), awaitBuild, newBuild, newBuildState, scheduleBatch)
+import GhcServer.Build.Schedule (BuildExt (..), BuildStatus, ModuleKey (..), TaskKey (..), emptyBuildExt)
 import GhcServer.Cabal (discoverCabalProject, findCabalFile)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (newBuildEvents)
 import GhcServer.Data.Config (ServerConfig (..))
 import qualified GhcServer.Data.Request as Request
 import GhcServer.Data.Request (ScheduleRequest (ScheduleRequest), UnitRequest (..))
-import GhcServer.Data.Unit (ClientModule (..), Project (..), UnitName (..))
+import GhcServer.Data.Unit (ClientModule (..), Project (..), Unit (..), UnitCache (..), UnitName (..))
 import GhcServer.Log (emitLog, newLogger)
-import GhcServer.Path (cacheDirName, fp, outputDirName, tmpDirName)
+import GhcServer.Path (cacheDirName, fp, osPath, outputDirName, tmpDirName)
 import GhcServer.Project (discoverProject)
+import GhcServer.Scheduler (Phase (..), SchedulerResources (..), SchedulerState (..))
+import Internal.State (newState)
 import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
 import Network.GRPC.Server.Protobuf (ProtobufMethodsOf)
 import Network.GRPC.Server.StreamType (Methods, mkNonStreaming, simpleMethods)
 import Prelude hiding (log)
-import Proto.GhcServer (GhcServer)
 import Proto.GhcServer qualified as GS
+import Proto.GhcServer (GhcServer)
 import Proto.GhcServer_Fields qualified as Fields
 import System.Directory.OsPath (doesDirectoryExist, removeDirectoryRecursive)
 import System.Exit (ExitCode (..), exitSuccess)
-import System.OsPath (OsPath, (</>))
+import System.OsPath ((</>))
 import qualified Text.Parsec as Parsec
 import qualified Types.Args as Args
 import Types.Args (emptyArgs)
@@ -306,24 +311,163 @@ executeCommand handler req = do
   where
     argv = Text.unpack . decodeUtf8Lenient <$> req.argv
 
--- | Handle a 'Clean' request: remove the project's 'output' and 'cache' directories.
+-- | Which scope a clean target spec refers to: the whole project, a single unit, or a single module within a
+-- unit. Deliberately a separate, much simpler grammar than 'parseTarget'\/'UnitRequest' -- clean has no notion of
+-- metadata\/modules\/execute selectors, only /how much/ state to discard.
+data CleanTarget =
+  CleanAll
+  |
+  CleanUnit UnitName
+  |
+  CleanModule UnitName ModuleName
+
+-- | Parse a clean target spec: @"*"@ or empty text selects the whole project, a bare unit name selects that
+-- unit, and @unitName:moduleName@ selects a single module within a unit.
+parseCleanTarget :: Text.Text -> CleanTarget
+parseCleanTarget spec
+  | Text.null spec || spec == Text.pack "*" = CleanAll
+  | otherwise =
+    case Text.breakOn (Text.pack ":") spec of
+      (unit, rest)
+        | Text.null rest -> CleanUnit (UnitName (Text.unpack unit))
+        | otherwise -> CleanModule (UnitName (Text.unpack unit)) (mkModuleName (Text.unpack (Text.drop 1 rest)))
+
+-- | The unit a resolved 'TaskKey' belongs to.
+taskUnit :: TaskKey p -> UnitName
+taskUnit = \case
+  MetaTask name -> name
+  PendingSource name _ -> name
+  ResolvedModule name _ -> name
+  PendingExecute name _ -> name
+  ExecuteModule name _ -> name
+
+-- | Whether a resolved 'TaskKey' is a compile\/execute task (not metadata) for the given module.
+taskIsModule :: UnitName -> ModuleName -> TaskKey 'Resolved -> Bool
+taskIsModule name modName = \case
+  ResolvedModule u m -> u == name && m == modName
+  ExecuteModule u m -> u == name && m == modName
+  MetaTask _ -> False
+
+-- | Reset the scheduler's completion\/in-flight bookkeeping to empty, discarding every accumulated 'ext' (module
+-- map, stale set) as well. Used for a whole-project clean: after this, the scheduler behaves as if freshly
+-- started, so the next request re-derives everything from disk\/source (which the whole-project clean has also
+-- just cleared).
 --
--- The paths are computed here from the project root the same way 'serverContext' computes them, rather than
--- accepted from the client, so that a client never has to duplicate that assumption to safely clean a project (this
--- replaces the instrument UI's previous client-side 'cleanGhcServer', which did exactly that).
-cleanCommand :: OsPath -> Proto GS.CleanRequest -> IO (Proto GS.CleanResponse)
-cleanCommand projectRoot _ = do
-  removed <- filterM removeIfExists dirs
-  let
-    msg
+-- NOTE: this does not touch 'unsatisfied'\/'ready'\/'pending' (in-flight tasks actively being processed by the
+-- scheduler loop) or bump the generation counter, since a clean is expected to only be requested between
+-- batches (no build in flight). This is a conservative, best-effort coherence improvement rather than a
+-- guaranteed-safe reset under concurrent scheduling -- it has not been exercised against a live, mid-build clean.
+resetSchedulerState :: Build -> IO ()
+resetSchedulerState build =
+  atomically $ modifyTVar' schedulerVar \ (state :: SchedulerState TaskKey BuildStatus String BuildExt) ->
+    state
+      { completed = Map.empty
+      , accepted = Map.empty
+      , failures = Map.empty
+      , resolutions = Map.empty
+      , ext = emptyBuildExt
+      }
+  where
+    SchedulerResources {state = schedulerVar} = build.scheduler
+
+-- | Drop every scheduler bookkeeping entry belonging to the given unit: completed\/accepted\/failures entries
+-- keyed by a 'TaskKey' for that unit (metadata or any module), the unit's resolutions, and its entries in the
+-- accumulated module map\/stale set. Leaves other units' state untouched.
+invalidateUnitState :: Build -> UnitName -> IO ()
+invalidateUnitState build name =
+  atomically $ modifyTVar' schedulerVar \ (state :: SchedulerState TaskKey BuildStatus String BuildExt) ->
+    state
+      { completed = Map.filterWithKey (\ k _ -> taskUnit k /= name) state.completed
+      , accepted = Map.filterWithKey (\ k _ -> taskUnit k /= name) state.accepted
+      , failures = Map.filterWithKey (\ k _ -> taskUnit k /= name) state.failures
+      , resolutions = Map.filterWithKey (\ k _ -> taskUnit k /= name) state.resolutions
+      , ext =
+        state.ext
+          { moduleMap = Map.filterWithKey (\ k _ -> k.unit /= name) state.ext.moduleMap
+          , stale = Set.filter (\ k -> k.unit /= name) state.ext.stale
+          }
+      }
+  where
+    SchedulerResources {state = schedulerVar} = build.scheduler
+
+-- | Drop scheduler bookkeeping entries for a single module within a unit (its compile\/execute tasks only --
+-- the unit's metadata task is untouched, since clean's module scope is meant to force only that module's own
+-- recompilation, not a full unit metadata re-run).
+invalidateModuleState :: Build -> UnitName -> ModuleName -> IO ()
+invalidateModuleState build name modName =
+  atomically $ modifyTVar' schedulerVar \ (state :: SchedulerState TaskKey BuildStatus String BuildExt) ->
+    let key = ModuleKey {unit = name, name = modName}
+        keep :: forall v. TaskKey 'Resolved -> v -> Bool
+        keep k _ = not (taskIsModule name modName k)
+    in
+      state
+        { completed = Map.filterWithKey keep state.completed
+        , accepted = Map.filterWithKey keep state.accepted
+        , failures = Map.filterWithKey keep state.failures
+        , ext =
+          state.ext
+            { moduleMap = Map.delete key state.ext.moduleMap
+            , stale = Set.delete key state.ext.stale
+            }
+        }
+  where
+    SchedulerResources {state = schedulerVar} = build.scheduler
+
+-- | Replace 'BuildEnv.stateVar' (the in-memory module graph\/HPT\/HUG) with a fresh 'Types.State.WorkerState'.
+-- Used only for a whole-project clean: unit\/module-scoped clean leaves this untouched, since a single shared
+-- 'WorkerState' has no unit-level granularity to invalidate piecemeal (documented limitation -- see the clean-key
+-- KB entry).
+resetWorkerState :: BuildEnv -> IO ()
+resetWorkerState env = do
+  freshVar <- newState
+  fresh <- readMVar freshVar
+  modifyMVar_ env.stateVar (const (pure fresh))
+
+-- | Handle a 'Clean' request: remove cache\/output directories for the requested scope and invalidate the
+-- corresponding scheduler\/in-memory build state so a subsequent build doesn't skip work it can no longer
+-- justify skipping (previously, only on-disk state was removed, which could leave the scheduler believing a
+-- module\/unit was still up to date after its cache was deleted from under it -- see the clean-scoping KB entry).
+--
+-- * 'CleanAll': removes the project's 'output' and 'cache' directories, resets the scheduler's bookkeeping
+--   (\'resetSchedulerState\') and the in-memory 'WorkerState' (\'resetWorkerState\'), and clears the accumulated
+--   digest diffs.
+-- * 'CleanUnit': removes only that unit's cache\/output subdirectories and invalidates only that unit's
+--   scheduler entries (\'invalidateUnitState\'). The shared in-memory 'WorkerState' is left alone (see
+--   'resetWorkerState'’s haddock).
+-- * 'CleanModule': removes no disk state (the unit's cache directory is shared across its modules); only
+--   invalidates that module's own scheduler entries (\'invalidateModuleState\'). The most conservative\/safe
+--   scope, since Phase 0's digest-based staleness detection means a module's source changes are already
+--   detected on the next build without any cache deletion.
+cleanCommand :: Build -> BuildEnv -> Proto GS.CleanRequest -> IO (Proto GS.CleanResponse)
+cleanCommand build env req =
+  case parseCleanTarget req.target of
+    CleanAll -> do
+      removed <- filterM removeIfExists [env.outputDir, env.projectRoot </> cacheDirName]
+      resetSchedulerState build
+      resetWorkerState env
+      modifyMVar_ env.diff (const (pure Map.empty))
+      success (describeRemoved removed)
+    CleanUnit name ->
+      case Map.lookup name env.project.units of
+        Nothing -> failure ("Unknown unit: " ++ name.string)
+        Just unit -> do
+          removed <- filterM removeIfExists [unit.cache.dir, env.outputDir </> osPath name.string]
+          invalidateUnitState build name
+          modifyMVar_ env.diff (pure . Map.delete name)
+          success (describeRemoved removed)
+    CleanModule name modName ->
+      case Map.lookup name env.project.units of
+        Nothing -> failure ("Unknown unit: " ++ name.string)
+        Just _ -> do
+          invalidateModuleState build name modName
+          success "Invalidated scheduler state for module (no on-disk cache removed)."
+  where
+    success msg = pure (defMessage & Fields.success .~ True & Fields.message .~ Text.pack msg)
+    failure msg = pure (defMessage & Fields.success .~ False & Fields.message .~ Text.pack msg)
+
+    describeRemoved removed
       | null removed = "Nothing to clean."
       | otherwise = "Removed: " ++ intercalate ", " (fp <$> removed)
-  pure $
-    defMessage
-      & Fields.success .~ True
-      & Fields.message .~ Text.pack msg
-  where
-    dirs = [projectRoot </> outputDirName, projectRoot </> cacheDirName]
 
     removeIfExists dir = do
       exists <- doesDirectoryExist dir
@@ -338,5 +482,5 @@ cleanCommand projectRoot _ = do
 serverMethods :: ServerContext -> Methods IO (ProtobufMethodsOf GhcServer)
 serverMethods ctx =
   simpleMethods
-    (mkNonStreaming (cleanCommand ctx.buildEnv.projectRoot))
+    (mkNonStreaming (cleanCommand ctx.build ctx.buildEnv))
     (mkNonStreaming (executeCommand ctx.grpcHandler))

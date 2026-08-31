@@ -92,6 +92,7 @@ import UI.Types (
   taskRunningAttr,
   taskSucceededAttr,
   )
+import Data.Maybe (fromMaybe)
 import UI.Utils (handleListEventOf, popup)
 
 data Event
@@ -132,6 +133,12 @@ data Event
   | -- | Dispatched once the background shutdown sequence started by the quit key has finished (see Main's
     -- 'requestShutdown'). Triggers the actual 'halt'.
     ShutdownComplete
+  | -- | Dispatched when a tracked @ghc-server@'s @Clean@ RPC (the capital-@C@ key binding) returns a result.
+    -- Carries the clean scope text computed by 'TaskTree.selectedCleanTarget' (the sentinel @"*"@, a bare unit
+    -- name, or @unitName:moduleName@) and whether it succeeded. On success, clears the project view's
+    -- success\/failure markers for the affected scope (see 'TaskTree.ClearMarks'), since the cleaned
+    -- cache\/output no longer reflects them.
+    CleanCompleted Text.Text Bool
 
 -- | Input fields for the "start ghc-server" popup (the capital-@S@ key binding).
 data ServeInput = ServeInput
@@ -160,9 +167,11 @@ data State = State
   , -- | Kills then restarts the @ghc-server@ instance most recently started\/ensured by this session, reusing the
     -- same project path\/extra options (the capital-@R@ key binding). Supplied by @Main@.
     _restartServer :: IO ()
-  , -- | Removes the tracked @ghc-server@ project's @cache@ and @output@ directories (the capital-@C@ key binding).
-    -- Supplied by @Main@.
-    _cleanServer :: IO ()
+  , -- | Removes the tracked @ghc-server@ project's @cache@ and @output@ directories for the selected scope (the
+    -- capital-@C@ key binding). The 'Text.Text' argument is the clean target computed by
+    -- 'TaskTree.selectedCleanTarget': the sentinel @"*"@ for the whole project, a bare unit name, or
+    -- @unitName:moduleName@. Supplied by @Main@.
+    _cleanServer :: Text.Text -> IO ()
   , -- | Runs the background shutdown sequence (clean\/kill the tracked @ghc-server@ instance, if any) and, once
     -- finished, dispatches 'ShutdownComplete' to actually 'halt' the app. Non-blocking: forks its own background
     -- thread and returns immediately, so the quit key ('requestQuit') can clear the session list and log the
@@ -189,7 +198,7 @@ ghcOptionsLens =
     (\opts s -> opts{extraGhcOptions = s})
     . packed
 
-initialState :: (Text.Text -> [String] -> IO ()) -> IO () -> IO () -> IO () -> IO () -> State
+initialState :: (Text.Text -> [String] -> IO ()) -> IO () -> IO () -> (Text.Text -> IO ()) -> IO () -> State
 initialState onStartServer onKill onRestart onClean onShutdown =
   State
     { _sessions = SessionSelector.initialState
@@ -224,7 +233,7 @@ drawUI State{..} =
       -- The start-server form is already embedded directly in the idle\/start screen (see 'idleLayers'); this
       -- overlay only applies when a session is connected, so 'S' still has a visible effect in that case.
       ServeOptions -> maybe [] (const [drawServeOverlay _serveForm]) session
-      TaskDetails -> let task = session >>= listSelectedElement . Session._activeTasks in maybe [] (pure . ActiveTasks.drawTaskDetails . snd) task
+      TaskDetails -> let mrow = session >>= listSelectedElement . Session._activeTasks in maybe [] (pure . ActiveTasks.drawTaskDetails) (mrow >>= ActiveTasks.rowTask . snd)
       LogViewer -> maybe [] (pure . drawLogViewer . Session._logViewer) session
       _ -> []
   )
@@ -580,6 +589,9 @@ handleEvent (AppEvent (ServerStarting path)) =
 handleEvent (AppEvent (ServerFailed path stderrText)) =
   logOp (Text.pack "Failed to start ghc-server in " <> Text.pack (describePath path) <> Text.pack ": " <> stderrText)
 handleEvent (AppEvent (OpLogMessage message)) = logOp message
+handleEvent (AppEvent (CleanCompleted target success)) =
+  when success $
+    zoom (currentSession . Session.taskTree) (TaskTree.handleEvent (TaskTree.ClearMarks target))
 handleEvent (AppEvent ShutdownComplete) = halt
 handleEvent (VtyEvent evt) = do
   current <- use currentFocus
@@ -643,9 +655,11 @@ handleEvent (VtyEvent evt) = do
         action <- use restartServer
         liftIO action
       V.EvKey (V.KChar 'C') [] -> do
-        logClient (Text.pack "info") (Text.pack "Cleaning ghc-server cache/output directories")
+        mtree <- preuse (currentSession . Session.taskTree)
+        let target = fromMaybe (Text.pack "*") (mtree >>= TaskTree.selectedCleanTarget)
+        logClient (Text.pack "info") (Text.pack ("Cleaning ghc-server cache/output directories for target=" ++ Text.unpack target))
         action <- use cleanServer
-        liftIO action
+        liftIO (action target)
       V.EvKey (V.KChar 'L') [] -> do
         currentFocus .= LogViewer
       V.EvKey (V.KChar 'W') [] -> writeLogToFile

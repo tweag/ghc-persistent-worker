@@ -63,6 +63,11 @@ success ::
   (Prelude.Functor f, Data.ProtoLens.Field.HasField s "success" a) =>
   Lens.Family2.LensLike' f s a
 success = Data.ProtoLens.Field.field @"success"
+target ::
+  forall f s a.
+  (Prelude.Functor f, Data.ProtoLens.Field.HasField s "target" a) =>
+  Lens.Family2.LensLike' f s a
+target = Data.ProtoLens.Field.field @"target"
 value ::
   forall f s a.
   (Prelude.Functor f, Data.ProtoLens.Field.HasField s "value" a) =>

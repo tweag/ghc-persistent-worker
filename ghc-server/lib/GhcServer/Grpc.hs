@@ -7,14 +7,14 @@ module GhcServer.Grpc where
 
 import Common.Grpc ()
 import Control.Concurrent (forkIO)
-import Control.Concurrent.Chan (Chan)
+import Control.Concurrent.Chan (Chan, writeChan)
 import Control.Concurrent.MVar (MVar)
 import Control.Monad (void)
 import Data.Binary (encode)
 import Data.ByteString (toStrict)
 import Data.Functor (($>))
 import qualified Data.Map.Strict as Map
-import GhcServer.Build (Build, awaitBuild, scheduleBatch)
+import GhcServer.Build (Build, BuildResult (..), awaitBuild, completedCount, scheduleBatch)
 import GhcServer.Data.Request (ScheduleRequest (..), UnitRequest (..))
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
 import GhcServer.Handler (parseTarget)
@@ -107,8 +107,13 @@ triggerTask chan build project TaskTrigger{target, task, rebuild} =
     Left err ->
       emitLog (Just chan) target "error" ("Rejected " ++ label ++ " request: " ++ err)
     Right steps -> do
+      before <- completedCount build
       scheduleBatch build (request steps)
-      void (forkIO (void (awaitBuild build)))
+      void $ forkIO do
+        result <- awaitBuild build
+        after <- completedCount build
+        let upToDate = after == before && null result.metadataErrors && null result.compileErrors
+        writeChan chan (RequestCompleted (if upToDate then Just "All targets up to date" else Nothing))
   where
     label = case task of
       Rebuild -> "rebuild"

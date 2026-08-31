@@ -33,9 +33,11 @@ import qualified Data.Vector.Generic
 import qualified Data.Vector.Unboxed
 import qualified Text.Read
 {- | Fields :
-      -}
+     
+         * 'Proto.GhcServer_Fields.target' @:: Lens' CleanRequest Data.Text.Text@ -}
 data CleanRequest
-  = CleanRequest'_constructor {_CleanRequest'_unknownFields :: !Data.ProtoLens.FieldSet}
+  = CleanRequest'_constructor {_CleanRequest'target :: !Data.Text.Text,
+                               _CleanRequest'_unknownFields :: !Data.ProtoLens.FieldSet}
   deriving stock (Prelude.Eq, Prelude.Ord)
 instance Prelude.Show CleanRequest where
   showsPrec _ __x __s
@@ -43,19 +45,41 @@ instance Prelude.Show CleanRequest where
         '{'
         (Prelude.showString
            (Data.ProtoLens.showMessageShort __x) (Prelude.showChar '}' __s))
+instance Data.ProtoLens.Field.HasField CleanRequest "target" Data.Text.Text where
+  fieldOf _
+    = (Prelude..)
+        (Lens.Family2.Unchecked.lens
+           _CleanRequest'target
+           (\ x__ y__ -> x__ {_CleanRequest'target = y__}))
+        Prelude.id
 instance Data.ProtoLens.Message CleanRequest where
   messageName _ = Data.Text.pack "ghcserver.CleanRequest"
   packedMessageDescriptor _
     = "\n\
-      \\fCleanRequest"
+      \\fCleanRequest\DC2\SYN\n\
+      \\ACKtarget\CAN\SOH \SOH(\tR\ACKtarget"
   packedFileDescriptor _ = packedFileDescriptor
-  fieldsByTag = let in Data.Map.fromList []
+  fieldsByTag
+    = let
+        target__field_descriptor
+          = Data.ProtoLens.FieldDescriptor
+              "target"
+              (Data.ProtoLens.ScalarField Data.ProtoLens.StringField ::
+                 Data.ProtoLens.FieldTypeDescriptor Data.Text.Text)
+              (Data.ProtoLens.PlainField
+                 Data.ProtoLens.Optional (Data.ProtoLens.Field.field @"target")) ::
+              Data.ProtoLens.FieldDescriptor CleanRequest
+      in
+        Data.Map.fromList
+          [(Data.ProtoLens.Tag 1, target__field_descriptor)]
   unknownFields
     = Lens.Family2.Unchecked.lens
         _CleanRequest'_unknownFields
         (\ x__ y__ -> x__ {_CleanRequest'_unknownFields = y__})
   defMessage
-    = CleanRequest'_constructor {_CleanRequest'_unknownFields = []}
+    = CleanRequest'_constructor
+        {_CleanRequest'target = Data.ProtoLens.fieldDefault,
+         _CleanRequest'_unknownFields = []}
   parseMessage
     = let
         loop ::
@@ -78,6 +102,13 @@ instance Data.ProtoLens.Message CleanRequest where
                else
                    do tag <- Data.ProtoLens.Encoding.Bytes.getVarInt
                       case tag of
+                        10
+                          -> do y <- (Data.ProtoLens.Encoding.Bytes.<?>)
+                                       (do len <- Data.ProtoLens.Encoding.Bytes.getVarInt
+                                           Data.ProtoLens.Encoding.Bytes.getText
+                                             (Prelude.fromIntegral len))
+                                       "target"
+                                loop (Lens.Family2.set (Data.ProtoLens.Field.field @"target") y x)
                         wire
                           -> do !y <- Data.ProtoLens.Encoding.Wire.parseTaggedValueFromWire
                                         wire
@@ -89,12 +120,30 @@ instance Data.ProtoLens.Message CleanRequest where
           (do loop Data.ProtoLens.defMessage) "CleanRequest"
   buildMessage
     = \ _x
-        -> Data.ProtoLens.Encoding.Wire.buildFieldSet
-             (Lens.Family2.view Data.ProtoLens.unknownFields _x)
+        -> (Data.Monoid.<>)
+             (let
+                _v = Lens.Family2.view (Data.ProtoLens.Field.field @"target") _x
+              in
+                if (Prelude.==) _v Data.ProtoLens.fieldDefault then
+                    Data.Monoid.mempty
+                else
+                    (Data.Monoid.<>)
+                      (Data.ProtoLens.Encoding.Bytes.putVarInt 10)
+                      ((Prelude..)
+                         (\ bs
+                            -> (Data.Monoid.<>)
+                                 (Data.ProtoLens.Encoding.Bytes.putVarInt
+                                    (Prelude.fromIntegral (Data.ByteString.length bs)))
+                                 (Data.ProtoLens.Encoding.Bytes.putBytes bs))
+                         Data.Text.Encoding.encodeUtf8 _v))
+             (Data.ProtoLens.Encoding.Wire.buildFieldSet
+                (Lens.Family2.view Data.ProtoLens.unknownFields _x))
 instance Control.DeepSeq.NFData CleanRequest where
   rnf
     = \ x__
-        -> Control.DeepSeq.deepseq (_CleanRequest'_unknownFields x__) ()
+        -> Control.DeepSeq.deepseq
+             (_CleanRequest'_unknownFields x__)
+             (Control.DeepSeq.deepseq (_CleanRequest'target x__) ())
 {- | Fields :
      
          * 'Proto.GhcServer_Fields.success' @:: Lens' CleanResponse Prelude.Bool@
@@ -783,16 +832,16 @@ packedFileDescriptor
     \\ENQvalue\CAN\STX \SOH(\fR\ENQvalue\"F\n\
     \\SIExecuteResponse\DC2\ESC\n\
     \\texit_code\CAN\SOH \SOH(\ENQR\bexitCode\DC2\SYN\n\
-    \\ACKstderr\CAN\STX \SOH(\tR\ACKstderr\"\SO\n\
-    \\fCleanRequest\"C\n\
+    \\ACKstderr\CAN\STX \SOH(\tR\ACKstderr\"&\n\
+    \\fCleanRequest\DC2\SYN\n\
+    \\ACKtarget\CAN\SOH \SOH(\tR\ACKtarget\"C\n\
     \\rCleanResponse\DC2\CAN\n\
     \\asuccess\CAN\SOH \SOH(\bR\asuccess\DC2\CAN\n\
     \\amessage\CAN\STX \SOH(\tR\amessage2\141\SOH\n\
     \\tGhcServer\DC2B\n\
     \\aExecute\DC2\EM.ghcserver.ExecuteCommand\SUB\SUB.ghcserver.ExecuteResponse\"\NUL\DC2<\n\
-    \\ENQClean\DC2\ETB.ghcserver.CleanRequest\SUB\CAN.ghcserver.CleanResponse\"\NULJ\140\n\
-    \\n\
-    \\ACK\DC2\EOT\NUL\NUL#\SOH\n\
+    \\ENQClean\DC2\ETB.ghcserver.CleanRequest\SUB\CAN.ghcserver.CleanResponse\"\NULJ\181\v\n\
+    \\ACK\DC2\EOT\NUL\NUL'\SOH\n\
     \\b\n\
     \\SOH\f\DC2\ETX\NUL\NUL\DC2\n\
     \\b\n\
@@ -872,56 +921,66 @@ packedFileDescriptor
     \\ENQ\EOT\SOH\STX\SOH\SOH\DC2\ETX\DC2\t\SI\n\
     \\f\n\
     \\ENQ\EOT\SOH\STX\SOH\ETX\DC2\ETX\DC2\DC2\DC3\n\
-    \\235\SOH\n\
-    \\STX\EOT\STX\DC2\ETX\ETB\NUL\ETB\SUB\223\SOH Empty: the paths to clean (the project's 'output' and 'cache' directories) are hardcoded server-side rather\n\
-    \ than sent by the client, since duplicating that assumption in a client is exactly what this RPC exists to avoid.\n\
+    \\221\STX\n\
+    \\STX\EOT\STX\DC2\EOT\EM\NUL\ESC\SOH\SUB\208\STX The directories to clean are still hardcoded server-side (the client never sends absolute paths), but the\n\
+    \ scope within the project can now be narrowed via 'target': the sentinel \"*\" or an empty string for the whole\n\
+    \ project (all units), a bare unit name for a single unit, or \"unitName:moduleName\" for a single module within a\n\
+    \ unit.\n\
     \\n\
     \\n\
     \\n\
-    \\ETX\EOT\STX\SOH\DC2\ETX\ETB\b\DC4\n\
-    \\n\
-    \\n\
-    \\STX\EOT\ETX\DC2\EOT\EM\NUL\FS\SOH\n\
-    \\n\
-    \\n\
-    \\ETX\EOT\ETX\SOH\DC2\ETX\EM\b\NAK\n\
+    \\ETX\EOT\STX\SOH\DC2\ETX\EM\b\DC4\n\
     \\v\n\
-    \\EOT\EOT\ETX\STX\NUL\DC2\ETX\SUB\STX\DC3\n\
+    \\EOT\EOT\STX\STX\NUL\DC2\ETX\SUB\STX\DC4\n\
     \\f\n\
-    \\ENQ\EOT\ETX\STX\NUL\ENQ\DC2\ETX\SUB\STX\ACK\n\
+    \\ENQ\EOT\STX\STX\NUL\ENQ\DC2\ETX\SUB\STX\b\n\
     \\f\n\
-    \\ENQ\EOT\ETX\STX\NUL\SOH\DC2\ETX\SUB\a\SO\n\
+    \\ENQ\EOT\STX\STX\NUL\SOH\DC2\ETX\SUB\t\SI\n\
     \\f\n\
-    \\ENQ\EOT\ETX\STX\NUL\ETX\DC2\ETX\SUB\DC1\DC2\n\
+    \\ENQ\EOT\STX\STX\NUL\ETX\DC2\ETX\SUB\DC2\DC3\n\
+    \\n\
+    \\n\
+    \\STX\EOT\ETX\DC2\EOT\GS\NUL \SOH\n\
+    \\n\
+    \\n\
+    \\ETX\EOT\ETX\SOH\DC2\ETX\GS\b\NAK\n\
     \\v\n\
-    \\EOT\EOT\ETX\STX\SOH\DC2\ETX\ESC\STX\NAK\n\
+    \\EOT\EOT\ETX\STX\NUL\DC2\ETX\RS\STX\DC3\n\
     \\f\n\
-    \\ENQ\EOT\ETX\STX\SOH\ENQ\DC2\ETX\ESC\STX\b\n\
+    \\ENQ\EOT\ETX\STX\NUL\ENQ\DC2\ETX\RS\STX\ACK\n\
     \\f\n\
-    \\ENQ\EOT\ETX\STX\SOH\SOH\DC2\ETX\ESC\t\DLE\n\
+    \\ENQ\EOT\ETX\STX\NUL\SOH\DC2\ETX\RS\a\SO\n\
     \\f\n\
-    \\ENQ\EOT\ETX\STX\SOH\ETX\DC2\ETX\ESC\DC3\DC4\n\
-    \\n\
-    \\n\
-    \\STX\ACK\NUL\DC2\EOT\RS\NUL#\SOH\n\
-    \\n\
-    \\n\
-    \\ETX\ACK\NUL\SOH\DC2\ETX\RS\b\DC1\n\
+    \\ENQ\EOT\ETX\STX\NUL\ETX\DC2\ETX\RS\DC1\DC2\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\NUL\DC2\ETX\US\STX:\n\
+    \\EOT\EOT\ETX\STX\SOH\DC2\ETX\US\STX\NAK\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\SOH\DC2\ETX\US\ACK\r\n\
+    \\ENQ\EOT\ETX\STX\SOH\ENQ\DC2\ETX\US\STX\b\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\STX\DC2\ETX\US\SO\FS\n\
+    \\ENQ\EOT\ETX\STX\SOH\SOH\DC2\ETX\US\t\DLE\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\ETX\DC2\ETX\US'6\n\
+    \\ENQ\EOT\ETX\STX\SOH\ETX\DC2\ETX\US\DC3\DC4\n\
+    \\n\
+    \\n\
+    \\STX\ACK\NUL\DC2\EOT\"\NUL'\SOH\n\
+    \\n\
+    \\n\
+    \\ETX\ACK\NUL\SOH\DC2\ETX\"\b\DC1\n\
+    \\v\n\
+    \\EOT\ACK\NUL\STX\NUL\DC2\ETX#\STX:\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\NUL\SOH\DC2\ETX#\ACK\r\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\NUL\STX\DC2\ETX#\SO\FS\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\NUL\ETX\DC2\ETX#'6\n\
     \\129\SOH\n\
-    \\EOT\ACK\NUL\STX\SOH\DC2\ETX\"\STX4\SUBt Removes the project's 'output' and 'cache' directories (server-generated, fully reconstructible build\n\
+    \\EOT\ACK\NUL\STX\SOH\DC2\ETX&\STX4\SUBt Removes the project's 'output' and 'cache' directories (server-generated, fully reconstructible build\n\
     \ artifacts).\n\
     \\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\SOH\DC2\ETX\"\ACK\v\n\
+    \\ENQ\ACK\NUL\STX\SOH\SOH\DC2\ETX&\ACK\v\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\STX\DC2\ETX\"\f\CAN\n\
+    \\ENQ\ACK\NUL\STX\SOH\STX\DC2\ETX&\f\CAN\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\ETX\DC2\ETX\"#0b\ACKproto3"
+    \\ENQ\ACK\NUL\STX\SOH\ETX\DC2\ETX&#0b\ACKproto3"

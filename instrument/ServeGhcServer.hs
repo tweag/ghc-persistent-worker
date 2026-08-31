@@ -15,6 +15,8 @@ import Network.GRPC.Common (Proxy (..), def)
 import Network.GRPC.Common.Protobuf (Protobuf, defMessage)
 import Network.Socket (Family (AF_UNIX), SockAddr (SockAddrUnix), SocketType (Stream), close, connect, socket)
 import Proto.GhcServer (GhcServer)
+import Proto.GhcServer_Fields qualified as Fields
+import Lens.Micro ((&), (.~))
 import System.Directory (findExecutable)
 import System.Exit (die)
 import System.IO (Handle)
@@ -114,11 +116,15 @@ killGhcServer ph = do
 -- human-readable reason on any failure (connection failure, or the RPC itself reporting @success = False@);
 -- @Right@ with the server's reported message otherwise.
 --
+-- @target@ selects the clean scope: the sentinel @"*"@ (or empty text) for the whole project, a bare unit name
+-- for a single unit, or @unitName:moduleName@ for a single module within a unit. Forwarded verbatim to the
+-- server, which owns the actual parsing (see 'GhcServer.Handler.parseCleanTarget').
+--
 -- Bounded by 'gracefulShutdownTimeoutMicros': if the server is busy (e.g. mid-build) and doesn't respond within
 -- that window, returns @Left@ instead of blocking indefinitely -- callers that need to tear the server down
 -- afterwards (e.g. the exit-time finalizer) must not be stalled by an unresponsive @Clean@ RPC.
-cleanGhcServer :: FilePath -> IO (Either String String)
-cleanGhcServer projectRoot = do
+cleanGhcServer :: FilePath -> Text.Text -> IO (Either String String)
+cleanGhcServer projectRoot target = do
   eres <- try @SomeException (timeout gracefulShutdownTimeoutMicros rpcCall)
   pure $ case eres of
     Left e -> Left (displayException e)
@@ -132,5 +138,5 @@ cleanGhcServer projectRoot = do
     rpcCall =
       withConnection def (ServerUnix sock) \ conn ->
         withRPC conn def (Proxy @(Protobuf GhcServer "clean")) \ call -> do
-          sendFinalInput call defMessage
+          sendFinalInput call (defMessage & Fields.target .~ target)
           recvNextOutput call

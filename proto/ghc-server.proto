@@ -19,9 +19,13 @@ message ExecuteResponse {
   string stderr = 2;
 }
 
-// Empty: the paths to clean (the project's 'output' and 'cache' directories) are hardcoded server-side rather
-// than sent by the client, since duplicating that assumption in a client is exactly what this RPC exists to avoid.
-message CleanRequest {}
+// The directories to clean are still hardcoded server-side (the client never sends absolute paths), but the
+// scope within the project can now be narrowed via 'target': the sentinel "*" or an empty string for the whole
+// project (all units), a bare unit name for a single unit, or "unitName:moduleName" for a single module within a
+// unit.
+message CleanRequest {
+  string target = 1;
+}
 
 message CleanResponse {
   bool success = 1;

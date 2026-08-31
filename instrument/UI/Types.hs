@@ -78,5 +78,15 @@ haskellLogoEqualsAttr :: AttrName
 haskellLogoEqualsAttr = attrName "haskellLogoEquals"
 
 -- | Suffix appended to a 'UI.TaskTree.ModuleRow' label once that module has been built successfully.
+--
+-- A plain check mark ('\10004', single-width in virtually every terminal font) rather than an emoji-presentation
+-- glyph, so it doesn't need 'UI.Utils.wideStr'\'s explicit-width workaround.
 builtMarker :: Text
-builtMarker = " \9989"
+builtMarker = " \10004"
+
+-- | Suffix appended to a 'UI.TaskTree.ModuleRow'\/'Header' label once that module\/unit has failed to build.
+--
+-- A plain ballot X ('\10008'), matching 'builtMarker'\'s use of a plain check mark rather than an
+-- emoji-presentation glyph.
+failedMarker :: Text
+failedMarker = " \10008"

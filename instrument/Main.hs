@@ -270,15 +270,18 @@ restartServerAction serverInfoRef serverExe eventChan = do
       notify eventChan $
         UI.ProcessLog (Text.pack "error") (Text.pack "No prior ghc-server info to restart from")
 
--- | Backs the capital-@C@ key binding: asks the tracked server to remove its @cache@\/@output@ directories via
--- the @Clean@ RPC (see 'ServeGhcServer.cleanGhcServer').
-cleanServerAction :: IORef (Maybe ServerInfo) -> BChan UI.Event -> IO ()
-cleanServerAction serverInfoRef eventChan = do
+-- | Backs the capital-@C@ key binding: asks the tracked server to remove its @cache@\/@output@ directories for
+-- the given scope via the @Clean@ RPC (see 'ServeGhcServer.cleanGhcServer'). @target@ is the clean scope
+-- computed by 'UI.TaskTree.selectedCleanTarget': the sentinel @"*"@ for the whole project, a bare unit name, or
+-- @unitName:moduleName@.
+cleanServerAction :: IORef (Maybe ServerInfo) -> BChan UI.Event -> Text.Text -> IO ()
+cleanServerAction serverInfoRef eventChan target = do
   minfo <- readIORef serverInfoRef
   case minfo of
     Just si -> do
-      result <- cleanGhcServer si.projectRoot
+      result <- cleanGhcServer si.projectRoot target
       notify eventChan $ UI.ProcessLog (Text.pack "clean") (Text.pack (either ("Clean failed: " ++) ("Clean: " ++) result))
+      notify eventChan $ UI.CleanCompleted target (either (const False) (const True) result)
     Nothing ->
       notify eventChan $
         UI.ProcessLog (Text.pack "error") (Text.pack "No tracked ghc-server project root to clean")
@@ -293,7 +296,7 @@ runSteps :: (UI.Event -> IO ()) -> Options -> IORef (Maybe ServerInfo) -> BChan 
 runSteps send opts serverInfoRef eventChan =
   unless opts.remain $ do
     send (UI.OpLogMessage (Text.pack "Cleaning ghc-server cache/output directories"))
-    cleanServerAction serverInfoRef eventChan
+    cleanServerAction serverInfoRef eventChan (Text.pack "*")
     send (UI.OpLogMessage (Text.pack "Killing ghc-server"))
     killServerAction serverInfoRef eventChan
 

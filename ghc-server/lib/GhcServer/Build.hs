@@ -10,6 +10,7 @@ module GhcServer.Build (
   newBuild,
   scheduleBatch,
   awaitBuild,
+  completedCount,
   stopBuild,
   runBuild,
   newBuildState,
@@ -19,7 +20,7 @@ module GhcServer.Build (
 
 import Control.Concurrent.Async (Async, cancel)
 import Control.Concurrent.MVar (MVar, modifyMVar_, newMVar, readMVar)
-import Control.Concurrent.STM (atomically, readTVar)
+import Control.Concurrent.STM (atomically, readTVar, readTVarIO)
 import Data.Foldable (traverse_)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -110,6 +111,14 @@ newBuild trace maxJobs taskTimeout buildEnv = do
 scheduleBatch :: Build -> ScheduleRequest -> IO ()
 scheduleBatch cb request =
   submitRequest cb.scheduler request
+
+-- | Number of tasks that have completed so far, across the whole lifetime of this 'Build'.
+--
+-- Used by 'GhcServer.Grpc.triggerTask' to detect whether a request produced any new task completions at all,
+-- by comparing the count taken just before submitting the batch against the count taken just after it drains:
+-- an unchanged count means the request's targets were already up to date and nothing was dispatched.
+completedCount :: Build -> IO Int
+completedCount cb = Map.size . (.completed) <$> readTVarIO cb.scheduler.state
 
 -- | Wait for all submitted tasks to complete, then collect results.
 --
