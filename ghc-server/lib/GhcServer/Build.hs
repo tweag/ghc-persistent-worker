@@ -18,7 +18,7 @@ module GhcServer.Build (
 ) where
 
 import Control.Concurrent.Async (Async, cancel)
-import Control.Concurrent.MVar (MVar, readMVar)
+import Control.Concurrent.MVar (MVar, modifyMVar_, newMVar, readMVar)
 import Control.Concurrent.STM (atomically, readTVar)
 import Data.Foldable (traverse_)
 import qualified Data.Map.Strict as Map
@@ -65,7 +65,14 @@ data Build =
     scheduler :: SchedulerResources ScheduleRequest TaskKey BuildStatus String BuildExt,
     thread :: Async Void,
     -- | The environment, retained for digest commits at batch completion.
-    env :: BuildEnv
+    env :: BuildEnv,
+    -- | Serializes 'awaitBuild'\'s post-batch digest commit ('GhcServer.Build.Diff.commitDigests')
+    -- across concurrent callers.  'GhcServer.Grpc.triggerTask' forks its own 'awaitBuild' for every
+    -- request, and a test\/one-shot caller may also call 'awaitBuild'\/'stopBuild' directly on the
+    -- same 'Build' -- without this lock, two calls that both observe the scheduler idle around the
+    -- same time race to 'GhcServer.Build.Diff.writeDigestRecord' the same unit's digest file
+    -- concurrently, which GHC's RTS file locking rejects with "resource busy (file is locked)".
+    commitLock :: MVar ()
   }
 
 -- | Create a new build session.
@@ -96,7 +103,8 @@ newBuild trace maxJobs taskTimeout buildEnv = do
       continueOnFailure = True
     }
   thread <- runScheduler env scheduler
-  pure Build {scheduler, thread, env = buildEnv}
+  commitLock <- newMVar ()
+  pure Build {scheduler, thread, env = buildEnv, commitLock}
 
 -- | Submit a batch of build requests to the scheduler.  Non-blocking.
 scheduleBatch :: Build -> ScheduleRequest -> IO ()
@@ -113,16 +121,17 @@ awaitBuild cb = do
     awaitIdle cb.scheduler
     readTVar cb.scheduler.state
   reportInvariantViolations cb.env.log (schedulerInvariantViolations state)
-  diffs <- readMVar cb.env.diff
-  let
-    metaFailedUnits = Set.fromList [name | MetaTask name <- Map.keys failures]
-    compiledModules = Set.fromList
-      [ ModuleKey {unit, name}
-      | ResolvedModule unit name <- Map.keys completed
-      , not (Map.member (ResolvedModule unit name) failures)
-      ]
-    modulePaths = Map.mapMaybe modulePath ext.moduleMap
-  commitDigests cb.env.project.units diffs metaFailedUnits modulePaths compiledModules ext.stale
+  modifyMVar_ cb.commitLock \ () -> do
+    diffs <- readMVar cb.env.diff
+    let
+      metaFailedUnits = Set.fromList [name | MetaTask name <- Map.keys failures]
+      compiledModules = Set.fromList
+        [ ModuleKey {unit, name}
+        | ResolvedModule unit name <- Map.keys completed
+        , not (Map.member (ResolvedModule unit name) failures)
+        ]
+      modulePaths = Map.mapMaybe modulePath ext.moduleMap
+    commitDigests cb.env.project.units diffs metaFailedUnits modulePaths compiledModules ext.stale
   pure (collectBuildResult (Map.keysSet completed) failures)
   where
     modulePath :: ModuleInfo -> Maybe OsPath

@@ -6,7 +6,9 @@
 -- them under various scheduling scenarios.
 module Test.BuildTest where
 
+import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (cancel)
+import Control.Concurrent.Chan (newChan)
 import Control.Concurrent.MVar (MVar, newMVar, readMVar)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Aeson (encode)
@@ -39,6 +41,7 @@ import GhcServer.Data.BuildEvent (BuildEvent (..), BuildEvents, newBuildEvents, 
 import GhcServer.Data.Request (ScheduleRequest (..), UnitRequest (..))
 import GhcServer.Data.Unit (ClientModule (..), Project (..), Unit (..), UnitCache (..), UnitName (..))
 import GhcServer.Data.UnitConfig (UnitConfig (..))
+import GhcServer.Grpc (triggerTask)
 import GhcServer.Log (newLogger)
 import GhcServer.Path (osPath)
 import GhcServer.Project (discoverProject)
@@ -52,6 +55,7 @@ import System.Timeout (timeout)
 import Test.Tasty (DependencyType (..), TestName, TestTree, dependentTestGroup, withResource)
 import Test.Tasty.Hedgehog (testProperty)
 import Types.Args (emptyArgs)
+import Types.Instrument (TaskKind (..), TaskTrigger (..))
 import Types.State (WorkerState (..))
 import Types.State.Make (MakeState (..))
 
@@ -549,6 +553,142 @@ createIntraDepProject root = do
     , "u1m1 :: String"
     , "u1m1 = u1m0 ++ u0m0"
     ]
+
+-- ---------------------------------------------------------------------------
+-- UI-driven repeated-rebuild project: unit1 (standalone M3), unit2 (M2 standalone, M1 -> M2).
+-- Mirrors ops/projects/project1's layout exactly (see kb-standalone-server / ui.log repro task).
+-- ---------------------------------------------------------------------------
+
+createUiReproProject :: FilePath -> IO ()
+createUiReproProject root = do
+  createDirectoryIfMissing True (root ++ "/unit1")
+  writeUnitConfig root "unit1" UnitConfig {deps = [], args = baseGhcArgs}
+  writeProjectFile root "unit1/M3.hs" $ unlines
+    [ "module M3 where"
+    , ""
+    , "payload :: String"
+    , "payload = \"m3\""
+    ]
+
+  createDirectoryIfMissing True (root ++ "/unit2")
+  writeUnitConfig root "unit2" UnitConfig {deps = [], args = baseGhcArgs}
+  writeProjectFile root "unit2/M2.hs" $ unlines
+    [ "module M2 where"
+    , ""
+    , "payload :: String"
+    , "payload = \"m2\""
+    ]
+  writeProjectFile root "unit2/M1.hs" $ unlines
+    [ "module M1 where"
+    , ""
+    , "import M2 (payload)"
+    , ""
+    , "combined :: String"
+    , "combined = payload"
+    ]
+
+uiReproTest :: TestName -> (TestProject -> TestT IO ()) -> TestTree
+uiReproTest =
+  projectTest "ghc-server-ui-repro" createUiReproProject
+
+-- | Counts of scheduler decisions used to detect when a single generation has fully settled --
+-- every task it activated (both 'MetaTask's and 'ResolvedModule's) has since been reported
+-- completed, deduped or judged up to date -- so consecutive 'triggerTask' calls can be paced the
+-- way a human watching the UI's live task tree would pace 'b'\/'r' key presses (waiting to see a
+-- build finish before triggering the next one) without resorting to an arbitrary fixed delay.
+--
+-- Hardcoded to this module's fixed 'createUiReproProject' shape (2 units, 3 modules total: unit1
+-- has a single module, unit2 has two), so a generation is "settled" once exactly 5 tasks (2
+-- 'MetaTask's + 3 'ResolvedModule's) have both activated and terminated.
+tasksPerGeneration :: Int
+tasksPerGeneration = 5
+
+decisionActivatedCount :: [SchedulerDecision TaskKey] -> Int
+decisionActivatedCount = length . filter isActivated
+  where
+    isActivated (DecisionActivated _ _) = True
+    isActivated _ = False
+
+decisionTerminatedCount :: [SchedulerDecision TaskKey] -> Int
+decisionTerminatedCount = length . filter isTerminated
+  where
+    isTerminated (DecisionCompleted _ _) = True
+    isTerminated (DecisionUpToDate _ _ _) = True
+    isTerminated (DecisionDeduped _ _) = True
+    isTerminated _ = False
+
+-- | Poll a 'newTestBuild' decision log until the @n@-th generation (1-based) has been recorded
+-- and all of its tasks have terminated. Gives up after roughly a second, in which case the
+-- subsequent 'triggerTask' call simply races ahead -- the same outcome an impatient real user
+-- gets by pressing 'r' before the previous build's indicator has settled.
+awaitGenerationSettled :: IORef [SchedulerDecision TaskKey] -> Int -> IO ()
+awaitGenerationSettled ref n = go (200 :: Int)
+  where
+    go 0 = pure ()
+    go budget = do
+      decisions <- buildDecisions ref
+      let batch = decisionBatch n decisions
+      if length (decisionGenerations decisions) >= n
+         && decisionActivatedCount batch == tasksPerGeneration
+         && decisionTerminatedCount batch == tasksPerGeneration
+        then pure ()
+        else threadDelay 5000 *> go (budget - 1)
+
+
+-- | Regression test for the bug observed via @ops/projects/project1/ui.log@: three consecutive
+-- requests against the project root -- matching the instrument UI's 'b' key (ordinary recompile,
+-- @rebuild = False@) followed by two 'r' presses (forced full rebuild, @rebuild = True@) -- used
+-- to intermittently fail the third generation with a "module is not loaded" error for unit2's M1
+-- against unit2's M2 (a purely intra-unit dependency, no cross-unit deps in this project at all).
+-- The cause was an ordering bug in 'Test.Scheduler.Concurrent.promote'\/'resolveTask': when a
+-- generation's newly computed resolutions for two dependent keys were promoted together in the
+-- same batch (as unit2's M1 and M2 are here, both resolved from the same metadata task), the
+-- dependent's unmet-dependency set was computed against whichever keys had already been
+-- reprocessed in this batch, silently treating a not-yet-reprocessed dependency's /previous/
+-- generation's completion as still satisfying the current one whenever the batch happened to
+-- visit the dependent before its dependency -- purely a consequence of 'Data.Map.Strict''s
+-- iteration order over the resolved keys, not something any of the first two generations'
+-- inputs differed on. Fixed by computing the full batch of keys being promoted together up
+-- front and excluding all of them from "already satisfied", regardless of visitation order.
+--
+-- Unlike every other test in this module, which calls 'scheduleBatch'\/'awaitBuild' directly,
+-- this test drives the build exclusively through 'GhcServer.Grpc.triggerTask' -- the actual
+-- production handler the real gRPC @Send@ RPC invokes for the UI's 'b'\/'m'\/'r' keys -- and
+-- never awaits in between the three triggers, matching the UI's own fire-and-forget
+-- 'Grpc.sendCommand' (@forkIO@, reply never awaited) semantics exactly. This is deliberate, not
+-- an omission: 'triggerTask' itself only enqueues via 'scheduleBatch' and forks its own
+-- background 'awaitBuild' for digest-commit bookkeeping, so calling it three times in a row with
+-- no synchronization in between is precisely what the instrument UI does when a user presses
+-- 'b', then 'r', then 'r' -- there is no synchronous reply to wait for between key presses. The
+-- three requests are still processed by the scheduler in strict succession regardless (a new
+-- generation's classification only runs once the previous generation's tasks have all settled,
+-- see 'GhcServer.Scheduler'), so this does not depend on any artificial pacing between the
+-- calls -- only on firing exactly three requests with the same targets and 'rebuild' flags, in
+-- the same order, that the UI's key bindings produce.
+--
+-- Only 'stopBuild' (which calls 'awaitBuild') is invoked by the test itself, once, after all
+-- three triggers have been fired -- draining every generation's tasks and collecting the
+-- accumulated 'BuildResult' across the whole session, the same way a human operator would
+-- eventually notice success (or failure) in the UI's log panel rather than from a synchronous
+-- RPC reply.
+test_uiRebuildRace :: TestTree
+test_uiRebuildRace =
+  uiReproTest "repeated UI rebuild ('b', 'r', 'r') does not corrupt an intra-unit dependency" \ tp -> do
+    (cb, evRef, _decisions) <- newTestBuild tp
+    chan <- liftIO newChan
+    liftIO $ triggerTask chan cb tp.project TaskTrigger {target = "*", task = Rebuild, rebuild = False}
+    liftIO $ awaitGenerationSettled _decisions 1
+    liftIO $ triggerTask chan cb tp.project TaskTrigger {target = "*", task = Rebuild, rebuild = True}
+    liftIO $ awaitGenerationSettled _decisions 2
+    liftIO $ triggerTask chan cb tp.project TaskTrigger {target = "*", task = Rebuild, rebuild = True}
+    liftIO $ awaitGenerationSettled _decisions 3
+    result <- liftIO (timedStop cb)
+    decisions <- liftIO (buildDecisions _decisions)
+    annotate (unlines (map show decisions))
+    annotate (prettyBuildResult "b, r, r" result)
+    events <- liftIO (readEvents evRef)
+    annotate (unlines (map show events))
+    assertSuccess "b, r, r" result
 
 -- ---------------------------------------------------------------------------
 -- Test group: Basic dispatch
@@ -1770,5 +1910,6 @@ test_serverBuild =
     , test_incrementalRecompilation
     , test_persistentSessions
     , test_executeModule
+    , test_uiRebuildRace
     ]
 

@@ -434,18 +434,11 @@ insertPending ::
 insertPending task state
   | task.enabled
   , Map.member task.key state.resolutions =
-    let inserted = state {pending = Map.insertWith mergeTask task.key task state.pending}
-    in case resolveTask task.key inserted of
-      Nothing -> inserted
-      Just (s', pendingDeps) -> promoteReady (go pendingDeps s')
-  | otherwise = state {pending = Map.insertWith mergeTask task.key task state.pending}
+    promote (Set.singleton task.key) inserted
+  | otherwise = inserted
   where
     mergeTask new old = old {enabled = old.enabled || new.enabled}
-    go [] s = s
-    go (k : ks) s =
-      case resolveTask k s of
-        Nothing -> go ks s
-        Just (s', more) -> go (more ++ ks) s'
+    inserted = state {pending = Map.insertWith mergeTask task.key task state.pending}
 
 -- | Promote keys from the pending pool to unsatisfied, transitively through dependencies.
 --
@@ -453,26 +446,83 @@ insertPending task state
 -- a resolved key, value, and pending dependency set, the task is moved to unsatisfied with
 -- the resolved identity.  Pending deps are converted to resolved keys via 'resolutions'
 -- and placed in the unsatisfied dep set.  Any pending deps that are still in the pending pool
--- are added to the work list, ensuring transitive activation.
+-- are promoted as well, ensuring transitive activation.
+--
+-- The full closure of keys reachable from @keys@ ('pendingClosure') and the set of resolved
+-- keys that will actually activate ('activatingKeys') are both computed up front, before any
+-- individual key is resolved, so that the unmet-dependency computation in 'resolveTask' does
+-- not depend on the order the closure happens to be visited in -- see 'resolveTask'\'s @batch@
+-- parameter.
 promote ::
   OrdKey key =>
   Set (key 'Pending) ->
   SchedulerState key task f ext ->
   SchedulerState key task f ext
-promote keys =
-  promoteReady . go (Set.toList keys)
+promote keys s0 =
+  promoteReady (go (Set.toList closure) s0)
   where
+    closure = pendingClosure keys s0
+    batch = activatingKeys closure s0
     go [] s = s
     go (k : ks) s =
-      case resolveTask k s of
+      case resolveTask batch k s of
         Nothing -> go ks s
-        Just (s', pendingDeps) -> go (pendingDeps ++ ks) s'
+        Just s' -> go ks s'
+
+-- | Compute the full transitive closure of pending keys reachable from the given seeds via
+-- resolution dependency sets, restricted to keys currently in the pending pool.
+--
+-- Computed as a single up-front pass over the (immutable, for the duration of one 'promote'
+-- call) resolutions\/pending maps, rather than discovered incrementally while resolving keys
+-- one at a time -- see 'promote' for why this matters.
+pendingClosure ::
+  OrdKey key =>
+  Set (key 'Pending) ->
+  SchedulerState key task f ext ->
+  Set (key 'Pending)
+pendingClosure seeds s =
+  go seeds (Set.toList seeds)
+  where
+    go visited [] = visited
+    go visited (k : ks) =
+      case Map.lookup k s.resolutions of
+        Nothing -> go visited ks
+        Just resolution ->
+          let new = [pk | pk <- Set.toList resolution.deps, Map.member pk s.pending, not (Set.member pk visited)]
+          in go (Set.union visited (Set.fromList new)) (new ++ ks)
+
+-- | The resolved keys that will actually be (re-)activated by promoting the given closure of
+-- pending keys, per 'activation'.
+--
+-- Computed up front, from the state as it stood before any of the closure's keys were
+-- processed, so that it does not depend on the (arbitrary) order 'promote' visits them in --
+-- see 'promote' for why this matters.
+activatingKeys ::
+  OrdKey key =>
+  Set (key 'Pending) ->
+  SchedulerState key task f ext ->
+  Set (key 'Resolved)
+activatingKeys closure s =
+  Set.fromList
+    [ resolution.key
+    | k <- Set.toList closure
+    , Map.member k s.pending
+    , Just resolution <- [Map.lookup k s.resolutions]
+    , ActivateNow <- [activation resolution s]
+    ]
 
 -- | Try to resolve a single pending task using 'resolutions' from state.
 --
 -- Returns 'Nothing' if the key is not pending or has no resolution entry.
--- On success, returns the updated state and a list of the task's own
--- dependencies that are still in the pending pool (for transitive promotion).
+--
+-- @batch@ is the set of resolved keys being activated together with this one in the same
+-- 'promote' call (see 'activatingKeys'). Those count as unmet dependencies even if they carry a
+-- stale completion record, because they are about to be (re-)activated: without this, whether a
+-- dependent (e.g. a module compile task depending on another module in the same unit's metadata
+-- resolution) waits for its dependency would hinge on the arbitrary order in which 'promote'
+-- happens to visit the two keys, since a completion from an earlier generation would otherwise
+-- be misread as still satisfying this generation's dependency purely because it hadn't been
+-- reprocessed yet. Mirrors 'classifyTaskIn'\'s @batch@ parameter for the same reason.
 --
 -- Whether the resolution actually activates the task is decided by 'activation'.  Note the
 -- asymmetry between the two negative outcomes: a deduped key is removed from the pending pool
@@ -480,10 +530,11 @@ promote keys =
 -- generation which finds it stale again can still activate it.
 resolveTask ::
   OrdKey key =>
+  Set (key 'Resolved) ->
   key 'Pending ->
   SchedulerState key task f ext ->
-  Maybe (SchedulerState key task f ext, [key 'Pending])
-resolveTask k s = do
+  Maybe (SchedulerState key task f ext)
+resolveTask batch k s = do
   task <- Map.lookup k s.pending
   resolution <- Map.lookup k s.resolutions
   let
@@ -497,17 +548,16 @@ resolveTask k s = do
     resolvedTask =
       Task {key = resolution.key, deps = allDeps, enabled = task.enabled, value = resolution.value}
     withoutPending = s {pending = Map.delete k s.pending}
+    unmet = Set.difference allDeps (Set.difference (satisfiedKeys s) batch)
     activated =
       traceDecision (DecisionActivated resolution.key s.generation) withoutPending {
-        unsatisfied =
-          Map.insert resolution.key (resolvedTask, Set.difference allDeps (satisfiedKeys s)) s.unsatisfied,
+        unsatisfied = Map.insert resolution.key (resolvedTask, unmet) s.unsatisfied,
         accepted = Map.insert resolution.key s.generation s.accepted
       }
-    transitive s' = [pk | pk <- Set.toList resolution.deps, Map.member pk s'.pending]
   pure case activation resolution s of
-    ActivateNow -> (activated, transitive activated)
-    SkipInFlight g -> (traceDecision (DecisionDeduped resolution.key g) withoutPending, transitive withoutPending)
-    SkipUpToDate g -> (traceDecision (DecisionUpToDate resolution.key resolution.computedAt g) s, [])
+    ActivateNow -> activated
+    SkipInFlight g -> traceDecision (DecisionDeduped resolution.key g) withoutPending
+    SkipUpToDate g -> traceDecision (DecisionUpToDate resolution.key resolution.computedAt g) s
 
 -- | Promote all pending tasks that have @enabled = True@ and have an entry
 -- in 'resolutions'.
