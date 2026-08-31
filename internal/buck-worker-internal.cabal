@@ -86,6 +86,7 @@ library
                       Internal.Compat.Unload
                       Internal.Compile.Make
                       Internal.Compile.Phase
+                      Internal.Compile.TopEnv
                       Internal.Debug
                       Internal.DynFlags
                       Internal.DynFlags.Options
