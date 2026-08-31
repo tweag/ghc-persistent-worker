@@ -40,7 +40,6 @@ import Internal.DynFlags (
   buckLocation,
   initDynFlags,
   instrumentLocation,
-  mkTargetAsInterpreted,
   parseFlags,
   setupPath,
   updateGlobalFlags,
@@ -239,7 +238,6 @@ withGhcMakeModule interp target =
   where
     setup env dflags0 (state0, hsc_env0) =
       foldM @[] (&) (state0, hsc_env0) [
-        pure . fmap setTarget,
         restoreCachedHomeUnit env dflags0,
         setSessionModuleGraph,
         setActiveUnit,
@@ -263,6 +261,6 @@ withGhcMakeModule interp target =
     maybeArg :: Maybe a -> (b -> a -> IO b) -> b -> IO b
     maybeArg arg f z = fromMaybe z <$> traverse (liftIO . f z) arg
 
-    (targetSpec, setTarget)
-      | Interpreted <- interp = (TargetModuleInterp, mkTargetAsInterpreted target.mod)
-      | otherwise = (TargetModule, id)
+    targetSpec
+      | Interpreted <- interp = TargetModuleInterp
+      | otherwise = TargetModule

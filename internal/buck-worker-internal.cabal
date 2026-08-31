@@ -88,6 +88,7 @@ library
                       Internal.Compat.UnitIndex
                       Internal.Compat.Unload
                       Internal.Compile.Make
+                      Internal.Compile.TopEnv
                       Internal.Debug
                       Internal.DynFlags
                       Internal.DynFlags.Options
