@@ -10,7 +10,6 @@ data Name
   | SessionSelector
   | OptionsEditor
   | OEExtraGhcOptions
-  | BytecodeBrowser
   | ServeOptions
   | SOPath
   | SOExtraOptions
@@ -76,6 +75,51 @@ haskellLogoLambdaAttr = attrName "haskellLogoLambda"
 -- lambda, the lightest\/most pink-toned purple (@#8f4e8b@, @purple2@).
 haskellLogoEqualsAttr :: AttrName
 haskellLogoEqualsAttr = attrName "haskellLogoEquals"
+
+-- | Applied to an active-task row's target name (see 'UI.ActiveTasks.draw') and, analogously, to a bytecode
+-- cache stats line's primary figure (the BCO count, see 'UI.TaskTree.draw'\'s @bcoLine@) -- the "headline"
+-- part of a two-part row that 'taskTimeAttr' styles the secondary part of.
+taskNameAttr :: AttrName
+taskNameAttr = attrName "taskName"
+
+-- | Applied to an active-task row's elapsed-time\/status label and, analogously, to a bytecode cache stats
+-- line's last-access figure -- the secondary, de-emphasized part of a row 'taskNameAttr' styles the primary
+-- part of.
+taskTimeAttr :: AttrName
+taskTimeAttr = attrName "taskTime"
+
+-- | Foreground accent for the "Active Tasks" panel header. Panel headers replace the borders that used to
+-- delimit the main view's panels (active tasks\/project) -- see 'UI.ActiveTasks.draw', 'UI.TaskTree.draw' --
+-- with distinct color accents instead, so the panels remain visually distinguishable without drawing a border
+-- around each of them.
+sectionActiveTasksAttr :: AttrName
+sectionActiveTasksAttr = attrName "sectionActiveTasks"
+
+-- | Foreground accent for the "Project" panel header (see 'sectionActiveTasksAttr'). Also used for the
+-- project view's bytecode-cache child rows, since that panel was merged into this one.
+sectionProjectAttr :: AttrName
+sectionProjectAttr = attrName "sectionProject"
+
+-- | Applied to a module name within a task\/tree label (see 'UI.Utils.styledTarget', 'UI.TaskTree.draw'):
+-- blue, bold. Shared between the task view's @unit  module@ labels and the project view's module rows so
+-- both use the same color coding.
+moduleNameAttr :: AttrName
+moduleNameAttr = attrName "moduleName"
+
+-- | Applied to the literal @"metadata"@ keyword within a task label (see 'UI.Utils.styledTarget'): magenta,
+-- bold.
+metadataAttr :: AttrName
+metadataAttr = attrName "metadata"
+
+-- | Applied to the literal @"execute"@ keyword within a task label (see 'UI.Utils.styledTarget'): green,
+-- bold.
+executeAttr :: AttrName
+executeAttr = attrName "execute"
+
+-- | Applied to a project-view node's own label (unit header\/module name), bold -- so node labels share the
+-- same weight as the task view's colored labels ('moduleNameAttr'\/'metadataAttr').
+nodeLabelAttr :: AttrName
+nodeLabelAttr = attrName "nodeLabel"
 
 -- | Suffix appended to a 'UI.TaskTree.ModuleRow' label once that module has been built successfully.
 --

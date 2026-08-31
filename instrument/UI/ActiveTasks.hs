@@ -3,18 +3,17 @@ module UI.ActiveTasks where
 import Brick.AttrMap (AttrName)
 import Brick.Main (lookupViewport, setTop, viewportScroll)
 import Brick.Types (EventM, Widget, vpTop)
-import Brick.Widgets.Core (Padding (..), padLeft, padRight, str, strWrap, vBox, vLimit, withAttr, (<+>))
+import Brick.Widgets.Core (Padding (..), padLeft, str, strWrap, vBox, vLimit, withAttr, (<+>))
 import Brick.Widgets.List (GenericList, list, listElementsL, listSelectedElementL, listSelectedL, renderList)
-import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
-import Data.Time (UTCTime, diffUTCTime, getCurrentTime, nominalDiffTimeToSeconds)
+import Data.Time (UTCTime, defaultTimeLocale, diffUTCTime, formatTime, getCurrentTime, nominalDiffTimeToSeconds)
 import Lens.Micro.Platform (modifying, preuse, use, (.=), (^.))
 import Types.Target (TargetSpec (..), renderTargetSpec)
-import UI.Types (Name (ActiveTasks), WorkerId, canDebugAttr, disabledAttr, taskFailedAttr, taskRunningAttr, taskSucceededAttr)
-import UI.Utils (formatPico, popup)
+import UI.Types (Name (ActiveTasks), WorkerId, canDebugAttr, disabledAttr, sectionActiveTasksAttr, taskFailedAttr, taskNameAttr, taskRunningAttr, taskSucceededAttr, taskTimeAttr)
+import UI.Utils (drawSection, formatPico, popup, styledTarget)
 
 type State = GenericList Name Seq.Seq Row
 
@@ -38,12 +37,12 @@ data Task = Task
   }
 
 -- | A row in the displayed list: either a task, or a separator marking the boundary of a completed build
--- request (see 'Types.Instrument.Event'\'s @RequestCompleted@). 'Nothing' renders as a plain separator line;
--- @Just msg@ additionally shows @msg@ (e.g. "All targets up to date") for a request that produced no new task
--- completions.
+-- request (see 'Types.Instrument.Event'\'s @RequestCompleted@), always carrying a message (e.g. "All tasks
+-- concluded") since the scheduler-queue-exhaustion redesign made this a rare, always-meaningful event rather
+-- than one fired per request.
 data Row
   = TaskRow Task
-  | Separator (Maybe String)
+  | Separator String
 
 -- | The task a row carries, if it is a 'TaskRow'.
 rowTask :: Row -> Maybe Task
@@ -61,28 +60,43 @@ stateMarker Task{_outcome} =
     Just (Succeeded _) -> ("\10004", taskSucceededAttr) -- \x2714 heavy check mark
     Just (Failed _) -> ("\10008", taskFailedAttr) -- \x2718 heavy ballot X
 
+-- | Header line replacing the border that used to delimit this panel; see 'UI.Types.sectionActiveTasksAttr'.
+-- Uses 'UI.Utils.drawSection's permanent placeholder rectangle for visual structure.
 draw :: Name -> UTCTime -> State -> Widget Name
-draw current now = renderList drawRow (current == ActiveTasks)
+draw current now st =
+  drawSection sectionActiveTasksAttr (withAttr sectionActiveTasksAttr (str "Active Tasks")) $
+    renderList drawRow (current == ActiveTasks) st
  where
   drawRow _ (Separator msg) =
-    withAttr disabledAttr $ str (maybe (replicate 40 '\9472') (\m -> "\9472\9472 " ++ m ++ " \9472\9472") msg)
+    withAttr disabledAttr $ str ("\9472\9472 " ++ msg ++ " \9472\9472")
   drawRow _ (TaskRow task@Task{_taskTarget = name, ..}) =
-    let (emoji, attr) = stateMarker task
+    let (outcome, attr) = stateMarker task
         elapsed = nominalDiffTimeToSeconds (max 0 (diffUTCTime (fromMaybe now _taskEndTime) _taskStartTime))
-        status = case _outcome of
+        progress = case _outcome of
           Just (Failed _) -> "Failure"
           _ -> formatPico elapsed
+        timestamp = withAttr taskTimeAttr (str (formatTime defaultTimeLocale "%H:%M:%S" _taskStartTime ++ " "))
         header =
           (if _canDebug then withAttr canDebugAttr else id) $
-            -- The markers ('stateMarker') are plain single-width characters, so no explicit-width
-            -- workaround ('UI.Utils.wideStr') is needed here, unlike the emoji they replaced. Only the
-            -- marker itself is colored by the outcome attribute -- the elapsed-time\/status text stays
-            -- uncolored.
-            withAttr attr (str emoji) <+> str " " <+> padRight Max (str (renderTargetSpec name)) <+> str status
+            -- The timestamp (subdued\/dim, mirroring 'progressLine' below) leads the label; the marker
+            -- ('stateMarker') is a plain single-width character, moved to the end of the row instead of
+            -- leading it. The target name itself is rendered via 'UI.Utils.styledTarget' for the
+            -- module\/metadata syntax highlighting, with 'taskNameAttr' as its default for the unrecognized
+            -- (unit-name) part.
+            timestamp
+              <+> withAttr taskNameAttr (styledTarget (renderTargetSpec name))
+              <+> str " "
+              <+> withAttr attr (str outcome)
+        -- Status (elapsed time or "Failure") is rendered on its own indented line below the target name,
+        -- rather than right-aligned on the same line: right-aligning it made it hard to visually associate
+        -- with the target it belongs to, especially once lines wrap or targets vary in length, and there is
+        -- no need for rows to stretch to the panel's full width just to right-align one word. This mirrors
+        -- how an execute task's result is already shown on its own line below ('drawResult').
+        progressLine = padLeft (Pad 2) (withAttr taskTimeAttr (str progress))
         result = case _outcome of
           Just (Succeeded (Just r)) -> Just r
           _ -> Nothing
-     in vBox (header : maybe [] (pure . drawResult) result)
+     in vBox ([header, progressLine] ++ maybe [] (pure . drawResult) result)
 
   -- A successful execute task's exfiltrated result, rendered on the lines following its row: wrapped to the
   -- available width, truncated to 4 lines, indented by two cells, and left uncolored (unlike the marker/status
@@ -106,8 +120,17 @@ insertRow :: Int -> Row -> Seq Row -> EventM Name State ()
 insertRow i row rows = do
   atTop <- maybe True ((== 0) . (^. vpTop)) <$> lookupViewport ActiveTasks
   listElementsL .= Seq.insertAt i row rows
-  modifying listSelectedL (Just . maybe i (\i' -> if i' >= i then i' + 1 else i'))
-  when atTop $ setTop (viewportScroll ActiveTasks) 0
+  if atTop
+    then do
+      -- Pin the selection to the freshly inserted row too, not just the viewport: 'renderList' wraps the
+      -- selected row in Brick's 'visible' combinator, which forces the viewport back to wherever the
+      -- selection is on every render. Leaving the selection on its old (now shifted) row would fight the
+      -- 'setTop' below as soon as that row scrolls out of view, which is why the previous version of this
+      -- function only kept the view pinned for a single insertion.
+      listSelectedL .= Just i
+      setTop (viewportScroll ActiveTasks) 0
+    else
+      modifying listSelectedL (Just . maybe i (\i' -> if i' >= i then i' + 1 else i'))
 
 addTask :: TargetSpec -> WorkerId -> Bool -> EventM Name State ()
 addTask name wid canDebug = do
@@ -121,7 +144,7 @@ addTask name wid canDebug = do
 
 -- | Insert a separator row at the top of the list, marking the boundary of a just-completed build request (see
 -- 'Types.Instrument.Event'\'s @RequestCompleted@).
-addSeparator :: Maybe String -> EventM Name State ()
+addSeparator :: String -> EventM Name State ()
 addSeparator msg = do
   rows <- use listElementsL
   insertRow 0 (Separator msg) rows

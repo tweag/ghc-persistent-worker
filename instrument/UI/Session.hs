@@ -3,8 +3,8 @@
 module UI.Session where
 
 import Brick.Types (EventM, Widget)
-import Brick.Widgets.Border (hBorder, vBorder)
-import Brick.Widgets.Core (hBox, hLimitPercent, str, vBox, vLimitPercent)
+import Brick.Widgets.Border (hBorder)
+import Brick.Widgets.Core (Padding (Pad), hBox, hLimitPercent, padBottom, padLeft, padRight, padTop, str, vBox)
 import Data.Map qualified as Map
 import Data.Text qualified as Text
 import Data.Time (UTCTime)
@@ -13,7 +13,6 @@ import Network.GRPC.Client (Connection)
 import Types.Instrument qualified as Instr
 import Types.Target (TargetSpec (..))
 import UI.ActiveTasks qualified as ActiveTasks
-import UI.BytecodeBrowser qualified as BytecodeBrowser
 import UI.LogViewer qualified as LogViewer
 import UI.OpLog qualified as OpLog
 import UI.TaskTree qualified as TaskTree
@@ -29,7 +28,6 @@ data State = Session
   , _activeTasks :: ActiveTasks.State
   , _taskTree :: TaskTree.State
   , _logViewer :: LogViewer.State
-  , _bcoBrowser :: BytecodeBrowser.State
   , _sesStartTime :: UTCTime
   , _sesEndTime :: Maybe UTCTime
   , _finishedWorkerStats :: Stats
@@ -66,40 +64,38 @@ mkSession _title _startTime =
     , _activeTasks = ActiveTasks.initialState
     , _taskTree = TaskTree.initialState
     , _logViewer = LogViewer.initialState
-    , _bcoBrowser = BytecodeBrowser.initialState
     , _sesStartTime = _startTime
     , _sesEndTime = Nothing
     , _finishedWorkerStats = mempty
     }
 
--- | Convert a pushed 'Instr.BytecodeSnapshot's cache-entry list into the bytecode browser's own 'BytecodeBrowser.Entry'
--- shape.
-toBrowserEntries :: [Instr.BcoEntryInfo] -> [BytecodeBrowser.Entry]
-toBrowserEntries entries =
-  [ BytecodeBrowser.Entry
-      (Text.pack e.unitId)
-      (Text.pack e.moduleName)
-      e.size
-      e.lastAccess
-      e.resident
-      e.pendingEviction
+-- | Convert a pushed 'Instr.BytecodeSnapshot's cache-entry list into the plain tuple shape 'TaskTree.LoadBco'
+-- expects (the project view now displays these merged into the tree rather than in a separate panel).
+toBcoRows :: [Instr.BcoEntryInfo] -> [(Text.Text, Text.Text, Int, Int, Bool, Bool)]
+toBcoRows entries =
+  [ (Text.pack e.unitId, Text.pack e.moduleName, e.size, e.lastAccess, e.resident, e.pendingEviction)
   | e <- entries
   ]
 
--- | Draws the session panel: active tasks on top, then a horizontal split of the project task tree (left) and the
--- bytecode-cache browser (right, replacing the previous popup dialog), the worker stats footer, and finally the
--- operational message log (see 'UI.OpLog'), capped to its 5 most recent entries and flexibly sized (no minimum
--- height, growing up to that cap).
+-- | Draws the session panel: the project task tree on the left and the active-tasks list on the right (the
+-- bytecode-cache browser that used to occupy a third column has been merged into the project tree, see
+-- 'UI.TaskTree'), then the worker stats footer, and finally the operational message log (see 'UI.OpLog'),
+-- capped to its 5 most recent entries and flexibly sized (no minimum height, growing up to that cap). The two
+-- top panels (project\/active tasks) are delimited by colored headers and a whitespace gutter rather than
+-- borders, and are inset on all four sides by a two-cell margin -- 'hBorder' is reserved for the boundaries
+-- around the two bottom panels (the stats footer and the operational log, plus the key-legend bar drawn by
+-- the caller, see 'UI.drawUI'), which stay flush with the screen edges.
 draw :: Name -> UTCTime -> OpLog.State -> State -> Widget Name
 draw current now opLog Session{..} =
   vBox
-    [ vLimitPercent 30 $ ActiveTasks.draw current now _activeTasks
-    , hBorder
-    , hBox
-        [ hLimitPercent 50 $ TaskTree.draw current _taskTree
-        , vBorder
-        , BytecodeBrowser.draw current _bcoBrowser
-        ]
+    [ padLeft (Pad 2) $
+        padRight (Pad 2) $
+          padTop (Pad 2) $
+            padBottom (Pad 2) $
+              hBox
+                [ hLimitPercent 50 $ padRight (Pad 3) $ TaskTree.draw current _taskTree
+                , ActiveTasks.draw current now _activeTasks
+                ]
     , hBorder
     , drawStats (length _workers) (foldMap _stats _workers <> _finishedWorkerStats)
     , hBorder
@@ -166,7 +162,7 @@ handleEvent (InstrEvent wid evt) =
             , timestampMs
             }
     Instr.BytecodeSnapshot {..} ->
-      zoom bcoBrowser (BytecodeBrowser.handleEvent (BytecodeBrowser.Load (toBrowserEntries entries)))
+      zoom taskTree (TaskTree.handleEvent (TaskTree.LoadBco (toBcoRows entries)))
 
 removeWorker :: WorkerId -> EventM Name State ()
 removeWorker wid = do

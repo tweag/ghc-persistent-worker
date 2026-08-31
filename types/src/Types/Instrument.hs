@@ -89,12 +89,11 @@ data Event
   -- millisecond epoch timestamp. Only emitted when the @instrument@ feature is enabled (see
   -- @GhcServer.Log.instrumentLogger@).
   | LogMessage { target :: String, level :: String, message :: String, timestampMs :: Integer }
-  -- | Sent once a UI-triggered build request (see @GhcServer.Grpc.triggerTask@) has drained (the scheduler went
-  -- idle for that request). 'Nothing' marks an ordinary completion, rendered by the @instrument@ UI's task view
-  -- as a plain separator between requests. @Just msg@ additionally carries a message (e.g. @"All targets up to
-  -- date"@) for the case where the request produced no new task completions and no errors -- i.e. every
-  -- targeted module was already up to date.
-  | RequestCompleted { statusMessage :: Maybe String }
+  -- | Sent once the scheduler's queue has fully drained -- i.e. every in-flight UI-triggered build request (see
+  -- @GhcServer.Grpc.triggerTask@) has completed, not just the one that happened to trigger this event. A single
+  -- request fanned out into several concurrent scheduler batches (e.g. a project-wide build across multiple
+  -- units) therefore produces exactly one of these, rather than one per batch.
+  | RequestCompleted { statusMessage :: String }
   | Halt
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary)

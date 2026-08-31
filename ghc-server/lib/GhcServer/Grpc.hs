@@ -9,12 +9,13 @@ import Common.Grpc ()
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (Chan, writeChan)
 import Control.Concurrent.MVar (MVar)
-import Control.Monad (void)
+import Control.Concurrent.STM (atomically, modifyTVar', readTVar)
+import Control.Monad (void, when)
 import Data.Binary (encode)
 import Data.ByteString (toStrict)
 import Data.Functor (($>))
 import qualified Data.Map.Strict as Map
-import GhcServer.Build (Build, BuildResult (..), awaitBuild, completedCount, scheduleBatch)
+import GhcServer.Build (Build (..), awaitBuild, scheduleBatch)
 import GhcServer.Data.Request (ScheduleRequest (..), UnitRequest (..))
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
 import GhcServer.Handler (parseTarget)
@@ -96,6 +97,12 @@ notifyMe project stateVar chan callback = do
 -- only triggered by the @ghc-client@\/Buck request path's optional @--wait@ flag). Without this, every source
 -- file touched by a UI-triggered build would be re-detected as \"changed\" on every subsequent build, forcing
 -- a full unnecessary recompile of the same modules on every request.
+--
+-- 'Instrument.RequestCompleted' is only ever emitted once 'Build.inFlight' drops back to zero, i.e. once every
+-- concurrently in-flight 'triggerTask' request (not just this one) has drained -- a single UI action fanned out
+-- into several concurrent requests (e.g. a project-wide build across multiple units, dispatched as one
+-- 'TriggerBuild' per module by the UI's \'b\' key) therefore surfaces exactly one completion indicator instead
+-- of one per fanned-out request.
 triggerTask ::
   Chan Event ->
   Build ->
@@ -107,13 +114,15 @@ triggerTask chan build project TaskTrigger{target, task, rebuild} =
     Left err ->
       emitLog (Just chan) target "error" ("Rejected " ++ label ++ " request: " ++ err)
     Right steps -> do
-      before <- completedCount build
+      atomically $ modifyTVar' build.inFlight (+ 1)
       scheduleBatch build (request steps)
       void $ forkIO do
-        result <- awaitBuild build
-        after <- completedCount build
-        let upToDate = after == before && null result.metadataErrors && null result.compileErrors
-        writeChan chan (RequestCompleted (if upToDate then Just "All targets up to date" else Nothing))
+        _ <- awaitBuild build
+        remaining <- atomically do
+          modifyTVar' build.inFlight (subtract 1)
+          readTVar build.inFlight
+        when (remaining == 0) $
+          writeChan chan (RequestCompleted "All tasks concluded")
   where
     label = case task of
       Rebuild -> "rebuild"

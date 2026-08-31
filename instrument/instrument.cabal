@@ -13,7 +13,6 @@ executable instrument
     ServeGhcServer
     UI
     UI.ActiveTasks
-    UI.BytecodeBrowser
     UI.GhcDebug
     UI.LogViewer
     UI.OpLog

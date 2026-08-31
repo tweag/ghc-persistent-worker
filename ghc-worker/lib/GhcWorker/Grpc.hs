@@ -120,15 +120,15 @@ pushBytecodeState stateVar chan = do
   state <- readMVar stateVar
   writeChan chan (BytecodeSnapshot (bytecodeEntries state))
 
--- | Request eviction of a module (or, if 'moduleName' is empty, an entire unit) from the lazily-loaded bytecode
--- cache. Deferred until the next compile job's session is stored, since eviction requires a live 'HscEnv'/'Interp'
--- (see 'Types.State.Make.pendingEvictions').
+-- | Request eviction of a module (or, if 'moduleName' is empty, an entire unit; or, if 'unitId' is the sentinel
+-- @"*"@, every unit in the project) from the lazily-loaded bytecode cache. Deferred until the next compile
+-- job's session is stored, since eviction requires a live 'HscEnv'/'Interp' (see 'Types.State.Make.pendingEvictions').
 evictBytecode :: MVar WorkerState -> EvictRequest -> IO ()
 evictBytecode stateVar req =
   modifyMVar_ stateVar \state -> do
     let
       matches m =
-        unitIdString (moduleUnitId m) == req.unitId
+        (req.unitId == "*" || unitIdString (moduleUnitId m) == req.unitId)
         && (null req.moduleName || moduleNameString (GHC.moduleName m) == req.moduleName)
       targets = Set.filter matches (Map.keysSet state.make.bcoCache)
     pure state {make = state.make {pendingEvictions = state.make.pendingEvictions <> targets}}

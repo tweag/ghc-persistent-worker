@@ -1,10 +1,10 @@
 module UI.Utils where
 
-import Brick.AttrMap (attrMapLookup)
+import Brick.AttrMap (AttrName, attrMapLookup)
 import Brick.Types (Context (ctxAttrMap, ctxAttrName), EventM, Result (image), Size (Fixed), Widget (..), emptyResult, getContext)
 import Brick.Widgets.Border (borderWithLabel)
 import Brick.Widgets.Center (centerLayer)
-import Brick.Widgets.Core (hLimitPercent, str, vLimitPercent)
+import Brick.Widgets.Core (Padding (Pad), hBox, hLimitPercent, padLeft, str, vBox, vLimitPercent, withAttr, (<+>))
 import Brick.Widgets.List (GenericList, Splittable, handleListEvent, handleListEventVi)
 import Data.Fixed (Fixed (..), Pico)
 import Data.Sequence qualified as Seq
@@ -12,7 +12,7 @@ import Data.Text.Lazy qualified as TL
 import Graphics.Vty qualified as V
 import Graphics.Vty.Image.Internal qualified as VI
 import Lens.Micro.Platform (Traversal', zoom)
-import UI.Types (Name)
+import UI.Types (Name, metadataAttr, moduleNameAttr, executeAttr)
 
 popup :: Int -> String -> Widget Name -> Widget Name
 popup size popupTitle content =
@@ -81,3 +81,36 @@ upsertAscSeq meas x as = binSearch 0 (Seq.length as - 1)
 
 handleListEventOf :: (Foldable t, Splittable t, Ord n) => Traversal' s (GenericList n t e) -> V.Event -> EventM n s ()
 handleListEventOf lens = zoom lens . handleListEventVi handleListEvent
+
+-- | Render a colon-separated @unit:thing@ target string with syntax highlighting: the part after the colon
+-- is shown in 'UI.Types.moduleNameAttr' (blue, bold) or, if it is the literal @"metadata"@ keyword, in
+-- 'UI.Types.metadataAttr' (magenta, bold) instead -- and the colon separator itself is replaced with two
+-- spaces. A string with no colon (unrecognized shape) is rendered plainly, unstyled.
+styledTarget :: String -> Widget n
+styledTarget spec =
+  case break (== ':') spec of
+    (unitPart, ':' : rest) -> str unitPart <+> str "  " <+> coloredRest rest
+    _ -> str spec
+ where
+  coloredRest = \case
+    "metadata" -> withAttr metadataAttr (str "metadata")
+    "execute" -> withAttr executeAttr (str "execute")
+    m -> case break (== ':') m of
+      (modulePart, ':' : rest) -> renderModuleName modulePart <+> str "  " <+> coloredRest rest
+      _ -> renderModuleName m
+
+  renderModuleName = withAttr moduleNameAttr . str
+
+-- | Draws a panel's header line plus its content, following the borderless section style (see
+-- 'UI.Types.sectionActiveTasksAttr' and friends). A small solid rectangle (6 columns wide, 3 rows high, in
+-- the section's accent color) is always drawn on the left edge, top-aligned with where the content starts
+-- (i.e. two lines below the header), giving the panel a permanent visual anchor independent of whether it
+-- currently has content. The header is indented four spaces so it doesn't align above the rectangle, and the
+-- content area is offset two more cells past the rectangle's width.
+drawSection :: AttrName -> Widget n -> Widget n -> Widget n
+drawSection attr headline content =
+  vBox
+    [ padLeft (Pad 4) headline
+    , str " "
+    , hBox [withAttr attr (vBox (replicate 6 (str (replicate 3 '\9608')))), padLeft (Pad 2) content]
+    ]
