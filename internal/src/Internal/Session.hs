@@ -36,7 +36,7 @@ import GHC.Utils.Panic (panic, pprPanic)
 import GHC.Utils.TmpFs (TempDir (..), cleanTempDirs, cleanTempFiles, initTmpFs)
 import Internal.Cache.Hpt (depsFromModuleGraph, loadCachedDeps, loadHomeUnit)
 import Internal.Compat.GHC914 (hscSetModuleGraph)
-import Internal.DynFlags (buckLocation, initDynFlags, mkTargetAsInterpreted, parseFlags, setupPath, updateGlobalFlags)
+import Internal.DynFlags (buckLocation, initDynFlags, parseFlags, setupPath, updateGlobalFlags)
 import Internal.Env (withDebugLog)
 import Internal.Error (handleExceptions)
 import Internal.Log (logDebugD)
@@ -230,7 +230,6 @@ withGhcMakeModule interp target =
   where
     setup env dflags0 (state0, hsc_env0) =
       foldM @[] (&) (state0, hsc_env0) [
-        pure . fmap setTarget,
         restoreCachedHomeUnit env dflags0,
         setSessionModuleGraph,
         setActiveUnit,
@@ -254,6 +253,6 @@ withGhcMakeModule interp target =
     maybeArg :: Maybe a -> (b -> a -> IO b) -> b -> IO b
     maybeArg arg f z = fromMaybe z <$> traverse (liftIO . f z) arg
 
-    (targetSpec, setTarget)
-      | Interpreted <- interp = (TargetModuleInterp, mkTargetAsInterpreted target.mod)
-      | otherwise = (TargetModule, id)
+    targetSpec
+      | Interpreted <- interp = TargetModuleInterp
+      | otherwise = TargetModule
