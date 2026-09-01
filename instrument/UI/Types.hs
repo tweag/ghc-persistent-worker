@@ -6,7 +6,6 @@ import Data.Text (Text)
 data Name
   = ActiveTasks
   | TaskDetails
-  | TaskStats
   | TaskTree
   | SessionSelector
   | OptionsEditor

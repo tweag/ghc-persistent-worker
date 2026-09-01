@@ -3,9 +3,9 @@ module UI.ActiveTasks where
 import Brick.AttrMap (AttrName)
 import Brick.Main (lookupViewport, setTop, viewportScroll)
 import Brick.Types (EventM, Widget, vpTop)
-import Brick.Widgets.Core (Padding (..), padLeft, str, strWrap, vBox, vLimit, withAttr, (<+>), txt)
+import Brick.Widgets.Core (Padding (..), padLeft, str, strWrap, txt, vBox, vLimit, withAttr, (<+>))
 import Brick.Widgets.List (GenericList, list, listElementsL, listSelectedElementL, listSelectedL, renderList)
-import Control.Monad.IO.Class (liftIO, MonadIO)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.List (sortOn)
 import Data.Map.Strict qualified as Map
 import Data.Map.Strict (Map)
@@ -15,9 +15,23 @@ import Data.Sequence (Seq)
 import Data.Time (UTCTime, defaultTimeLocale, diffUTCTime, formatTime, getCurrentTime, nominalDiffTimeToSeconds)
 import Lens.Micro.Platform (modifying, preuse, use, (.=), (^.))
 import Types.Target (TargetSpec (..), renderTargetSpec)
-import UI.Types (Name (ActiveTasks), WorkerId, canDebugAttr, disabledAttr, sectionActiveTasksAttr, taskFailedAttr, taskNameAttr, taskRunningAttr, taskSucceededAttr, taskTimeAttr, taskPhaseAttr, opLogIndicatorAttr, taskResultAttr)
-import UI.Utils (drawSection, formatPico, popup, styledTarget)
 import qualified UI.OpLog as OpLog
+import UI.Types (
+  Name (ActiveTasks),
+  WorkerId,
+  canDebugAttr,
+  disabledAttr,
+  opLogIndicatorAttr,
+  sectionActiveTasksAttr,
+  taskFailedAttr,
+  taskNameAttr,
+  taskPhaseAttr,
+  taskResultAttr,
+  taskRunningAttr,
+  taskSucceededAttr,
+  taskTimeAttr,
+  )
+import UI.Utils (drawSection, formatPico, popup, styledTarget)
 
 type State = GenericList Name Seq.Seq Row
 
@@ -32,7 +46,7 @@ data Outcome
   | Failed String
 
 -- | A single phase's recorded stats for a task (see 'Task'\'s @_phases@ field): the order in which the phase
--- was first started, used to list phases chronologically in 'drawTaskStats', and its most recently reported
+-- was first started, used to list phases chronologically in 'drawTaskDetails', and its most recently reported
 -- duration (see 'Types.Instrument.PhaseEnd'). Zero until the corresponding 'phaseEnd' call arrives.
 data PhaseInfo = PhaseInfo
   { _phaseOrder :: Int
@@ -145,22 +159,27 @@ draw current now st =
   -- above it).
   drawResult r = padLeft (Pad 2) (vLimit 4 (withAttr opLogIndicatorAttr (txt OpLog.indicator) <+> withAttr taskResultAttr (strWrap r)))
 
+-- | The task's target name, outcome (if finished), and recorded phases (see 'Task'\'s @_phases@ field), in a
+-- single fixed-size popup (merging what used to be two separate popups bound to 'p'\/'Enter' -- they largely
+-- duplicated each other's purpose, and neither made sense without the other: the outcome view had no way to
+-- show timing, and the phase view had no way to show the failure\/result text). The target name is always
+-- shown first, unconditionally -- not just in the popup's border label -- so a metadata task with neither an
+-- outcome yet nor any recorded phases still shows something rather than an empty body.
 drawTaskDetails :: Task -> Widget Name
-drawTaskDetails Task{_taskTarget = name, ..} =
-  popup 70 (renderTargetSpec name) $
-    strWrap $ case _outcome of
-      Just (Failed content) -> content
-      Just (Succeeded (Just result)) -> "Result: " ++ result
-      _ -> ""
-
--- | Lists a task's recorded phases (see 'Task'\'s @_phases@ field), in the chronological order they were first
--- started, each with its most recently reported duration in milliseconds. A phase that is still running (or
--- whose 'phaseEnd' hasn't arrived yet) shows @0ms@, since 'PhaseInfo' has no separate "pending" state.
-drawTaskStats :: Task -> Widget Name
-drawTaskStats Task{_taskTarget = name, _phases} =
-  popup 50 (renderTargetSpec name ++ " phases") $
-    vBox (map drawPhase (sortOn (_phaseOrder . snd) (Map.toList _phases)))
+drawTaskDetails Task{_taskTarget = name, _phases, ..} =
+  popup 30 (renderTargetSpec name) $
+    vBox $
+      withAttr taskNameAttr (styledTarget (renderTargetSpec name))
+        : outcomeLines
+        ++ phaseLines
  where
+  outcomeLines = case _outcome of
+    Just (Failed content) -> [strWrap content]
+    Just (Succeeded (Just result)) -> [strWrap ("Result: " ++ result)]
+    _ -> []
+  phaseLines
+    | Map.null _phases = []
+    | otherwise = str " " : map drawPhase (sortOn (_phaseOrder . snd) (Map.toList _phases))
   drawPhase (phase, PhaseInfo{_phaseDurationMs}) =
     str phase <+> str (replicate 2 ' ') <+> withAttr taskTimeAttr (str (show _phaseDurationMs ++ "ms"))
 

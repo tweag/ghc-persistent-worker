@@ -290,23 +290,31 @@ draw current State{rows, built, failed, bco} =
   -- The bytecode-cache stats line for a module (formerly the old bytecode browser's row), indented as a child
   -- of its owning module row. The leading connector column continues the module row's tree line (a vertical
   -- bar) when the module isn't the last child of its unit, so a following sibling's own connector still reads
-  -- as attached to the same trunk instead of appearing interrupted by this extra line. The whole line uses
-  -- 'UI.Types.taskTimeAttr', the same subdued\/dim style the task view uses for a task's elapsed-duration
-  -- label. Non-resident (evicted) entries additionally use 'UI.Types.evictedAttr'; entries with a pending
-  -- eviction request additionally use 'UI.Types.pendingEvictionAttr' and are suffixed "(evicting)" (vs
-  -- "(evicted)" for non-pending evicted entries).
+  -- as attached to the same trunk instead of appearing interrupted by this extra line.
+  --
+  -- The whole line is wrapped in exactly one top-level 'withAttr' call, picking one of 'UI.Types.taskTimeAttr'
+  -- (normal), 'UI.Types.evictedAttr' (non-resident) or 'UI.Types.pendingEvictionAttr' (pending eviction
+  -- request, suffixed "(evicting)" vs "(evicted)" for non-pending evicted entries) -- rather than nesting
+  -- independent 'withAttr' calls for each condition, since 'withAttr' fully replaces the current attribute
+  -- name instead of composing with an enclosing one (see its haddock): nesting them meant the innermost
+  -- applied name (e.g. 'pendingEvictionAttr', which only sets an italic style) completely discarded
+  -- 'taskTimeAttr'\'s dim style rather than adding to it, reverting the line to the default (non-dim,
+  -- non-colored) attribute as soon as an eviction was requested. All three names are now self-contained
+  -- (registered with their own complete style in 'UI.appAttrMap') so picking exactly one is sufficient.
   bcoLine isLast BcoInfo{size, lastAccess, resident, pending} =
-    withAttr taskTimeAttr $
+    withAttr (bcoAttr resident pending) $
       str (if isLast then "      " else "  \9474   ")
-        <+> ( (if resident then id else withAttr evictedAttr) $
-                (if pending then withAttr pendingEvictionAttr else id) $
-                  str (formatBytes size ++ " BCOs")
-                    <+> str
-                      ( "  access #"
-                          ++ show lastAccess
-                          ++ if pending then "  (evicting)" else if resident then "" else "  (evicted)"
-                      )
-            )
+        <+> str (formatBytes size ++ " BCOs")
+        <+> str
+          ( "  access #"
+              ++ show lastAccess
+              ++ if pending then "  (evicting)" else if resident then "" else "  (evicted)"
+          )
+
+  bcoAttr resident pending
+    | pending = pendingEvictionAttr
+    | not resident = evictedAttr
+    | otherwise = taskTimeAttr
 
   -- The built/failed markers are a leading space plus a plain check mark\/ballot X ('UI.Types.builtMarker'\/
   -- 'UI.Types.failedMarker'), single-width characters in virtually every terminal font, so no explicit-width

@@ -181,7 +181,6 @@ drawUI State{..} =
       -- overlay only applies when a session is connected, so 'S' still has a visible effect in that case.
       ServeOptions -> maybe [] (const [drawServeOverlay _serveForm]) session
       TaskDetails -> let mrow = session >>= listSelectedElement . Session._activeTasks in maybe [] (pure . ActiveTasks.drawTaskDetails) (mrow >>= ActiveTasks.rowTask . snd)
-      TaskStats -> let mrow = session >>= listSelectedElement . Session._activeTasks in maybe [] (pure . ActiveTasks.drawTaskStats) (mrow >>= ActiveTasks.rowTask . snd)
       LogViewer -> maybe [] (pure . drawLogViewer . Session._logViewer) session
       _ -> []
   )
@@ -568,13 +567,8 @@ handleEvent (VtyEvent evt) = do
       case evt of
         V.EvKey V.KEsc [] -> hide
         V.EvKey V.KEnter [] -> hide
-        _ -> handleListEventOf (currentSession . Session.activeTasks) evt
-    TaskStats -> do
-      let hide = currentFocus .= ActiveTasks
-      case evt of
-        V.EvKey V.KEsc [] -> hide
         V.EvKey (V.KChar 'p') [] -> hide
-        _ -> handleListEventOf (currentSession . Session.activeTasks) evt
+        _ -> pure ()
     LogViewer -> do
       let hide = currentFocus .= TaskTree
       case evt of
@@ -649,7 +643,7 @@ handleEvent (VtyEvent evt) = do
           Nothing -> beep
           Just (unitId, modName) -> handleEvent (AppEvent (RequestEvict unitId modName))
       V.EvKey (V.KChar 'p') [] | current == ActiveTasks -> do
-        withTarget \_ _ -> currentFocus .= TaskStats
+        withTarget \_ _ -> currentFocus .= TaskDetails
       V.EvKey (V.KChar '\t') [] -> do
         let next = case current of
               ActiveTasks -> TaskTree
@@ -688,8 +682,16 @@ app =
               (listSelectedFocusedAttr, V.defAttr `V.withBackColor` black)
             , (disabledAttr, V.withStyle V.defAttr V.dim)
             , (canDebugAttr, V.withStyle V.defAttr V.bold)
-            , (evictedAttr, V.withStyle (V.defAttr `V.withForeColor` brightBlack) V.dim)
-            , (pendingEvictionAttr, V.withStyle V.defAttr V.italic)
+            , -- No explicit foreground color (unlike an earlier version that set 'brightBlack', identical to
+              -- 'listSelectedAttr'\'s background): that made an evicted row's text invisible whenever it was
+              -- also the selected row. Distinguished from a normal (resident) bytecode-stats line by style only
+              -- (dim, matching 'taskTimeAttr', plus italic) -- both self-contained, since 'UI.TaskTree.bcoLine'
+              -- now applies exactly one top-level attribute name per row rather than nesting independent ones.
+              (evictedAttr, V.withStyle (V.withStyle V.defAttr V.dim) V.italic)
+            , -- Dim (matching 'taskTimeAttr') in addition to italic, now that this is applied as a standalone
+              -- top-level attribute (see 'UI.TaskTree.bcoLine') rather than nested inside a 'taskTimeAttr'
+              -- context it used to (incorrectly) rely on inheriting the dim style from.
+              (pendingEvictionAttr, V.withStyle (V.withStyle V.defAttr V.dim) V.italic)
             , (taskRunningAttr, V.defAttr `V.withForeColor` yellow)
             , (taskPhaseAttr, V.withStyle (V.defAttr `V.withForeColor` yellow) V.italic)
             , (taskSucceededAttr, V.defAttr `V.withForeColor` green)

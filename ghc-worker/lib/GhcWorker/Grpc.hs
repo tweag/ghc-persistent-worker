@@ -121,10 +121,14 @@ pushBytecodeState stateVar chan = do
   writeChan chan (BytecodeSnapshot (bytecodeEntries state))
 
 -- | Request eviction of a module (or, if 'moduleName' is empty, an entire unit; or, if 'unitId' is the sentinel
--- @"*"@, every unit in the project) from the lazily-loaded bytecode cache. Deferred until the next compile
--- job's session is stored, since eviction requires a live 'HscEnv'/'Interp' (see 'Types.State.Make.pendingEvictions').
-evictBytecode :: MVar WorkerState -> EvictRequest -> IO ()
-evictBytecode stateVar req =
+-- @"*"@, every unit in the project) from the lazily-loaded bytecode cache. The actual unload is deferred until
+-- the next compile job's session is stored (see 'Internal.State.withState'), but a 'BytecodeSnapshot' is pushed
+-- immediately here so the UI's pending marker ("(evicting)") shows up right away, rather than only whenever a
+-- later compile happens to run -- without this, a manually triggered eviction with no subsequent compile job
+-- would leave the UI stuck showing "(evicting)" forever, since only a compile/metadata/execute task's
+-- session-store step otherwise triggers a push (see 'GhcWorker.Instrumentation'/'GhcServer.Build.Propagate').
+evictBytecode :: MVar WorkerState -> Chan Event -> EvictRequest -> IO ()
+evictBytecode stateVar chan req = do
   modifyMVar_ stateVar \state -> do
     let
       matches m =
@@ -132,18 +136,20 @@ evictBytecode stateVar req =
         && (null req.moduleName || moduleNameString (GHC.moduleName m) == req.moduleName)
       targets = Set.filter matches (Map.keysSet state.make.bcoCache)
     pure state {make = state.make {pendingEvictions = state.make.pendingEvictions <> targets}}
+  pushBytecodeState stateVar chan
 
 -- | Dispatch a single decoded 'Instrument.Command' to the appropriate handler, producing the 'Instrument.Response'
 -- to be JSON-encoded back into the @Send@ RPC's 'Instr.CommandResponse'.
 runCommand ::
+  Chan Event ->
   MVar WorkerState ->
   (CommandEnv -> RequestArgs -> IO ()) ->
   Instrument.Command ->
   IO Instrument.Response
-runCommand stateVar recompile = \case
+runCommand chan stateVar recompile = \case
   Instrument.SetOptions opts -> setOptions stateVar opts $> Instrument.Ack
   Instrument.TriggerTask trigger -> triggerTask stateVar recompile trigger $> Instrument.Ack
-  Instrument.EvictBytecode req -> evictBytecode stateVar req $> Instrument.Ack
+  Instrument.EvictBytecode req -> evictBytecode stateVar chan req $> Instrument.Ack
 
 -- | Implementation of the unified @Send@ RPC: decodes the JSON 'Instr.Command' payload, runs it via the supplied
 -- dispatcher, and JSON-encodes the resulting 'Instrument.Response' back into an 'Instr.CommandResponse'. Exported
@@ -170,5 +176,5 @@ instrumentMethods ::
 instrumentMethods chan stateVar recompile =
   simpleMethods
     (mkServerStreaming (const (notifyMe stateVar chan)))
-    (mkNonStreaming (handleCommand (runCommand stateVar recompile)))
+    (mkNonStreaming (handleCommand (runCommand chan stateVar recompile)))
 

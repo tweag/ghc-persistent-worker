@@ -151,7 +151,7 @@ runCommand ::
 runCommand chan build project stateVar = \case
   Instrument.SetOptions opts -> Worker.setOptions stateVar opts $> Instrument.Ack
   Instrument.TriggerTask trigger -> triggerTask chan build project trigger $> Instrument.Ack
-  Instrument.EvictBytecode req -> Worker.evictBytecode stateVar req $> Instrument.Ack
+  Instrument.EvictBytecode req -> Worker.evictBytecode stateVar chan req $> Instrument.Ack
 
 -- | A grapesy server that streams instrumentation data and dispatches every other 'Instrument' operation through
 -- the unified @Send@ RPC, backed by 'ghc-server'\'s persistent 'WorkerState' and scheduler.
