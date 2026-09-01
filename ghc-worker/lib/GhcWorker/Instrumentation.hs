@@ -9,7 +9,7 @@ import Data.Int (Int32)
 import GhcWorker.Grpc (mkStats)
 import Internal.Log (dbg)
 import Prelude hiding (log)
-import Types.Api (Event (..), RequestId, Target, targetFromWorkerSpec)
+import Types.Api (Event (..), Events (..), RequestId, Target, eventsForRequest, eventsNoop, targetFromWorkerSpec)
 import Types.BuckArgs (BuckArgs (..))
 import Types.State (WorkerState)
 import Types.Target (TargetSpec)
@@ -38,7 +38,10 @@ data Hooks =
 
     -- | A module compilation has finished.
     -- If the job was successful, the argument contains 'Just' the stderr lines and the exit code, otherwise 'Nothing'.
-    compileFinish :: Maybe (Maybe TargetSpec, [String], Int32) -> IO ()
+    compileFinish :: Maybe (Maybe TargetSpec, [String], Int32) -> IO (),
+
+    -- | Hook for publishing instrumentation events.
+    events :: Events
   }
 
 -- | Dummy implementation of 'Hooks'.
@@ -46,7 +49,8 @@ hooksNoop :: Hooks
 hooksNoop =
   Hooks {
     compileStart = const (const (pure ())),
-    compileFinish = const (pure ())
+    compileFinish = const (pure ()),
+    events = eventsNoop
   }
 
 -- | A request handler that is aware of instrumentation.
@@ -111,7 +115,8 @@ withInstrumentation instrChan status stateVar handler =
       requestId <- startRequest status
       let hooks = Hooks {
             compileStart = compileStart requestId,
-            compileFinish = compileFinish requestId
+            compileFinish = compileFinish requestId,
+            events = eventsForRequest requestId (writeChan instrChan)
           }
       result <- (handler.create hooks).run commandEnv argv
       stats <- mkStats state
