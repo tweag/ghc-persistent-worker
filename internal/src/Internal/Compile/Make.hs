@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns, CPP, OverloadedStrings, PatternSynonyms #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Internal.Compile.Make where
 
@@ -32,11 +32,13 @@ import GHC.Utils.Outputable (ppr, showPprUnsafe, text, (<+>))
 import GHC.Utils.Panic (throwGhcExceptionIO)
 import GHC.Utils.TmpFs (TmpFs, cleanCurrentModuleTempFiles, keepCurrentModuleTempFiles)
 import Internal.Compat.GHC914 (hscModuleGraph)
+import Internal.Compile.Phase (withPhaseEvents)
 import Internal.Debug (pprModuleFull)
 import Internal.DynFlags (mkTargetAsInterpreted)
 import Internal.Error (eitherMessages, noteGhc)
 import Internal.Log (logTimedD)
 import System.OsPath.Extra (fromOsPath)
+import Types.Api (Events)
 import Types.Log (Logger (..))
 import Types.Target (ModuleTarget (..), Target (..), TargetSpec (..))
 
@@ -128,9 +130,10 @@ ensureSummary logger hsc_env = \case
 -- - Store the resulting @HomeModInfo@ in the current unit's home package table.
 compileModuleWithDepsInHpt ::
   Logger ->
+  Events ->
   TargetSpec ->
   Ghc (Maybe ModIface)
-compileModuleWithDepsInHpt logger target =
+compileModuleWithDepsInHpt logger events target =
   logTimedD logger "Compiling" do
     initializeSessionPlugins
     hsc_env <- getSession
@@ -139,7 +142,7 @@ compileModuleWithDepsInHpt logger target =
       let hsc_env'
             | TargetModuleInterp _ <- target = mkTargetAsInterpreted (ms_mod summary) hsc_env
             | otherwise = hsc_env
-      result <- compileOne hsc_env' (forceRecomp summary) 1 100000 Nothing (HomeModLinkable Nothing Nothing)
+      result <- compileOne (withPhaseEvents events target hsc_env') (forceRecomp summary) 1 100000 Nothing (HomeModLinkable Nothing Nothing)
       cleanCurrentModuleTempFilesMaybe (hsc_logger hsc_env') (hsc_tmpfs hsc_env') summary.ms_hspp_opts
       pure result
     liftIO $ hscInsertHPT hmi hsc_env

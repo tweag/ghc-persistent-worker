@@ -38,6 +38,7 @@ import Test.Data.TestLog (DiagnosticEntry (..), TestLog (..))
 import Test.Log (withTestLog)
 import Test.Path (compileTmpDir, extDepName, moduleName, moduleSourcePath, unitName, unitOutputDir, unitTmpDir)
 import Test.Scheduler (initScheduler, runScheduler)
+import Types.Api (eventsNoop)
 import qualified Types.Args as Args
 import Types.Args (Args (..))
 import Types.BuckArgs (IsInterpreted (Compiled))
@@ -98,7 +99,7 @@ runCompile env mkArgs key = do
         target = compileTarget key
     result <- withGhcMakeModule Compiled target compileEnv \ _targetSpec -> do
       modifyGlobalFlags \ d -> d {ghcMode = CompManager}
-      compileModuleWithDepsInHpt compileEnv.log (TargetModule target)
+      compileModuleWithDepsInHpt compileEnv.log eventsNoop (TargetModule target)
     pure (isJust result)
   where
     (args, codes) = mkArgs key

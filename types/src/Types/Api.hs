@@ -158,5 +158,34 @@ data Event =
     cpuNs :: Int,
     gcCpuNs :: Int
   }
+  |
+  PhaseStart {
+    target :: Target,
+    phase :: String,
+    requestId :: RequestId
+  }
+  |
+  PhaseEnd {
+    target :: Target,
+    durationMs :: Word,
+    requestId :: RequestId
+  }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary)
+
+data Events =
+  Events {
+    publish :: (RequestId -> Event) -> IO ()
+  }
+
+eventsNoop :: Events
+eventsNoop =
+  Events {
+    publish = \ _ -> pure ()
+  }
+
+eventsForRequest :: RequestId -> (Event -> IO ()) -> Events
+eventsForRequest requestId publish =
+  Events {
+    publish = \ event -> publish (event requestId)
+  }

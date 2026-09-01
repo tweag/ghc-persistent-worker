@@ -83,6 +83,7 @@ library
                       Internal.Compat.ModuleGraph.Reachability
                       Internal.Compat.UnitIndex
                       Internal.Compile.Make
+                      Internal.Compile.Phase
                       Internal.Debug
                       Internal.DynFlags
                       Internal.DynFlags.Options
