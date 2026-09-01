@@ -123,18 +123,16 @@ handleEvent :: Event -> EventM Name State ()
 handleEvent (InstrEvent wid evt) =
   case evt of
     Instr.CompileStart {..} -> do
-      zoom activeTasks $ ActiveTasks.addTask (TargetUnknown target) wid canDebug
+      zoom activeTasks $ ActiveTasks.addTask (TargetUnknown target) wid canDebug requestId
     Instr.CompileEnd {..} -> do
       let content = stripEscSeqs stderr
           rawTarget = if target == "" then takeWhile (/= ':') content else target
-          target' = TargetUnknown rawTarget
-      if exitCode == 0
-        then do
-          zoom activeTasks $ ActiveTasks.completeTask target' (ActiveTasks.Succeeded result)
-          zoom taskTree $ TaskTree.handleEvent $ TaskTree.MarkBuilt (Text.pack rawTarget)
-        else do
-          zoom activeTasks $ ActiveTasks.completeTask target' (ActiveTasks.Failed content)
-          zoom taskTree $ TaskTree.handleEvent $ TaskTree.MarkFailed (Text.pack rawTarget)
+          (outcome, event) =
+            if exitCode == 0
+            then (ActiveTasks.Succeeded result, TaskTree.MarkBuilt)
+            else (ActiveTasks.Failed content, TaskTree.MarkFailed)
+      zoom activeTasks $ ActiveTasks.completeTask requestId outcome
+      zoom taskTree $ TaskTree.handleEvent $ event (Text.pack rawTarget)
     Instr.Stats {..} -> do
         modifying (workers . each . filtered (\w -> w._workerId == wid) . stats) \st ->
           st
@@ -150,8 +148,8 @@ handleEvent (InstrEvent wid evt) =
             | u <- units
             ]
     Instr.Halt -> pure ()
-    Instr.PhaseStart {target, phase} -> zoom activeTasks $ ActiveTasks.phaseStart (TargetUnknown target) phase
-    Instr.PhaseEnd {target, durationMs} -> zoom activeTasks $ ActiveTasks.phaseEnd (TargetUnknown target) durationMs
+    Instr.PhaseStart {phase, requestId} -> zoom activeTasks $ ActiveTasks.phaseStart requestId phase
+    Instr.PhaseEnd {durationMs, requestId} -> zoom activeTasks $ ActiveTasks.phaseEnd requestId durationMs
     Instr.RequestCompleted {..} ->
       zoom activeTasks $ ActiveTasks.addSeparator statusMessage
     Instr.LogMessage {..} ->

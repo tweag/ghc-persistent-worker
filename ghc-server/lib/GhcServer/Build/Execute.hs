@@ -55,8 +55,8 @@ data ExecOutcome =
 -- and a runtime failure via 'ExecRan False') from the deliberate no-@main@ skip ('ExecNoMain'). Only the
 -- failure modes are reported as a failed task ('TaskFailed'); 'ExecNoMain' is reported as 'Nothing' so the
 -- caller ('GhcServer.Build.Propagate.dispatchTask') can distinguish "skip" from "ran/failed".
-executeModuleTask :: BuildEnv -> BuildExt -> UnitName -> ModuleName -> IO (Maybe (TaskResult String))
-executeModuleTask buildEnv ext name modName =
+executeModuleTask :: BuildEnv -> BuildExt -> UnitName -> ModuleName -> Int -> IO (Maybe (TaskResult String))
+executeModuleTask buildEnv ext name modName requestId =
   case Map.lookup name buildEnv.project.units of
     Nothing -> pure (Just (TaskFailed ("Unit not found in project: " ++ name.string)))
     Just unit -> do
@@ -75,7 +75,7 @@ executeModuleTask buildEnv ext name modName =
           target = moduleTarget name modName
         outcome <- runGhcCatchingExceptions do
           withGhcMakeModule Interpreted target env \ targetSpec -> do
-            _ <- compileModuleWithDepsInHpt logger (emitEvent buildEnv.instrChan) targetSpec
+            _ <- compileModuleWithDepsInHpt logger (emitEvent buildEnv.instrChan) requestId targetSpec
             Just <$> executeMain env (fromOsPath <$> args.homeUnit) target
         captured <- logger.flush
         logger.debug ("executeModuleTask: " ++ name.string ++ ":" ++ modBaseName ++ " outcome=" ++ show (outcomeLabel outcome))

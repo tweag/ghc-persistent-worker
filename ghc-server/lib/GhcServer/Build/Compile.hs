@@ -36,8 +36,9 @@ compileSingleModule ::
   UnitName ->
   ModuleName ->
   CachedDeps ->
+  Int ->
   IO ([(UnitName, ModuleName, String)], [String])
-compileSingleModule buildEnv name modName cachedDeps =
+compileSingleModule buildEnv name modName cachedDeps requestId =
   case Map.lookup name buildEnv.project.units of
     Nothing -> pure ([(name, modName, "Unit not found in project")], [])
     Just unit -> do
@@ -55,7 +56,7 @@ compileSingleModule buildEnv name modName cachedDeps =
           env = Env {log = logger, state = buildEnv.stateVar, args}
           target = moduleTarget name modName
         result <- withGhcMakeModule Compiled target env \ _targetSpec ->
-          compileModuleWithDepsInHpt logger (emitEvent buildEnv.instrChan) (TargetModule target)
+          compileModuleWithDepsInHpt logger (emitEvent buildEnv.instrChan) requestId (TargetModule target)
         captured <- logger.flush
         case result of
           Just _ -> pure ([], captured)

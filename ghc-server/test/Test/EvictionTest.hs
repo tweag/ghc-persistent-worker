@@ -145,17 +145,17 @@ test_bcoEvictionManual =
     -- This differs from 'GhcServer.Build.Compile.compileSingleModule' (used below for the main module), which
     -- targets a plain 'Types.Target.TargetModule' and keeps the object-code backend, preserving Core in the
     -- interface. The helper has no @main@, so this is expected to report 'Nothing' (a deliberate no-op skip).
-    helperExecResult <- liftIO (executeModuleTask buildEnv emptyBuildExt unit0 helperModuleName)
+    helperExecResult <- liftIO (executeModuleTask buildEnv emptyBuildExt unit0 helperModuleName 0)
     annotate ("helper execute result: " ++ show helperExecResult)
     case helperExecResult of
       Nothing -> pure ()
       other -> fail ("Expected Nothing (no main), got " ++ show other)
 
-    (compileErrors, _) <- liftIO (compileSingleModule buildEnv unit0 fatModuleName (CachedDeps []))
+    (compileErrors, _) <- liftIO (compileSingleModule buildEnv unit0 fatModuleName (CachedDeps []) 0)
     annotate ("compile errors: " ++ show compileErrors)
     assert (null compileErrors)
 
-    execResult <- liftIO (executeModuleTask buildEnv emptyBuildExt unit0 fatModuleName)
+    execResult <- liftIO (executeModuleTask buildEnv emptyBuildExt unit0 fatModuleName 0)
     annotate ("execute result: " ++ show execResult)
     case execResult of
       Just (TaskSuccess _) -> pure ()
@@ -191,4 +191,4 @@ test_bcoEvictionManual =
     assert (Map.notMember targetModule afterState.make.bcoCache)
     assert (Map.notMember helperModule afterState.make.bcoCache)
 
-    assertJust (TaskSuccess (Just "2")) =<< liftIO (executeModuleTask buildEnv emptyBuildExt unit0 fatModuleName)
+    assertJust (TaskSuccess (Just "2")) =<< liftIO (executeModuleTask buildEnv emptyBuildExt unit0 fatModuleName 0)

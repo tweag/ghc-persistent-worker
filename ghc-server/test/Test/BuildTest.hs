@@ -115,6 +115,7 @@ newBuildEnv tp stateVar = do
   events <- newBuildEvents
   extDepsDb <- newMVar Nothing
   diffVar <- newMVar Map.empty
+  requestIdCounter <- newIORef 0
   pure (BuildEnv {
     baseArgs = emptyArgs Map.empty,
     projectRoot = tp.rootOs,
@@ -126,7 +127,8 @@ newBuildEnv tp stateVar = do
     events,
     instrChan = Nothing,
     extDepsDb,
-    diff = diffVar
+    diff = diffVar,
+    requestIdCounter
   }, events)
 
 -- ---------------------------------------------------------------------------
@@ -1569,7 +1571,7 @@ test_executeAfterCompile =
     stateVar <- liftIO newBuildState
     (buildEnv, _) <- liftIO (newBuildEnv tp stateVar)
     let name = UnitName "unit0"
-    mresult <- liftIO (executeModuleTask buildEnv emptyBuildExt name (mkModuleName "Main"))
+    mresult <- liftIO (executeModuleTask buildEnv emptyBuildExt name (mkModuleName "Main") 0)
     annotate ("executeModuleTask result: " ++ show mresult)
     case mresult of
       Just (TaskSuccess Nothing) -> pure ()
@@ -1605,7 +1607,7 @@ test_executeStringMain =
     stateVar <- liftIO newBuildState
     (buildEnv, _) <- liftIO (newBuildEnv tp stateVar)
     let name = UnitName "unit0"
-    mresult <- liftIO (executeModuleTask buildEnv emptyBuildExt name (mkModuleName "Main"))
+    mresult <- liftIO (executeModuleTask buildEnv emptyBuildExt name (mkModuleName "Main") 0)
     annotate ("executeModuleTask result: " ++ show mresult)
     case mresult of
       Just (TaskSuccess (Just "hello from IO String main")) -> pure ()
@@ -1630,7 +1632,7 @@ test_executeNonexistentModuleFails =
     stateVar <- liftIO newBuildState
     (buildEnv, _) <- liftIO (newBuildEnv tp stateVar)
     let name = UnitName "unit0"
-    mresult <- liftIO (executeModuleTask buildEnv emptyBuildExt name (mkModuleName "DoesNotExist"))
+    mresult <- liftIO (executeModuleTask buildEnv emptyBuildExt name (mkModuleName "DoesNotExist") 0)
     annotate ("executeModuleTask result: " ++ show mresult)
     case mresult of
       Just (TaskFailed _) -> pure ()

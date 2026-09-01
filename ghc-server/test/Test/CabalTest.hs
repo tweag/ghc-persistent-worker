@@ -2,6 +2,7 @@
 module Test.CabalTest where
 
 import Control.Concurrent.MVar (newMVar)
+import Data.IORef (newIORef)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromJust)
@@ -70,6 +71,7 @@ runCabalFresh tp steps = timedBuild do
   events <- newBuildEvents
   extDepsDb <- newMVar Nothing
   diffMVar <- newMVar Map.empty
+  requestIdCounter <- newIORef 0
   let env = BuildEnv {
         baseArgs = emptyArgs Map.empty,
         projectRoot = tp.rootOs,
@@ -81,7 +83,8 @@ runCabalFresh tp steps = timedBuild do
         events,
         instrChan = Nothing,
         extDepsDb,
-        diff = diffMVar
+        diff = diffMVar,
+        requestIdCounter
       }
   result <- runBuild 4 testTaskTimeout env ScheduleRequest {steps, recompile = False, rebuild = False}
   evs <- readEvents events

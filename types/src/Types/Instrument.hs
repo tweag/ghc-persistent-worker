@@ -74,8 +74,8 @@ data Response
   deriving anyclass (FromJSON, ToJSON)
 
 data Event
-  = CompileStart { target :: String, canDebug :: Bool }
-  | CompileEnd { target :: String, exitCode :: Int, stderr :: String, result :: Maybe String }
+  = CompileStart { target :: String, canDebug :: Bool, requestId :: Int }
+  | CompileEnd { target :: String, exitCode :: Int, stderr :: String, result :: Maybe String, requestId :: Int }
   | Stats { memory :: Map String Int, cpuNs :: Int, gcCpuNs :: Int }
   -- | The project's units and modules, sent once when a client connects to the Instrument service. Populates the
   -- @instrument@ app's task tree view immediately, ahead of any build activity.
@@ -92,8 +92,8 @@ data Event
   -- | A single pipeline phase (@Hsc@\/@HscPostTc@\/@HscBackend@) firing for a target's compilation, emitted via
   -- GHC's @runPhaseHook@ (see @Internal.Compile.Make.withPhaseEvents@). Named @PhaseEvent@ rather than @Phase@ to
   -- avoid clashing with @GhcServer.Scheduler@'s unrelated @Phase@ type when both are imported unqualified.
-  | PhaseStart { target :: String, phase :: String }
-  | PhaseEnd { target :: String, durationMs :: Word }
+  | PhaseStart { target :: String, phase :: String, requestId :: Int }
+  | PhaseEnd { target :: String, durationMs :: Word, requestId :: Int }
   -- | Sent once the scheduler's queue has fully drained -- i.e. every in-flight UI-triggered build request (see
   -- @GhcServer.Grpc.triggerTask@) has completed, not just the one that happened to trigger this event. A single
   -- request fanned out into several concurrent scheduler batches (e.g. a project-wide build across multiple

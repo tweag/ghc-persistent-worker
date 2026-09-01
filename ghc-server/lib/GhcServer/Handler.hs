@@ -4,6 +4,7 @@ module GhcServer.Handler where
 import Common.Grpc (GrpcHandler (..))
 import Control.Concurrent.Chan (newChan)
 import Control.Concurrent.MVar (modifyMVar_, newMVar, readMVar)
+import Data.IORef (newIORef)
 import Control.Concurrent.STM (atomically, modifyTVar')
 import Control.Exception (SomeException (..), displayException, fromException, try)
 import Control.Monad (filterM, when)
@@ -238,6 +239,7 @@ serverContext config = do
   instrChan <- if config.features.instrument then Just <$> newChan else pure Nothing
   extDepsDb <- newMVar Nothing
   diff <- newMVar Map.empty
+  requestIdCounter <- newIORef 0
   let
     env = BuildEnv {
       baseArgs = (emptyArgs Map.empty) {Args.features = config.features},
@@ -250,7 +252,8 @@ serverContext config = do
       events,
       instrChan,
       extDepsDb,
-      diff
+      diff,
+      requestIdCounter
     }
   -- Tracing is tied to the instrument feature flag rather than a dedicated CLI flag: 'instrChan' is 'Just'
   -- exactly when there's an instrument UI to exfiltrate the scheduler's decision log to, and that's also

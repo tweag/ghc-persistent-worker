@@ -123,7 +123,7 @@ dispatch hooks env args =
       Nothing ->
         withGhcMakeSource env (withTarget compileHpt . TargetSource)
 
-    compileHpt = compileAndReadAbiHash CompManager (compileModuleWithDepsInHpt env.log hooks.emitEvent) hooks args
+    compileHpt = compileAndReadAbiHash CompManager (compileModuleWithDepsInHpt env.log hooks.emitEvent hooks.requestId) hooks args
 
     eval mname modTarget stmt imports = do
       case mname of

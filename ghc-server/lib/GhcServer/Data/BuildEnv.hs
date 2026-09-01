@@ -3,6 +3,7 @@ module GhcServer.Data.BuildEnv where
 
 import Control.Concurrent.Chan (Chan)
 import Control.Concurrent.MVar (MVar)
+import Data.IORef (IORef)
 import Data.Map.Strict (Map)
 import GhcServer.Build.Diff (UnitDiff)
 import GhcServer.Data.BuildEvent (BuildEvents)
@@ -33,5 +34,10 @@ data BuildEnv =
     extDepsDb :: MVar (Maybe (Either String FilePath)),
     -- | Per-unit incremental analysis results (Phase 0 source diff + old module graph), written at
     -- classification time and consumed on metadata completion and at digest-commit time.
-    diff :: MVar (Map UnitName UnitDiff)
+    diff :: MVar (Map UnitName UnitDiff),
+    -- | Monotonic counter allocating a unique 'Types.Instrument.Event' request id for each task-dispatch
+    -- instance (see 'GhcServer.Build.Propagate.nextRequestId'), included in the 'CompileStart'\/'CompileEnd'\/
+    -- 'PhaseStart'\/'PhaseEnd' events a task emits, so the @instrument@ UI can match events to the exact task
+    -- instance instead of matching by target text.
+    requestIdCounter :: IORef Int
   }

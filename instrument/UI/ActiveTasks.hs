@@ -5,10 +5,10 @@ import Brick.Main (lookupViewport, setTop, viewportScroll)
 import Brick.Types (EventM, Widget, vpTop)
 import Brick.Widgets.Core (Padding (..), padLeft, str, strWrap, vBox, vLimit, withAttr, (<+>), txt)
 import Brick.Widgets.List (GenericList, list, listElementsL, listSelectedElementL, listSelectedL, renderList)
-import Control.Monad.IO.Class (liftIO)
+import Control.Monad.IO.Class (liftIO, MonadIO)
 import Data.List (sortOn)
-import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Map.Strict (Map)
 import Data.Maybe (fromMaybe)
 import Data.Sequence qualified as Seq
 import Data.Sequence (Seq)
@@ -48,6 +48,33 @@ data Task = Task
   , _canDebug :: Bool
   , _phase :: Maybe String
   , _phases :: Map String PhaseInfo
+  -- | The id allocated by the @instrument@ UI for the request that spawned this task (see
+  -- 'UI.allocRequestId'), echoed back by the server in every 'Types.Instrument.Event' belonging to it.
+  -- Identifies this row unambiguously, so 'completeTask'\/'phaseStart'\/'phaseEnd' can match the exact task
+  -- instance instead of matching by target text, which collides when the same target is dispatched more than
+  -- once (e.g. as both a direct request and a transitive dependency of another request).
+  , _taskRequestId :: Int
+  }
+
+newTask ::
+  MonadIO m =>
+  TargetSpec ->
+  WorkerId ->
+  Bool ->
+  Int ->
+  m Task
+newTask _taskTarget _fromWorker _canDebug _taskRequestId = do
+  _taskStartTime <- liftIO getCurrentTime
+  pure Task {
+    _taskTarget,
+    _taskStartTime,
+    _taskEndTime = Nothing,
+    _outcome = Nothing,
+    _fromWorker,
+    _canDebug,
+    _phase = Nothing,
+    _phases = [],
+    _taskRequestId
   }
 
 -- | A row in the displayed list: either a task, or a separator marking the boundary of a completed build
@@ -158,12 +185,12 @@ insertRow i row rows = do
     else
       modifying listSelectedL (Just . maybe i (\i' -> if i' >= i then i' + 1 else i'))
 
-addTask :: TargetSpec -> WorkerId -> Bool -> EventM Name State ()
-addTask name wid canDebug = do
-  time <- liftIO getCurrentTime
+addTask :: TargetSpec -> WorkerId -> Bool -> Int -> EventM Name State ()
+addTask name wid canDebug requestId = do
+  task <- liftIO $ newTask name wid canDebug requestId
   rows <- use listElementsL
   let i = if canDebug then 0 else fromMaybe 0 (Seq.findIndexL (not . isCanDebugRow) rows)
-  insertRow i (TaskRow (Task name time Nothing Nothing wid canDebug Nothing Map.empty)) rows
+  insertRow i (TaskRow task) rows
  where
   isCanDebugRow (TaskRow t) = _canDebug t
   isCanDebugRow (Separator _) = False
@@ -175,15 +202,15 @@ addSeparator msg = do
   rows <- use listElementsL
   insertRow 0 (Separator msg) rows
 
--- | Mark all tasks matching the given target as finished with the given outcome, keeping them in the list
--- indefinitely instead of removing them. Updates every match rather than just the first, since duplicate
--- entries for the same target can occur (e.g. retries), and picking only the first risks completing an
--- already-finished row instead of the one the outcome actually belongs to.
-completeTask :: TargetSpec -> Outcome -> EventM Name State ()
-completeTask target outcome = do
+-- | Mark the task with the given request id as finished with the given outcome, keeping it in the list
+-- indefinitely instead of removing it. Matches by request id rather than by target text: distinct 'TriggerBuild'\
+-- /'TriggerExecute' dispatches for the same target (e.g. a direct request and a transitive dependency of
+-- another request) each get their own row, and matching by target alone risked completing the wrong one.
+completeTask :: Int -> Outcome -> EventM Name State ()
+completeTask requestId outcome = do
   time <- liftIO getCurrentTime
   let complete row = case row of
-        TaskRow t | _taskTarget t == target -> TaskRow t{_outcome = Just outcome, _taskEndTime = Just time}
+        TaskRow t | _taskRequestId t == requestId -> TaskRow t{_outcome = Just outcome, _taskEndTime = Just time}
         _ -> row
   modifying listElementsL (fmap complete)
 
@@ -195,10 +222,10 @@ getSelectedTarget = do
 -- | Records the start of a phase on the matching task: sets it as the task's current phase, and, if it hasn't
 -- been seen before, adds it to '_phases' with a fresh order (the number of phases already recorded) and a zero
 -- duration, to be filled in once the matching 'phaseEnd' arrives.
-phaseStart :: TargetSpec -> String -> EventM Name State ()
-phaseStart target phase =
+phaseStart :: Int -> String -> EventM Name State ()
+phaseStart requestId phase =
   modifying listElementsL $ fmap \case
-    TaskRow t | _taskTarget t == target ->
+    TaskRow t | _taskRequestId t == requestId ->
       TaskRow
         t
           { _phase = Just phase
@@ -208,10 +235,10 @@ phaseStart target phase =
 
 -- | Records the duration of the task's current phase (see 'phaseStart'), identified via '_phase' since
 -- 'Types.Instrument.PhaseEnd' doesn't itself carry a phase name.
-phaseEnd :: TargetSpec -> Word -> EventM Name State ()
-phaseEnd target duration =
+phaseEnd :: Int -> Word -> EventM Name State ()
+phaseEnd requestId duration =
   modifying listElementsL $ fmap \case
-    TaskRow t | _taskTarget t == target ->
+    TaskRow t | _taskRequestId t == requestId ->
       case _phase t of
         Just phase -> TaskRow t {_phases = Map.adjust (\info -> info {_phaseDurationMs = duration}) phase (_phases t)}
         Nothing -> TaskRow t

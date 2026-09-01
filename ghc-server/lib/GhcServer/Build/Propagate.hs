@@ -11,6 +11,7 @@ module GhcServer.Build.Propagate where
 
 import Control.Concurrent.MVar (readMVar)
 import Data.Foldable (for_)
+import Data.IORef (atomicModifyIORef')
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
@@ -60,15 +61,23 @@ emitEvent env = Log.emitEvent env.instrChan
 emitBytecodeState :: BuildEnv -> IO ()
 emitBytecodeState env = for_ env.instrChan (pushBytecodeState env.stateVar)
 
+-- | Allocate a fresh, server-lifetime-unique request id for a task-dispatch instance (see 'dispatchTask'),
+-- included in the 'CompileStart'\/'CompileEnd'\/'PhaseStart'\/'PhaseEnd' events that instance emits, so the
+-- @instrument@ UI can match events to the exact task instance instead of matching by target text (which
+-- collides when the same target is dispatched more than once, e.g. as both a direct request and a transitive
+-- dependency of another request).
+nextRequestId :: BuildEnv -> IO Int
+nextRequestId env = atomicModifyIORef' env.requestIdCounter \ n -> (n + 1, n)
+
 -- | Send a 'CompileStart' event for a metadata or compile task about to run.
-emitTaskStart :: BuildEnv -> String -> IO ()
-emitTaskStart env target = emitEvent env CompileStart {target, canDebug = False}
+emitTaskStart :: BuildEnv -> Int -> String -> IO ()
+emitTaskStart env requestId target = emitEvent env CompileStart {target, canDebug = False, requestId}
 
 -- | Send a 'CompileEnd' event for a metadata or compile task that just finished, deriving the exit code,
 -- stderr content, and any exfiltrated result payload from the task's 'TaskResult' (see
 -- 'GhcServer.Build.Execute.executeModuleTask' for the only task kind that ever produces a payload).
-emitTaskEnd :: BuildEnv -> String -> TaskResult String -> IO ()
-emitTaskEnd env target result = do
+emitTaskEnd :: BuildEnv -> Int -> String -> TaskResult String -> IO ()
+emitTaskEnd env requestId target result = do
   emitEvent env CompileEnd {
     target,
     exitCode = case result of
@@ -79,17 +88,18 @@ emitTaskEnd env target result = do
       TaskFailed msg -> msg,
     result = case result of
       TaskSuccess mResultStr -> Text.unpack <$> mResultStr
-      TaskFailed _ -> Nothing
+      TaskFailed _ -> Nothing,
+    requestId
   }
   emitBytecodeState env
 
 -- | Run an instrumented task: emits 'CompileStart' before and 'CompileEnd' after, deriving the target's
 -- display text from the given unit\/module description.
-withTaskEvents :: BuildEnv -> String -> IO (TaskResult String) -> IO (TaskResult String)
-withTaskEvents env target action = do
-  emitTaskStart env target
+withTaskEvents :: BuildEnv -> Int -> String -> IO (TaskResult String) -> IO (TaskResult String)
+withTaskEvents env requestId target action = do
+  emitTaskStart env requestId target
   result <- action
-  emitTaskEnd env target result
+  emitTaskEnd env requestId target result
   pure result
 
 -- | Skip metadata for a unit whose Phase 0 analysis found no changes.
@@ -103,13 +113,13 @@ skipMetadata env name = do
 --
 -- Before compilation, assembles 'CachedDeps' from the 'BuildExt' module map
 -- and passes them to the worker for HPT pre-population.
-compile :: BuildExt -> BuildEnv -> UnitName -> ModuleName -> IO (TaskResult String)
-compile ext env name modName = do
+compile :: BuildExt -> BuildEnv -> UnitName -> ModuleName -> Int -> IO (TaskResult String)
+compile ext env name modName requestId = do
   env.log.debugD ("Compile:" <+> ppr name O.<> ":" O.<> ppr modName)
   logEvent env.events (ModuleCompiled name modName)
   let modKey = ModuleKey {unit = name, name = modName}
   let cachedDeps = buildModuleCachedDeps ext.moduleMap modKey
-  (result, _) <- compileSingleModule env name modName cachedDeps
+  (result, _) <- compileSingleModule env name modName cachedDeps requestId
   pure (taskResultFromErrors [(unit, errors) | (unit, _, errors) <- result])
 
 -- | Dispatch a resolved build task to the appropriate GHC operation.
@@ -120,17 +130,20 @@ compile ext env name modName = do
 dispatchTask :: BuildEnv -> BuildExt -> Task TaskKey 'Resolved BuildStatus -> IO (TaskResult String)
 dispatchTask env ext task = case task.key of
   MetaTask name
-    | task.value.runMeta ->
-      withTaskEvents env (name.string ++ ":metadata") (taskResultFromErrors . fst <$> runMetadata env name)
+    | task.value.runMeta -> do
+      requestId <- nextRequestId env
+      withTaskEvents env requestId (name.string ++ ":metadata") (taskResultFromErrors . fst <$> runMetadata env name)
     | otherwise -> skipMetadata env name
-  ResolvedModule name modName ->
-    withTaskEvents env (name.string ++ ":" ++ moduleNameString modName) (compile ext env name modName)
-  ExecuteModule name modName ->
-    executeModuleTask env ext name modName >>= \case
+  ResolvedModule name modName -> do
+    requestId <- nextRequestId env
+    withTaskEvents env requestId (name.string ++ ":" ++ moduleNameString modName) (compile ext env name modName requestId)
+  ExecuteModule name modName -> do
+    requestId <- nextRequestId env
+    executeModuleTask env ext name modName requestId >>= \case
       Nothing -> pure (TaskSuccess Nothing)
       Just result -> do
-        emitTaskStart env target
-        emitTaskEnd env target result
+        emitTaskStart env requestId target
+        emitTaskEnd env requestId target result
         pure result
     where
       target = name.string ++ ":" ++ moduleNameString modName ++ ":execute"
