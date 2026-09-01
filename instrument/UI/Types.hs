@@ -6,6 +6,7 @@ import Data.Text (Text)
 data Name
   = ActiveTasks
   | TaskDetails
+  | TaskStats
   | TaskTree
   | SessionSelector
   | OptionsEditor
@@ -38,6 +39,10 @@ pendingEvictionAttr = attrName "pendingEviction"
 -- | Applied to active-task rows for tasks that are still running.
 taskRunningAttr :: AttrName
 taskRunningAttr = attrName "taskRunning"
+
+-- | Applied to active-task rows for tasks that are running and have an active phase.
+taskPhaseAttr :: AttrName
+taskPhaseAttr = attrName "taskPhase"
 
 -- | Applied to active-task rows for tasks that finished successfully.
 taskSucceededAttr :: AttrName
@@ -87,6 +92,9 @@ taskNameAttr = attrName "taskName"
 -- part of.
 taskTimeAttr :: AttrName
 taskTimeAttr = attrName "taskTime"
+
+taskResultAttr :: AttrName
+taskResultAttr = attrName "taskResult"
 
 -- | Foreground accent for the "Active Tasks" panel header. Panel headers replace the borders that used to
 -- delimit the main view's panels (active tasks\/project) -- see 'UI.ActiveTasks.draw', 'UI.TaskTree.draw' --

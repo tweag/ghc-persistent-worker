@@ -30,7 +30,11 @@ data Hooks =
 
     -- | A module compilation has finished.
     -- If the job was successful, the argument contains 'Just' the stderr lines and the exit code, otherwise 'Nothing'.
-    compileFinish :: Maybe (Maybe TargetSpec, [String], Int32) -> IO ()
+    compileFinish :: Maybe (Maybe TargetSpec, [String], Int32) -> IO (),
+
+    -- | An arbitrary instrumentation event fires during compilation, currently used for
+    -- 'Internal.Compile.Make.withPhaseEvents''s 'Types.Instrument.PhaseEvent's.
+    emitEvent :: Event -> IO ()
   }
 
 -- | Dummy implementation of 'Hooks'.
@@ -38,7 +42,8 @@ hooksNoop :: Hooks
 hooksNoop =
   Hooks {
     compileStart = const (const (pure ())),
-    compileFinish = const (pure ())
+    compileFinish = const (pure ()),
+    emitEvent = const (pure ())
   }
 
 -- | A request handler that is aware of instrumentation.
@@ -108,7 +113,8 @@ withInstrumentation instrChan status stateVar handler =
   where
     hooks = Hooks {
       compileStart,
-      compileFinish
+      compileFinish,
+      emitEvent = writeChan instrChan
     }
 
     compileStart =

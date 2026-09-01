@@ -22,6 +22,8 @@ import Test.Path (
   testFunctionName,
   unitDir,
   )
+import Data.ByteString.Lazy.Char8 (hPutStrLn)
+import System.IO (stderr)
 
 sumExpr :: String -> [String] -> String
 sumExpr base = \case
@@ -152,4 +154,5 @@ fatModuleSource numFunctions caseArms key =
 writeFatModuleSource :: OsPath -> Int -> Int -> ModuleKey -> IO ()
 writeFatModuleSource srcDir numFunctions caseArms key = do
   createDirectoryIfMissing True (srcDir </> unitDir key.unit)
+  hPutStrLn stderr (fatModuleSource numFunctions caseArms key)
   OsPath.writeFile (srcDir </> moduleSourcePath key) (fatModuleSource numFunctions caseArms key)

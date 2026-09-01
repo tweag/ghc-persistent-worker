@@ -3,17 +3,21 @@ module UI.ActiveTasks where
 import Brick.AttrMap (AttrName)
 import Brick.Main (lookupViewport, setTop, viewportScroll)
 import Brick.Types (EventM, Widget, vpTop)
-import Brick.Widgets.Core (Padding (..), padLeft, str, strWrap, vBox, vLimit, withAttr, (<+>))
+import Brick.Widgets.Core (Padding (..), padLeft, str, strWrap, vBox, vLimit, withAttr, (<+>), txt)
 import Brick.Widgets.List (GenericList, list, listElementsL, listSelectedElementL, listSelectedL, renderList)
 import Control.Monad.IO.Class (liftIO)
+import Data.List (sortOn)
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
-import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
+import Data.Sequence (Seq)
 import Data.Time (UTCTime, defaultTimeLocale, diffUTCTime, formatTime, getCurrentTime, nominalDiffTimeToSeconds)
 import Lens.Micro.Platform (modifying, preuse, use, (.=), (^.))
 import Types.Target (TargetSpec (..), renderTargetSpec)
-import UI.Types (Name (ActiveTasks), WorkerId, canDebugAttr, disabledAttr, sectionActiveTasksAttr, taskFailedAttr, taskNameAttr, taskRunningAttr, taskSucceededAttr, taskTimeAttr)
+import UI.Types (Name (ActiveTasks), WorkerId, canDebugAttr, disabledAttr, sectionActiveTasksAttr, taskFailedAttr, taskNameAttr, taskRunningAttr, taskSucceededAttr, taskTimeAttr, taskPhaseAttr, opLogIndicatorAttr, taskResultAttr)
 import UI.Utils (drawSection, formatPico, popup, styledTarget)
+import qualified UI.OpLog as OpLog
 
 type State = GenericList Name Seq.Seq Row
 
@@ -27,6 +31,14 @@ data Outcome
   = Succeeded (Maybe String)
   | Failed String
 
+-- | A single phase's recorded stats for a task (see 'Task'\'s @_phases@ field): the order in which the phase
+-- was first started, used to list phases chronologically in 'drawTaskStats', and its most recently reported
+-- duration (see 'Types.Instrument.PhaseEnd'). Zero until the corresponding 'phaseEnd' call arrives.
+data PhaseInfo = PhaseInfo
+  { _phaseOrder :: Int
+  , _phaseDurationMs :: Word
+  }
+
 data Task = Task
   { _taskTarget :: TargetSpec
   , _taskStartTime :: UTCTime
@@ -34,6 +46,8 @@ data Task = Task
   , _outcome :: Maybe Outcome
   , _fromWorker :: WorkerId
   , _canDebug :: Bool
+  , _phase :: Maybe String
+  , _phases :: Map String PhaseInfo
   }
 
 -- | A row in the displayed list: either a task, or a separator marking the boundary of a completed build
@@ -54,11 +68,12 @@ rowTask (Separator _) = Nothing
 -- Plain, single-width characters (an ellipsis for "still running", a check mark for success, a ballot X for
 -- failure) rather than emoji-presentation glyphs, so no 'UI.Utils.wideStr' explicit-width workaround is needed.
 stateMarker :: Task -> (String, AttrName)
-stateMarker Task{_outcome} =
-  case _outcome of
-    Nothing -> ("...", taskRunningAttr)
-    Just (Succeeded _) -> ("\10004", taskSucceededAttr) -- \x2714 heavy check mark
-    Just (Failed _) -> ("\10008", taskFailedAttr) -- \x2718 heavy ballot X
+stateMarker Task{_outcome, _phase} =
+  case (_outcome, _phase) of
+    (Nothing, Just phase) -> (phase, taskPhaseAttr)
+    (Nothing, Nothing) -> ("...", taskRunningAttr)
+    (Just (Succeeded _), _) -> ("\10004", taskSucceededAttr) -- \x2714 heavy check mark
+    (Just (Failed _), _) -> ("\10008", taskFailedAttr) -- \x2718 heavy ballot X
 
 -- | Header line replacing the border that used to delimit this panel; see 'UI.Types.sectionActiveTasksAttr'.
 -- Uses 'UI.Utils.drawSection's permanent placeholder rectangle for visual structure.
@@ -70,7 +85,7 @@ draw current now st =
   drawRow _ (Separator msg) =
     withAttr disabledAttr $ str ("\9472\9472 " ++ msg ++ " \9472\9472")
   drawRow _ (TaskRow task@Task{_taskTarget = name, ..}) =
-    let (outcome, attr) = stateMarker task
+    let (status, attr) = stateMarker task
         elapsed = nominalDiffTimeToSeconds (max 0 (diffUTCTime (fromMaybe now _taskEndTime) _taskStartTime))
         progress = case _outcome of
           Just (Failed _) -> "Failure"
@@ -86,7 +101,7 @@ draw current now st =
             timestamp
               <+> withAttr taskNameAttr (styledTarget (renderTargetSpec name))
               <+> str " "
-              <+> withAttr attr (str outcome)
+              <+> withAttr attr (str status)
         -- Status (elapsed time or "Failure") is rendered on its own indented line below the target name,
         -- rather than right-aligned on the same line: right-aligning it made it hard to visually associate
         -- with the target it belongs to, especially once lines wrap or targets vary in length, and there is
@@ -101,7 +116,7 @@ draw current now st =
   -- A successful execute task's exfiltrated result, rendered on the lines following its row: wrapped to the
   -- available width, truncated to 4 lines, indented by two cells, and left uncolored (unlike the marker/status
   -- above it).
-  drawResult r = padLeft (Pad 2) (vLimit 4 (strWrap r))
+  drawResult r = padLeft (Pad 2) (vLimit 4 (withAttr opLogIndicatorAttr (txt OpLog.indicator) <+> withAttr taskResultAttr (strWrap r)))
 
 drawTaskDetails :: Task -> Widget Name
 drawTaskDetails Task{_taskTarget = name, ..} =
@@ -110,6 +125,17 @@ drawTaskDetails Task{_taskTarget = name, ..} =
       Just (Failed content) -> content
       Just (Succeeded (Just result)) -> "Result: " ++ result
       _ -> ""
+
+-- | Lists a task's recorded phases (see 'Task'\'s @_phases@ field), in the chronological order they were first
+-- started, each with its most recently reported duration in milliseconds. A phase that is still running (or
+-- whose 'phaseEnd' hasn't arrived yet) shows @0ms@, since 'PhaseInfo' has no separate "pending" state.
+drawTaskStats :: Task -> Widget Name
+drawTaskStats Task{_taskTarget = name, _phases} =
+  popup 50 (renderTargetSpec name ++ " phases") $
+    vBox (map drawPhase (sortOn (_phaseOrder . snd) (Map.toList _phases)))
+ where
+  drawPhase (phase, PhaseInfo{_phaseDurationMs}) =
+    str phase <+> str (replicate 2 ' ') <+> withAttr taskTimeAttr (str (show _phaseDurationMs ++ "ms"))
 
 -- | Insert a row at index @i@ of the given (pre-fetched) element sequence, preserving the logical selection
 -- (mirroring the previous element it pointed to) the same way 'addTask' always did, and -- new -- keeping the
@@ -137,7 +163,7 @@ addTask name wid canDebug = do
   time <- liftIO getCurrentTime
   rows <- use listElementsL
   let i = if canDebug then 0 else fromMaybe 0 (Seq.findIndexL (not . isCanDebugRow) rows)
-  insertRow i (TaskRow (Task name time Nothing Nothing wid canDebug)) rows
+  insertRow i (TaskRow (Task name time Nothing Nothing wid canDebug Nothing Map.empty)) rows
  where
   isCanDebugRow (TaskRow t) = _canDebug t
   isCanDebugRow (Separator _) = False
@@ -165,3 +191,28 @@ getSelectedTarget :: EventM Name State (Maybe (WorkerId, TargetSpec))
 getSelectedTarget = do
   mrow <- preuse listSelectedElementL
   pure $ mrow >>= \row -> (\Task{_fromWorker = wid, _taskTarget = target} -> (wid, target)) <$> rowTask row
+
+-- | Records the start of a phase on the matching task: sets it as the task's current phase, and, if it hasn't
+-- been seen before, adds it to '_phases' with a fresh order (the number of phases already recorded) and a zero
+-- duration, to be filled in once the matching 'phaseEnd' arrives.
+phaseStart :: TargetSpec -> String -> EventM Name State ()
+phaseStart target phase =
+  modifying listElementsL $ fmap \case
+    TaskRow t | _taskTarget t == target ->
+      TaskRow
+        t
+          { _phase = Just phase
+          , _phases = Map.insertWith (\_new old -> old) phase (PhaseInfo (Map.size (_phases t)) 0) (_phases t)
+          }
+    row -> row
+
+-- | Records the duration of the task's current phase (see 'phaseStart'), identified via '_phase' since
+-- 'Types.Instrument.PhaseEnd' doesn't itself carry a phase name.
+phaseEnd :: TargetSpec -> Word -> EventM Name State ()
+phaseEnd target duration =
+  modifying listElementsL $ fmap \case
+    TaskRow t | _taskTarget t == target ->
+      case _phase t of
+        Just phase -> TaskRow t {_phases = Map.adjust (\info -> info {_phaseDurationMs = duration}) phase (_phases t)}
+        Nothing -> TaskRow t
+    row -> row

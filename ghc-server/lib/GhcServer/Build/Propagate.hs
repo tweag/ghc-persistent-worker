@@ -9,7 +9,6 @@
 -- (lifecycle management) keeps each module focused on one concern.
 module GhcServer.Build.Propagate where
 
-import Control.Concurrent.Chan (writeChan)
 import Control.Concurrent.MVar (readMVar)
 import Data.Foldable (for_)
 import qualified Data.Map.Strict as Map
@@ -38,6 +37,7 @@ import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (BuildEvent (..), logEvent)
 import GhcServer.Data.Unit (UnitName (..))
 import GhcServer.Log (emitLog)
+import GhcServer.Log qualified as Log
 import GhcServer.Scheduler (Phase (..), SchedulerState (..), Task (..), TaskResult (..), addResolutions)
 import GhcWorker.Grpc (pushBytecodeState)
 import Types.Instrument (Event (..))
@@ -52,7 +52,7 @@ taskResultFromErrors = \case
 
 -- | Push an instrumentation event to the UI's channel, if instrumentation is enabled.
 emitEvent :: BuildEnv -> Event -> IO ()
-emitEvent env evt = maybe (pure ()) (`writeChan` evt) env.instrChan
+emitEvent env = Log.emitEvent env.instrChan
 
 -- | Push a snapshot of the bytecode cache to the UI's channel, if instrumentation is enabled. Called after every
 -- 'emitTaskEnd', since a compile\/metadata\/execute task's session-store step (see 'Internal.State.withState') is

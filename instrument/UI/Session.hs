@@ -150,6 +150,8 @@ handleEvent (InstrEvent wid evt) =
             | u <- units
             ]
     Instr.Halt -> pure ()
+    Instr.PhaseStart {target, phase} -> zoom activeTasks $ ActiveTasks.phaseStart (TargetUnknown target) phase
+    Instr.PhaseEnd {target, durationMs} -> zoom activeTasks $ ActiveTasks.phaseEnd (TargetUnknown target) durationMs
     Instr.RequestCompleted {..} ->
       zoom activeTasks $ ActiveTasks.addSeparator statusMessage
     Instr.LogMessage {..} ->

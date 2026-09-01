@@ -109,7 +109,7 @@ runEvaluate env mkArgs expr key = do
         target = compileTarget key
     result <- withGhcMakeModule Interpreted target compileEnv \ _targetSpec -> do
       modifyGlobalFlags \ d -> d {ghcMode = CompManager}
-      iface <- compileModuleWithDepsInHpt compileEnv.log (TargetModuleInterp target)
+      iface <- compileModuleWithDepsInHpt compileEnv.log (const (pure ())) (TargetModuleInterp target)
       case iface of
         Nothing -> pure Nothing
         Just _ -> do
@@ -129,7 +129,7 @@ runCompile env mkArgs key = do
         target = compileTarget key
     result <- withGhcMakeModule Compiled target compileEnv \ _targetSpec -> do
       modifyGlobalFlags \ d -> d {ghcMode = CompManager}
-      compileModuleWithDepsInHpt compileEnv.log (TargetModule target)
+      compileModuleWithDepsInHpt compileEnv.log (const (pure ())) (TargetModule target)
     pure (isJust result)
   where
     (args, codes) = mkArgs key

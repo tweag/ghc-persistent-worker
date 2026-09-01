@@ -6,7 +6,7 @@ import GHC.Unit.Types (stringToUnit)
 import GhcServer.Cache (loadHomeUnitCache)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
-import GhcServer.Log (instrumentLogger, withBuildLog)
+import GhcServer.Log (emitEvent, instrumentLogger, withBuildLog)
 import Internal.Compile.Make (compileModuleWithDepsInHpt)
 import Internal.Session (withGhcMakeModule)
 import Prelude hiding (log)
@@ -55,7 +55,7 @@ compileSingleModule buildEnv name modName cachedDeps =
           env = Env {log = logger, state = buildEnv.stateVar, args}
           target = moduleTarget name modName
         result <- withGhcMakeModule Compiled target env \ _targetSpec ->
-          compileModuleWithDepsInHpt logger (TargetModule target)
+          compileModuleWithDepsInHpt logger (emitEvent buildEnv.instrChan) (TargetModule target)
         captured <- logger.flush
         case result of
           Just _ -> pure ([], captured)

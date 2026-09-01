@@ -37,7 +37,7 @@ import UI.OpLog qualified as OpLog
 import UI.Session qualified as Session
 import UI.SessionSelector qualified as SessionSelector
 import UI.TaskTree qualified as TaskTree
-import UI.Types (Name (..), WorkerId, canDebugAttr, disabledAttr, evictedAttr, haskellLogoArrowAttr, haskellLogoEqualsAttr, haskellLogoLambdaAttr, metadataAttr, moduleNameAttr, nodeLabelAttr, opLogIndicatorAttr, opLogTextAttr, pendingEvictionAttr, sectionActiveTasksAttr, sectionProjectAttr, startServerLabelAttr, taskFailedAttr, taskNameAttr, taskRunningAttr, taskSucceededAttr, taskTimeAttr)
+import UI.Types (Name (..), WorkerId, canDebugAttr, disabledAttr, evictedAttr, haskellLogoArrowAttr, haskellLogoEqualsAttr, haskellLogoLambdaAttr, metadataAttr, moduleNameAttr, nodeLabelAttr, opLogIndicatorAttr, opLogTextAttr, pendingEvictionAttr, sectionActiveTasksAttr, sectionProjectAttr, startServerLabelAttr, taskFailedAttr, taskNameAttr, taskRunningAttr, taskSucceededAttr, taskTimeAttr, taskPhaseAttr, executeAttr, taskResultAttr)
 import UI.Utils (handleListEventOf, popup)
 
 data Event
@@ -181,6 +181,7 @@ drawUI State{..} =
       -- overlay only applies when a session is connected, so 'S' still has a visible effect in that case.
       ServeOptions -> maybe [] (const [drawServeOverlay _serveForm]) session
       TaskDetails -> let mrow = session >>= listSelectedElement . Session._activeTasks in maybe [] (pure . ActiveTasks.drawTaskDetails) (mrow >>= ActiveTasks.rowTask . snd)
+      TaskStats -> let mrow = session >>= listSelectedElement . Session._activeTasks in maybe [] (pure . ActiveTasks.drawTaskStats) (mrow >>= ActiveTasks.rowTask . snd)
       LogViewer -> maybe [] (pure . drawLogViewer . Session._logViewer) session
       _ -> []
   )
@@ -199,8 +200,8 @@ drawUI State{..} =
                 maybe (fill ' ') (Session.draw _currentFocus _currentTime _opLog) session
           , hBorder
           , modifyDefAttr (`V.withStyle` V.italic) $
-              str
-          " q:quit   Tab:switch focus   Enter:expand/details   b:build   m:metadata   x:execute   r:trigger rebuild   d:debug   o:options   s:sessions   S:start server   K:kill server   R:restart server   C:clean cache   e:evict bytecode   L:log"
+          str
+          " q:quit   Tab:switch focus   Enter:expand/details   p:phases   b:build   m:metadata   x:execute   r:trigger rebuild   d:debug   o:options   s:sessions   S:start server   K:kill server   R:restart server   C:clean cache   e:evict bytecode   L:log"
           ]
        ]
  where
@@ -568,6 +569,12 @@ handleEvent (VtyEvent evt) = do
         V.EvKey V.KEsc [] -> hide
         V.EvKey V.KEnter [] -> hide
         _ -> handleListEventOf (currentSession . Session.activeTasks) evt
+    TaskStats -> do
+      let hide = currentFocus .= ActiveTasks
+      case evt of
+        V.EvKey V.KEsc [] -> hide
+        V.EvKey (V.KChar 'p') [] -> hide
+        _ -> handleListEventOf (currentSession . Session.activeTasks) evt
     LogViewer -> do
       let hide = currentFocus .= TaskTree
       case evt of
@@ -641,6 +648,8 @@ handleEvent (VtyEvent evt) = do
         case mtree >>= TaskTree.selectedEvictTarget of
           Nothing -> beep
           Just (unitId, modName) -> handleEvent (AppEvent (RequestEvict unitId modName))
+      V.EvKey (V.KChar 'p') [] | current == ActiveTasks -> do
+        withTarget \_ _ -> currentFocus .= TaskStats
       V.EvKey (V.KChar '\t') [] -> do
         let next = case current of
               ActiveTasks -> TaskTree
@@ -682,10 +691,12 @@ app =
             , (evictedAttr, V.withStyle (V.defAttr `V.withForeColor` brightBlack) V.dim)
             , (pendingEvictionAttr, V.withStyle V.defAttr V.italic)
             , (taskRunningAttr, V.defAttr `V.withForeColor` yellow)
+            , (taskPhaseAttr, V.withStyle (V.defAttr `V.withForeColor` yellow) V.italic)
             , (taskSucceededAttr, V.defAttr `V.withForeColor` green)
             , (taskFailedAttr, V.defAttr `V.withForeColor` red)
             , (taskNameAttr, V.withStyle V.defAttr V.bold)
             , (taskTimeAttr, V.withStyle V.defAttr V.dim)
+            , (taskResultAttr, V.defAttr `V.withForeColor` brightYellow)
             , (sectionActiveTasksAttr, V.withStyle (V.defAttr `V.withForeColor` yellow) V.bold)
             , (sectionProjectAttr, V.withStyle (V.defAttr `V.withForeColor` cyan) V.bold)
             , (opLogIndicatorAttr, V.withStyle (V.defAttr `V.withForeColor` green) V.bold)

@@ -89,6 +89,11 @@ data Event
   -- millisecond epoch timestamp. Only emitted when the @instrument@ feature is enabled (see
   -- @GhcServer.Log.instrumentLogger@).
   | LogMessage { target :: String, level :: String, message :: String, timestampMs :: Integer }
+  -- | A single pipeline phase (@Hsc@\/@HscPostTc@\/@HscBackend@) firing for a target's compilation, emitted via
+  -- GHC's @runPhaseHook@ (see @Internal.Compile.Make.withPhaseEvents@). Named @PhaseEvent@ rather than @Phase@ to
+  -- avoid clashing with @GhcServer.Scheduler@'s unrelated @Phase@ type when both are imported unqualified.
+  | PhaseStart { target :: String, phase :: String }
+  | PhaseEnd { target :: String, durationMs :: Word }
   -- | Sent once the scheduler's queue has fully drained -- i.e. every in-flight UI-triggered build request (see
   -- @GhcServer.Grpc.triggerTask@) has completed, not just the one that happened to trigger this event. A single
   -- request fanned out into several concurrent scheduler batches (e.g. a project-wide build across multiple

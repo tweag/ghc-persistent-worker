@@ -18,7 +18,7 @@ import GhcServer.Build.Schedule (BuildExt (..), ModuleKey (..), buildModuleCache
 import GhcServer.Cache (loadHomeUnitCache)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
-import GhcServer.Log (instrumentLogger, withBuildLog)
+import GhcServer.Log (emitEvent, instrumentLogger, withBuildLog)
 import GhcServer.Scheduler (TaskResult (..))
 import Internal.Compile.Make (compileModuleWithDepsInHpt)
 import Internal.Evaluate (executeMain)
@@ -75,7 +75,7 @@ executeModuleTask buildEnv ext name modName =
           target = moduleTarget name modName
         outcome <- runGhcCatchingExceptions do
           withGhcMakeModule Interpreted target env \ targetSpec -> do
-            _ <- compileModuleWithDepsInHpt logger targetSpec
+            _ <- compileModuleWithDepsInHpt logger (emitEvent buildEnv.instrChan) targetSpec
             Just <$> executeMain env (fromOsPath <$> args.homeUnit) target
         captured <- logger.flush
         logger.debug ("executeModuleTask: " ++ name.string ++ ":" ++ modBaseName ++ " outcome=" ++ show (outcomeLabel outcome))

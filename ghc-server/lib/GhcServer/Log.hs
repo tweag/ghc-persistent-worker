@@ -90,6 +90,14 @@ emitLog (Just chan) target level message = do
   timestampMs <- currentTimeMs
   writeChan chan LogMessage {target, level, message, timestampMs}
 
+-- | Push an arbitrary instrumentation event to the given channel, if instrumentation is enabled. No-op otherwise.
+-- Shared by all build steps that report events beyond plain log messages (e.g. 'Types.Instrument.PhaseEvent'),
+-- so it lives below both 'GhcServer.Build.Propagate' (whose own 'GhcServer.Build.Propagate.emitEvent' takes a
+-- 'GhcServer.Data.BuildEnv.BuildEnv' for convenience) and its callees, avoiding an import cycle.
+emitEvent :: Maybe (Chan Event) -> Event -> IO ()
+emitEvent Nothing _ = pure ()
+emitEvent (Just chan) evt = writeChan chan evt
+
 -- | Render a GHC log-hook message the same way 'Internal.Log.logGhcAction' does, returning the level\/text pair
 -- to forward to the instrument channel, or 'Nothing' for messages that should be dropped (e.g. ignored
 -- diagnostics).
