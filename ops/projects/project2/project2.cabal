@@ -1,0 +1,20 @@
+cabal-version: 3.0
+name: project2
+version: 1
+build-type: Simple
+
+library unit1
+  hs-source-dirs: unit1
+  exposed-modules:
+    M3
+  build-depends: base, aeson
+  default-language: GHC2021
+  default-extensions: DerivingStrategies, DeriveAnyClass
+
+library unit2
+  hs-source-dirs: unit2
+  exposed-modules:
+    M1
+    M2
+  build-depends: base, aeson, bytestring, template-haskell, unit1
+  default-language: GHC2021
