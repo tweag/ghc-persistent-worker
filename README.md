@@ -107,3 +107,7 @@ For example, running `cabal build -ffixed-nodes` enables the fixed nodes feature
   This is a simple optimization that allows reusing old module graphs when recomputing a new graph, which we use to
   provide dependency graphs from our state.
 
+* Abstract `Linkables` `-flinkables`/`-DLINKABLES`
+
+  This allows the worker to hook into the bytecode loading procedure to lazily compile interface Core to bytecode when
+  the module is requested for a splice or test execution.
