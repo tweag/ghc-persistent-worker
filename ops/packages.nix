@@ -382,6 +382,10 @@
         source-dirs = "app/compare-features";
       };
 
+      executables.compare-eviction = {
+        source-dirs = "app/compare-eviction";
+      };
+
       tests.ghc-server-test = {
         dependencies = [
           "aeson"
