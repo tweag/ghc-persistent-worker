@@ -229,6 +229,7 @@
         dependencies = [
           "aeson"
           "binary"
+          "bytestring"
           "containers"
           "exceptions"
           "extra"
