@@ -28,15 +28,15 @@ jobs:
         run: rm -rf /opt/hostedtoolcache
       - name: Nix build and test
         run: nix -L build
-      - name: Nix build and test without fixed nodes
-        run: nix -L build .#mwb-26-04.ghc-worker
+      - name: Nix build and test without linkables
+        run: nix -L build .#mwb-26-07.ghc-worker
+      - name: Nix build and test ghc-server
+        run: nix -L build .#mwb-26-07.ghc-server
+      - name: Nix build and test with GHC 9.14
+        run: nix -L build .#ghc914.ghc-worker
       - name: Init Cabal
         run: nix -L develop -c cabal update
       - name: Build packages
         run: nix -L develop -c cabal build -fmwb all
       - name: Run resource tests
         run: nix -L develop .#test-ext-deps -c cabal test ghc-worker --test-option='-p /resources/'
-      - name: Clean up Cabal store to switch to vanilla GHC
-        run: rm -rf $(nix develop -c cabal path --store-dir)/ghc-9.10.1-inplace dist-newstyle
-      - name: Build packages with vanilla GHC
-        run: nix -L develop .#ghc910 -c cabal build -f-mwb all
