@@ -1,41 +1,44 @@
 module Ghc.Ui.Render.Session where
 
-import Brick.Types (Widget)
-import Brick.Widgets.Border (borderWithLabel, hBorder)
-import Brick.Widgets.Core (str, vBox, vLimitPercent)
-import Data.Generics.Labels ()
+import Brick (Padding (..), Widget, hBox, hLimitPercent, padAll, padRight, txt, vBox, vLimit)
+import Brick.Widgets.Border (hBorder)
 import Data.Map qualified as Map
+import qualified Data.Text as Text
 import Data.Time (UTCTime)
 import Ghc.Ui.Data.Name (Name)
+import Ghc.Ui.Data.OpLog (OpLogState)
 import Ghc.Ui.Data.Session (SessionState (..), Stats (..), Worker (..))
-import Ghc.Ui.ModuleSelector qualified as ModuleSelector
-import Ghc.Ui.Render.Tasks qualified as Tasks
 import Ghc.Ui.Render.Format (formatBytes, formatPs)
+import Ghc.Ui.Render.OpLog (renderOpLogEmbed)
+import Ghc.Ui.Render.Project (renderProject)
+import Ghc.Ui.Render.Tasks (renderTasks)
+import Types.Text (showText)
 
-drawStats :: Int -> Stats -> Widget Name
-drawStats workerCount Stats{..} =
-  vBox
-    [ str $
-        " Worker count: "
-          ++ show workerCount
-          ++ " | Memory:"
-          ++ concatMap
-            (\(k, v) -> " " ++ k ++ "=" ++ formatBytes v)
-            (Map.toList memory)
-    , str $
-        " CPU Time: "
-          ++ formatPs (1000 * cpu_ns)
-          ++ " | GC Time: "
-          ++ formatPs (1000 * gc_cpu_ns)
-    ]
+renderStats :: Int -> Stats -> Widget Name
+renderStats workerCount Stats {..} =
+  vBox [txt line1, txt line2]
+  where
+    line1 =
+      " Worker count: " <> showText workerCount
+      <>
+      " | Memory:" <> memoryStats
 
-draw :: Name -> UTCTime -> SessionState -> Widget Name
-draw current now SessionState {..} =
-  borderWithLabel (str $ " GHC Persistent Worker  " ++ title ++ " ") $
-    vBox
-      [ vLimitPercent 30 $ Tasks.draw current now activeTasks
-      , hBorder
-      , ModuleSelector.draw current modules
-      , hBorder
-      , drawStats (length workers) (foldMap (.stats) workers <> finishedWorkerStats)
-      ]
+    line2 =
+      " CPU Time: " <> formatPs (1000 * cpu_ns)
+      <>
+      " | GC Time: " <> formatPs (1000 * gc_cpu_ns)
+
+    memoryStats = Text.concat [" " <> k <> "=" <> formatBytes v | (k, v) <- Map.toList memory]
+
+renderSession :: Name -> UTCTime -> OpLogState -> SessionState -> Widget Name
+renderSession current now opLog SessionState {project, tasks, workers, finishedWorkerStats} =
+  vBox [
+    padAll 2 $ hBox [
+      hLimitPercent 50 $ padRight (Pad 3) $ renderProject current project,
+      renderTasks current now tasks
+    ],
+    hBorder,
+    renderStats (length workers) (foldMap (.stats) workers <> finishedWorkerStats),
+    hBorder,
+    vLimit 6 (renderOpLogEmbed opLog)
+  ]

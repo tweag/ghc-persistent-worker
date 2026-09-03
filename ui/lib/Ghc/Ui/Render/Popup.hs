@@ -1,14 +1,14 @@
 module Ghc.Ui.Render.Popup where
 
-import Brick (Widget)
+import Brick (Widget, hLimitPercent, txt, vLimitPercent)
 import Brick.Widgets.Border (borderWithLabel)
 import Brick.Widgets.Center (centerLayer)
-import Brick.Widgets.Core (hLimitPercent, str, vLimitPercent)
+import Data.Text (Text)
 import Ghc.Ui.Data.Name (Name)
 
-popup :: Int -> String -> Widget Name -> Widget Name
-popup size popupTitle content =
+popup :: Int -> Text -> Widget Name -> Widget Name
+popup size title content =
   centerLayer $
   hLimitPercent size $
   vLimitPercent size $
-  borderWithLabel (str $ " " ++ popupTitle ++ " ") content
+  borderWithLabel (txt (" " <> title <> " ")) content
