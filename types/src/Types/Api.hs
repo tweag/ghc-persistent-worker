@@ -4,6 +4,7 @@ module Types.Api where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
 import Data.Binary (Binary)
+import Data.Fixed (Pico)
 import Data.Map (Map)
 import Data.String (IsString)
 import qualified Data.Text as Text
@@ -11,6 +12,7 @@ import Data.Text (Text, unpack)
 import qualified GHC
 import GHC.Generics (Generic)
 import GHC.Unit (Module, UnitId, mkModuleName, moduleName, moduleNameString, moduleUnitId, stringToUnitId, unitIdString)
+import Types.FeatureFlags (FeatureFlag)
 import qualified Types.Target as Worker
 import Types.Target (ModuleTarget (..), TargetSpec, UnitTarget (..))
 
@@ -174,7 +176,7 @@ data ApiResponse a =
   |
   ApiFailure { message :: Text }
   deriving stock (Eq, Show, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, Binary)
 
 newtype RequestId =
   RequestId { number :: Int }
@@ -193,6 +195,7 @@ data Event =
     target :: Target,
     exitCode :: Int,
     stderr :: String,
+    result :: Maybe String,
     requestId :: RequestId
   }
   |
@@ -225,7 +228,7 @@ data Event =
     category :: String,
     level :: String,
     message :: String,
-    timestampMs :: Integer
+    time :: Pico
   }
   |
   -- | Indicates that all scheduled tasks have concluded.

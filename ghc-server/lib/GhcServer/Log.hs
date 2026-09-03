@@ -4,6 +4,7 @@ import Control.Concurrent.Chan (Chan, writeChan)
 import Control.Monad (when)
 import Data.Foldable (traverse_)
 import Data.IORef (newIORef)
+import Data.Time (nominalDiffTimeToSeconds)
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import GHC (Severity (..), SrcSpan)
 import GHC.Types.Error (MessageClass (..))
@@ -71,17 +72,12 @@ withBuildLog :: (Logger -> IO a) -> IO a
 withBuildLog action =
   action =<< newLogger False
 
--- | Current time as a millisecond epoch timestamp, for 'Types.Api.LogMessage'.
-currentTimeMs :: IO Integer
-currentTimeMs =
-  round . (* 1000) <$> getPOSIXTime
-
 -- | Push a 'LogMessage' event to the instrument channel, if instrumentation is enabled. No-op otherwise.
 emitLog :: Maybe (Chan Event) -> String -> String -> String -> IO ()
 emitLog Nothing _ _ _ = pure ()
 emitLog (Just chan) category level message = do
-  timestampMs <- currentTimeMs
-  writeChan chan LogMessage {category, level, message, timestampMs}
+  time <- nominalDiffTimeToSeconds <$> getPOSIXTime
+  writeChan chan LogMessage {category, level, message, time}
 
 -- | Push an arbitrary instrumentation event to the given channel, if instrumentation is enabled. No-op otherwise.
 -- Shared by all build steps that report events beyond plain log messages (e.g. 'Types.Api.PhaseEvent'),

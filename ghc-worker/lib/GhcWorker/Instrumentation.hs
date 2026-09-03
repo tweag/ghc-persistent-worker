@@ -93,6 +93,7 @@ messageCompileEnd target exitCode output requestId =
     target,
     exitCode = fromIntegral exitCode,
     stderr = unlines output,
+    result = Nothing,
     requestId
   }
 
