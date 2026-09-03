@@ -67,7 +67,8 @@ library
     ghc-paths,
     os-string,
     split,
-    text
+    text,
+    time
 
   if (flag(mwb))
       cpp-options: -DMWB -DUNIT_INDEX

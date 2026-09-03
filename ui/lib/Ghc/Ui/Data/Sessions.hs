@@ -4,22 +4,45 @@ import Brick.Widgets.List (GenericList, list)
 import Data.Sequence (Seq)
 import Data.Time (UTCTime)
 import Ghc.Ui.Data.Name (Name (Sessions))
-import Ghc.Ui.Data.Session (Id, SessionEvent, SessionState (..))
+import Ghc.Ui.Data.Session (SessionEvent, SessionId, SessionState (..))
 import Ghc.Ui.Data.WorkerId (WorkerId)
 import Network.GRPC.Client (Connection)
 
-type SessionsState = GenericList Name Seq (Id, SessionState)
+-- TODO why is this a tuple?
+-- If the index is required, can it be a Map?
+type SessionsState = GenericList Name Seq (SessionId, SessionState)
+
+newtype GrpcConnection =
+  GrpcConnection Connection
+
+instance Show GrpcConnection where
+  show _ = "GrpcConnection"
 
 data SessionsEvent =
-  StartSession Id UTCTime
+  StartSession {
+    sessionId :: SessionId,
+    startTime :: UTCTime
+  }
   |
-  EndSession Id
+  EndSession { sessionId :: SessionId }
   |
-  Session Id SessionEvent
+  Session {
+    sessionId :: SessionId,
+    event :: SessionEvent
+  }
   |
-  AddWorker Id WorkerId UTCTime Connection
+  AddWorker {
+    sessionId :: SessionId,
+    workerId :: WorkerId,
+    startTime :: UTCTime,
+    connection :: GrpcConnection
+  }
   |
-  RemoveWorker Id WorkerId
+  RemoveWorker {
+    sessionId :: SessionId,
+    workerId :: WorkerId
+  }
+  deriving stock (Show)
 
 initialState :: SessionsState
 initialState = list Sessions [] 1

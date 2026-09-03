@@ -253,6 +253,7 @@
           "process"
           "split"
           "text"
+          "time"
         ];
         source-dirs = "src";
         ghc-options = ["-O2"];
