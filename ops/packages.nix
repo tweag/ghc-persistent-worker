@@ -143,7 +143,10 @@
 
     ghc-ui = {
       src = ../ui;
-      cabal.meta.synopsis = "Terminal UI for ghc-server";
+      cabal = {
+        meta.synopsis = "Terminal UI for ghc-server";
+        default-extensions = ["NoFieldSelectors"];
+      };
       library = {
         enable = true;
         dependencies = [
@@ -154,6 +157,7 @@
           "buck-worker-types"
           "bytestring"
           "containers"
+          "generic-lens"
           "ghc-debug-brick"
           "directory"
           "filepath"
@@ -305,6 +309,7 @@
 
     default-extensions = [
       "BlockArguments"
+      "DeriveAnyClass"
       "DerivingStrategies"
       "DuplicateRecordFields"
       "LambdaCase"
