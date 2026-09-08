@@ -36,7 +36,6 @@ newState = do
       extra = mempty
     },
     baseSession = Nothing,
-    options = defaultOptions,
     make = MakeState {
       moduleGraphState = emptyEModuleGraph,
       moduleGraphNodes = M.empty,

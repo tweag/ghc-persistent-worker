@@ -24,7 +24,7 @@ import Proto.Instrument (Instrument)
 import Proto.Instrument_Fields qualified as Instr
 import Types.Grpc (CommandEnv (..), RequestArgs (..))
 import Types.Instrument (Event (..))
-import Types.State (WorkerState (..), Options (..))
+import Types.State (WorkerState (..))
 import Types.Target (TargetSpec (..))
 
 -- | Fetch statistics about the current state of the RTS for instrumentation.
@@ -59,20 +59,6 @@ notifyMe stateVar chan callback = do
     callback $ NextElem $
       defMessage
         & Instr.encoded .~ toStrict (encode msg)
-
--- | Set the options for the server.
-setOptions ::
-  MVar WorkerState ->
-  Proto Instr.Options ->
-  IO (Proto Instr.Empty)
-setOptions stateVar opts = do
-  modifyMVar_ stateVar $ \state ->
-    pure state {
-      options = Options {
-        extraGhcOptions = Text.unpack opts.extraGhcOptions
-      }
-    }
-  pure defMessage
 
 -- | Trigger a rebuild for the given target.
 triggerRebuild ::
