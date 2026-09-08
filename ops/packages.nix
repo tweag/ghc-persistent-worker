@@ -163,6 +163,7 @@
           "filepath"
           "fsnotify"
           "grapesy"
+          "lens"
           "microlens-platform"
           "text"
           "time"
