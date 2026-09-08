@@ -104,7 +104,7 @@ runMetadata desc state prog =
     where
       conf = defTest \ env -> do
         controlT \ lowerT ->
-          flip (withDynFlags env) (map buckLocation args.ghcOptions) \ dflags _ -> do
+          flip withDynFlags (map buckLocation args.ghcOptions) \ dflags _ -> do
             void $ prepareMetadataSession env dflags
             modifyActiveUnitFlags \ d -> d {ghcMode = MkDepend}
             lowerT (prog env.log)
