@@ -20,7 +20,7 @@ import Data.Tuple (swap)
 import GHC (DynFlags, GhcException (..), IsBootInterface (..), ModIface, ModIface_ (..), ModLocation (..), Module, ModuleName, mkModule, mkModuleName, moduleName, moduleNameString)
 import GHC.Data.Bag (emptyBag)
 import GHC.Data.Maybe (MaybeErr (..))
-import GHC.Driver.Env (HscEnv (..), hscActiveUnitId, hscSetActiveUnitId, hsc_HPT)
+import GHC.Driver.Env (HscEnv (..), hsc_HUG, hscActiveUnitId, hscSetActiveUnitId, hsc_HPT)
 import GHC.Driver.Main (initModDetails)
 import GHC.Driver.Make (ModNodeKeyWithUid (..))
 import GHC.Driver.Session (dynHiSuf_, dynamicNow, hiDir, hiSuf_, targetProfile)
@@ -34,7 +34,7 @@ import GHC.Types.Name.Occurrence (mkOccEnv)
 import GHC.Types.Name.Reader (GlobalRdrEltX (..), Parent (NoParent))
 import GHC.Unit (Definite (..), GenUnit (..), GenWithIsBoot (..), UnitId, moduleUnitId)
 import GHC.Unit.Env (UnitEnv (..))
-import GHC.Unit.Home.Graph (unitEnv_lookup_maybe)
+import GHC.Unit.Home.Graph (HomeUnitGraph, homeUnitEnv_hpt, unitEnv_lookup_maybe)
 import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..), homeModInfoByteCode)
 import GHC.Unit.Home.PackageTable (HomePackageTable, addHomeModInfoToHpt, lookupHpt)
 import GHC.Unit.Module (moduleNameSlashes)
@@ -224,17 +224,8 @@ loadCachedDep log features interp hsc_env name ifaceFile mod_load_state =
     RequestHi lock -> loadHmiOnlyInterface >>= \ hmi -> pure (RequestBCO lock hmi)
     RequestBCO lock hmi -> loadHmiFull hmi >> putMVar lock () >> pure Loaded
   where
-    loadHmiOnlyInterface = do
-      logTimed log ("Loading HPT module from cache (interface): " ++ fromOsPath ifaceFile) do
-        hm_iface <- loadIface
-        !hm_details <- initModDetails hsc_env hm_iface
-        let hmi = HomeModInfo {
-          hm_iface,
-          hm_linkable = HomeModLinkable {homeMod_object = Nothing, homeMod_bytecode = Nothing},
-          hm_details
-        }
-        addHomeModInfoToHpt hmi hpt
-        pure hmi
+    loadHmiOnlyInterface =
+      loadHomeModInfo log interp hsc_env (hsc_HUG hsc_env) (hscActiveUnitId hsc_env) name ifaceFile
 
     loadHmiFull HomeModInfo {hm_iface, hm_details} = do
       logTimed log ("Loading HPT module from cache (BCO): " ++ fromOsPath ifaceFile) do
@@ -255,8 +246,33 @@ loadCachedDep log features interp hsc_env name ifaceFile mod_load_state =
           hm_linkable = HomeModLinkable {homeMod_object = Nothing, homeMod_bytecode},
           hm_details
         }
-        addHomeModInfoToHpt hmi' hpt
+        addHomeModInfoToHpt hmi' (hsc_HPT hsc_env)
 
+loadHomeModInfo ::
+  Logger ->
+  IsInterpreted ->
+  HscEnv ->
+  HomeUnitGraph ->
+  UnitId ->
+  ModuleName ->
+  OsPath ->
+  IO HomeModInfo
+loadHomeModInfo log interp hsc_env hug uid name ifaceFile = do
+    logTimed log ("Loading HPT module from cache (interface): " ++ fromOsPath ifaceFile) do
+      hm_iface <- loadIface
+      !hm_details <- initModDetails hsc_env hm_iface
+      let hmi = HomeModInfo
+            { hm_iface
+            , hm_linkable = HomeModLinkable {homeMod_object = Nothing, homeMod_bytecode = Nothing}
+            , hm_details
+            }
+      case unitEnv_lookup_maybe uid hug of
+        Nothing ->
+          throwGhcExceptionIO (PprProgramError "loadHomeModInfo: unit not found in home unit graph" (ppr uid))
+        Just unit_env -> do
+          addHomeModInfoToHpt hmi (homeUnitEnv_hpt unit_env)
+          pure hmi
+  where
     -- @readIface@ needs the dflags only for platform/ways, so we don't need the unit dflags
     loadIface =
       ifaceResult =<< readIface' (hsc_dflags hsc_env) (hsc_NC hsc_env) (toModule name) (fromOsPath ifaceFile)
@@ -303,10 +319,6 @@ loadCachedDep log features interp hsc_env name ifaceFile mod_load_state =
         in throwGhcExceptionIO (PprProgramError "Loading cached interface failed" msg)
 
     toModule = mkModule (RealUnit (Definite uid))
-
-    uid = hscActiveUnitId hsc_env
-
-    hpt = hsc_HPT hsc_env
 
 hasUnit :: UnitId -> HscEnv -> Bool
 hasUnit uid hsc_env =
