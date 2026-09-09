@@ -23,6 +23,7 @@ newState = do
   initialPath <- lookupEnv "PATH"
   unitIndex <- newUnitIndex
   let bcoLoadState = M.empty
+  loadingModInfosMV <- newMVar M.empty
   newMVar WorkerState {
     path = BinPath {
       initial = toOsPath <$> initialPath,
@@ -39,7 +40,8 @@ newState = do
       bcoLoadState,
       extraLib = emptyLibLoadState
     },
-    targetArgs = mempty
+    targetArgs = mempty,
+    loadingModInfos = loadingModInfosMV
   }
 
 modifyMakeState :: MVar WorkerState -> (MakeState -> IO (MakeState, a)) -> IO a
