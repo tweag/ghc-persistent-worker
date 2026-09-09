@@ -1,8 +1,11 @@
 module Types.State where
 
+import Control.Concurrent.MVar (MVar)
 import Data.Map.Strict (Map)
 import Data.Set (Set)
-import GHC (HscEnv)
+import GHC (HscEnv, ModuleName)
+import GHC.Unit.Home.ModInfo (HomeModInfo)
+import GHC.Unit.Types (UnitId)
 import Types.Grpc (CommandEnv, RequestArgs)
 import Types.State.Make (MakeState (..))
 import Types.Target (TargetSpec)
@@ -32,5 +35,6 @@ data WorkerState =
     baseSession :: Maybe HscEnv,
     options :: Options,
     make :: MakeState,
-    targetArgs :: Map TargetSpec (CommandEnv, RequestArgs)
+    targetArgs :: Map TargetSpec (CommandEnv, RequestArgs),
+    loadingModInfos :: MVar (Map (UnitId, ModuleName) (IO (Maybe HomeModInfo)))
   }
