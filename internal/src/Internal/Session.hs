@@ -2,13 +2,22 @@
 
 module Internal.Session where
 
-import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, readMVar)
-import Control.Exception (finally)
+import Control.Concurrent.MVar
+  (MVar, modifyMVar, modifyMVar_, newEmptyMVar, readMVar, takeMVar, putMVar)
+import Control.Exception (
+  SomeException,
+  bracket_,
+  finally,
+  mask,
+  try,
+  uninterruptibleMask_,
+  )
 import Control.Monad (foldM, unless)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (traverse_)
 import Data.Function ((&))
 import Data.IORef (newIORef)
+import qualified Data.Map as M
 import Data.Maybe (fromMaybe)
 import GHC (
   DynFlags (..),
@@ -24,17 +33,23 @@ import GHC (
   setSessionDynFlags,
   withSignalHandlers,
   )
-import GHC.Driver.Env (HscEnv (..), hscSetActiveUnitId)
+import GHC.Driver.Env (HscEnv (..), hsc_HUG, hscSetActiveUnitId)
+import GHC.Driver.Hooks (lookupHomeModInfoHook)
 import GHC.Driver.Main (initHscEnv)
 import GHC.Driver.Monad (Session (Session), modifySession, unGhc)
 import GHC.Runtime.Loader (initializeSessionPlugins)
 import GHC.Types.SrcLoc (Located)
-import GHC.Unit (moduleUnitId)
+import GHC.Unit (ModuleName, UnitId, moduleUnitId)
+import GHC.Unit.Env (ue_home_unit_graph)
+import GHC.Unit.Home.Graph
+  (HomeUnitGraph, lookupHug, lookupHugUnit, homeUnitEnv_dflags, homeUnitEnv_hpt)
+import GHC.Unit.Home.ModInfo (HomeModInfo)
+import GHC.Unit.Home.PackageTable (lookupHpt)
 import GHC.Utils.Logger (getLogger)
 import GHC.Utils.Outputable (ppr, text, (<+>))
 import GHC.Utils.Panic (panic, pprPanic)
 import GHC.Utils.TmpFs (TempDir (..), cleanTempDirs, cleanTempFiles, initTmpFs)
-import Internal.Cache.Hpt (depsFromModuleGraph, loadCachedDeps, loadHomeUnit)
+import Internal.Cache.Hpt (canonicalInterfacePath, loadHomeModInfo, loadHomeUnit)
 import Internal.Compat.GHC914 (hscSetModuleGraph)
 import Internal.DynFlags (
   buckLocation,
@@ -56,7 +71,7 @@ import Types.Args (Args (..))
 import Types.BuckArgs (IsInterpreted (Interpreted))
 import Types.Env (Env (..))
 import Types.Log (Logger (..))
-import Types.State (Options (..), WorkerState (..))
+import Types.State (LoadingModInfos, Options (..), WorkerState (..))
 import Types.State.Make (EModuleGraph (..), MakeState (..))
 import Types.Target (ModuleTarget (..), Target (Target), TargetSpec (..))
 
@@ -243,7 +258,7 @@ withGhcMakeModule interp target =
         restoreCachedHomeUnit env dflags0,
         setSessionModuleGraph,
         setActiveUnit,
-        restoreCachedModules env
+        traverse (setLookupHomeModInfoHook interp env.log (loadingModInfos state0))
       ]
 
     restoreCachedHomeUnit env dflags0 =
@@ -254,15 +269,99 @@ withGhcMakeModule interp target =
 
     setActiveUnit (state, hsc_env) = pure (state, hscSetActiveUnitId (moduleUnitId target.mod) hsc_env)
 
-    -- When the dependency closure is not provided with --dep-modules, compute it from the module graph.
-    restoreCachedModules env (state, hsc_env) =
-      liftIO (loadCachedDeps env.log env.args.features interp (state, hsc_env) deps)
-      where
-        deps = fromMaybe (depsFromModuleGraph state.make.moduleGraphNodes target.mod) env.args.cachedDeps
-
     maybeArg :: Maybe a -> (b -> a -> IO b) -> b -> IO b
     maybeArg arg f z = fromMaybe z <$> traverse (liftIO . f z) arg
 
     (targetSpec, setTarget)
       | Interpreted <- interp = (TargetModuleInterp, mkTargetAsInterpreted target.mod)
       | otherwise = (TargetModule, id)
+
+-- | Set the hook to load interface files on demand.
+setLookupHomeModInfoHook
+  :: IsInterpreted
+  -> Logger
+  -> MVar LoadingModInfos
+  -> HscEnv
+  -> IO HscEnv
+setLookupHomeModInfoHook interp logger mref hsc_env = do
+    pure $ hsc_env
+      { hsc_hooks = hsc_env.hsc_hooks
+         { lookupHomeModInfoHook = Just $
+             lookupHomeModInfo logger interp hsc_env mref
+         }
+      }
+
+-- | Look up a module in the home unit graph, and if it is not found, attempt
+-- to load it from the file system.
+--
+-- If the module is being loaded from another thread, block until it finishes
+-- loading.
+--
+-- Yields 'Nothing' if the module cannot be loaded.
+lookupHomeModInfo
+  :: Logger
+  -> IsInterpreted
+  -> HscEnv
+     -- | When modules are loading, an entry is kept in the 'loadingModInfos'
+     -- field of the worker state.
+  -> MVar LoadingModInfos
+  -> HomeUnitGraph
+  -> UnitId
+  -> ModuleName
+  -> IO (Maybe HomeModInfo)
+lookupHomeModInfo logger interpreted hsc_env mref hug uid mn = do
+    let mhue = lookupHugUnit uid (hsc_HUG hsc_env)
+    case mhue of
+      Nothing -> pure Nothing
+      Just hue -> do
+        mm <- lookupHpt (homeUnitEnv_hpt hue) mn
+        case mm of
+          -- The module is not in the HPT, so we need to load it from the file
+          -- system.
+          Nothing ->
+            case canonicalInterfacePath (homeUnitEnv_dflags hue) mn of
+              -- We don't know where the interface file is, so we can't load it.
+              Nothing -> pure Nothing
+              Just fp -> load fp
+          _ -> pure mm
+  where
+    load fp = mask $ \restore -> do
+      -- Only one thread can update the mref at a time
+      -- All code paths below should put the mref back before returning
+      --
+      -- Invariant: A module that was requested is either on the HUG or
+      -- in m or it failed to load.
+      --
+      -- Failed attempts are not kept in m, so that subsequent attempts to load
+      -- the module can succeed with different paremeters.
+      --
+      -- Taking the MVar introduces contention, so we defer it as much as
+      -- possible.
+      m <- takeMVar mref
+      -- Look up the module in the HUG again, since it may have been loaded by
+      -- another thread while we were waiting for the MVar.
+      mm <- lookupHug hug uid mn
+      case mm of
+        Just hmi -> do
+          putMVar mref m
+          pure (Just hmi)
+        Nothing -> case M.lookup (uid, mn) m of
+          -- Wait for some other thread to load the module
+          Just io -> putMVar mref m >> restore io
+          Nothing -> do
+              hmiMV <- newEmptyMVar
+              -- Let other threads know that we are loading this module.
+              --
+              -- Only the thread that puts an entry for a module in the map can
+              -- load it.
+              --
+              -- The entry is removed only after the module is registered
+              -- in the HUG or it fails to load.
+              bracket_
+                (putMVar mref (M.insert (uid, mn) (readMVar hmiMV) m))
+                (uninterruptibleMask_ $ modifyMVar_ mref (pure . M.delete (uid, mn))) $ do
+                  e <- try $ restore $
+                         loadHomeModInfo logger interpreted hsc_env hug uid mn fp
+                  let mhmi = either @SomeException (const Nothing) Just e
+                  putMVar hmiMV mhmi
+                  pure mhmi
