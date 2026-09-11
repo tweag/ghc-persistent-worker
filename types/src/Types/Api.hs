@@ -55,6 +55,18 @@ data UnitSummary =
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary)
 
+-- | Metadata for tracking the loaded bytecode of a module.
+data TrackedBytecode =
+  TrackedBytecode {
+    key :: HomeModule,
+    size :: Int,
+    lastAccess :: Int,
+    resident :: Bool,
+    pendingEviction :: Bool
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (Binary, FromJSON, ToJSON)
+
 -- | Specification for selecting build targets by names, especially from the UI.
 data Target =
   TargetProject
@@ -125,10 +137,54 @@ data ApiResponse =
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
-data Event
-  = CompileStart { target :: String, canDebug :: Bool }
-  | CompileEnd { target :: String, exitCode :: Int, stderr :: String }
-  | Stats { memory :: Map String Int, cpuNs :: Int, gcCpuNs :: Int }
-  | Halt
+-- | Events emitted during task execution, to be consumed by clients like the UI.
+data Event =
+  CompileStart {
+    target :: Target,
+    debuggable :: Bool,
+    requestId :: Int
+  }
+  |
+  CompileEnd {
+    target :: Target,
+    exitCode :: Int,
+    stderr :: String,
+    result :: Maybe String,
+    requestId :: Int
+  }
+  |
+  Stats {
+    memory :: Map Text Int,
+    cpuNs :: Int,
+    gcCpuNs :: Int
+  }
+  |
+  -- | The project structure at the point when a client connects.
+  ProjectStructure { units :: [UnitSummary] }
+  |
+  -- | Sent when bytecode in the loader state was accessed.
+  BytecodeSnapshot { entries :: [TrackedBytecode] }
+  |
+  LogMessage {
+    category :: String,
+    level :: String,
+    message :: String,
+    timestampMs :: Integer
+  }
+  |
+  PhaseStart {
+    target :: Target,
+    phase :: String,
+    requestId :: Int
+  }
+  |
+  PhaseEnd {
+    target :: Target,
+    durationMs :: Word,
+    requestId :: Int
+  }
+  |
+  -- | Indicates that all scheduled tasks have concluded.
+  RequestCompleted { statusMessage :: Text }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary)
