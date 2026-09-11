@@ -44,7 +44,7 @@ import Internal.Debug (pprModuleFull)
 import Internal.Error (eitherMessages, noteGhc)
 import Internal.Log (logTimedD)
 import System.OsPath.Extra (fromOsPath)
-import Types.Instrument (Event (..))
+import Types.Api (Event (..))
 import Types.Log (Logger (..))
 import Types.Target (ModuleTarget (..), Target (..), TargetSpec (..))
 
@@ -183,10 +183,6 @@ compileModuleWithDepsInHpt logger emitEvent target =
           pure $ maybe hmi (\ env -> hmi {hm_iface = patchTopEnv env hmi.hm_iface}) topEnv
         Nothing -> pure hmi
 
--- | Names the pipeline phases that are reported as 'PhaseEvent's, matching the phases GHC always runs for a single
--- module compilation with any backend: type/instance-checking and desugaring ('T_Hsc'), the post-typecheck backend
--- action selection e.g. "needs code generation" vs. "interface only" ('T_HscPostTc'), and code generation proper
--- ('T_HscBackend'). Every other 'TPhase' constructor (preprocessing, assembling, linking, ...) is not reported.
 phaseLabel :: TPhase a -> Maybe String
 phaseLabel = \case
   T_HsPp {} -> Just "cpp"
@@ -195,12 +191,6 @@ phaseLabel = \case
   T_HscBackend {} -> Just "backend"
   _ -> Nothing
 
--- | Report a 'Types.Instrument.PhaseStart'\/'Types.Instrument.PhaseEnd' pair of 'Event's around running @act@,
--- recording the wall-clock duration (in milliseconds) between the two. This is the single combinator used by every
--- phase-observing hook in this module (see 'withPhaseEvents', 'frontendEvents'); it deliberately does not guarantee
--- that 'PhaseEnd' is emitted if @act@ throws, since one of its use sites runs in GHC's 'Hsc' monad, which has no
--- 'GHC.Utils.Exception.ExceptionMonad' instance (its internal warning-message state can't survive being caught) and
--- therefore cannot support exception-safe cleanup in general.
 withPhase ::(Event -> IO ()) -> TargetSpec -> String -> IO a -> IO a
 withPhase _emitEvent _target _phase act = do
   _startNs <- getMonotonicTimeNSec
