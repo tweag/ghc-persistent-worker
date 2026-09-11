@@ -45,7 +45,7 @@ library
     Types.FeatureFlags
     Types.BuildPlan.Incremental
     Types.Grpc
-    Types.Instrument
+    Types.Api
     Types.Log
     Types.Orchestration
     Types.State

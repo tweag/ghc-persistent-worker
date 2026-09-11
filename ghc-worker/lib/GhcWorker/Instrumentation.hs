@@ -10,7 +10,7 @@ import GhcWorker.Grpc (mkStats)
 import Internal.Log (dbg)
 import Prelude hiding (log)
 import Types.BuckArgs (BuckArgs (..))
-import Types.Instrument (Event (..))
+import Types.Api (Event (..))
 import Types.State (WorkerState)
 import Types.Target (TargetSpec, renderTargetSpec)
 
@@ -33,7 +33,7 @@ data Hooks =
     compileFinish :: Maybe (Maybe TargetSpec, [String], Int32) -> IO (),
 
     -- | An arbitrary instrumentation event fires during compilation, currently used for
-    -- 'Internal.Compile.Make.withPhaseEvents''s 'Types.Instrument.PhaseEvent's.
+    -- 'Internal.Compile.Make.withPhaseEvents''s 'Types.Api.PhaseEvent's.
     emitEvent :: Event -> IO ()
   }
 
