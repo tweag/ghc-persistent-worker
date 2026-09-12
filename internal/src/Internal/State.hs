@@ -46,8 +46,7 @@ newState = do
       extraLib = emptyLibLoadState,
       bcoCache = M.empty,
       bcoAccessCounter = 0
-    },
-    targetArgs = mempty
+    }
   }
 
 modifyMakeState :: MVar WorkerState -> (MakeState -> IO (MakeState, a)) -> IO a
