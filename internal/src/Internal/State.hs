@@ -17,7 +17,7 @@ import System.Environment (lookupEnv)
 import System.OsPath.Extra (toOsPath)
 import Types.FeatureFlags (FeatureFlags (..))
 import Types.Log (Logger (..))
-import Types.State (BinPath (..), WorkerState (..), defaultOptions)
+import Types.State (BinPath (..), WorkerState (..))
 import Types.State.Make (
   EModuleGraph (..),
   MakeState (..),
@@ -48,8 +48,7 @@ newState = do
       bcoAccessCounter = 0,
       pendingEvictions = mempty,
       bcoHistory = M.empty
-    },
-    targetArgs = mempty
+    }
   }
 
 modifyMakeState :: MVar WorkerState -> (MakeState -> IO (MakeState, a)) -> IO a
