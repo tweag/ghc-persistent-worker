@@ -43,6 +43,7 @@ import GHC.Unit.Finder (FindResult (..), findImportedModule)
 import GHC.Unit.State (UnitIndexQuery (..))
 import GHC.Utils.Outputable (showPprUnsafe)
 import Internal.Log (dbg)
+import Types.Api (Target)
 
 #endif
 
@@ -155,6 +156,10 @@ showUnitEnv UnitEnv {..} = do
 debugSocketPath :: TargetSpec -> FilePath
 debugSocketPath target =
   "/tmp/ghc-persistent-worker/debug-sockets" </> show (fingerprintString (renderTargetSpec target))
+
+debugSocketPathTarget :: Target -> FilePath
+debugSocketPathTarget target =
+  "/tmp/ghc-persistent-worker/debug-sockets" </> show (fingerprintString (show target))
 
 #if defined(UNIT_INDEX)
 
