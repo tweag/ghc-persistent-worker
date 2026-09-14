@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package ghcserver;
+
+message ExecuteCommand {
+  message EnvironmentEntry {
+    bytes key = 1;
+    bytes value = 2;
+  }
+
+  repeated bytes argv = 1;
+  repeated EnvironmentEntry env = 2;
+}
+
+message ExecuteResponse {
+  int32 exit_code = 1;
+  string stderr = 2;
+}
+
+message Empty {}
+
+message Encoded {
+  bytes payload = 1;
+}
+
+service GhcServer {
+  rpc Execute(ExecuteCommand) returns (ExecuteResponse) {};
+  rpc Events(Empty) returns (stream Encoded) {};
+  rpc Api(Encoded) returns (Encoded) {};
+}

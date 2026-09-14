@@ -4,7 +4,7 @@
 {-# OPTIONS_GHC -Wno-duplicate-exports#-}
 {-# OPTIONS_GHC -Wno-dodgy-exports#-}
 module Proto.Instrument (
-        Instrument(..), Empty(), Event(), RebuildRequest()
+        Instrument(..), Empty(), Encoded()
     ) where
 import qualified Control.DeepSeq
 import qualified Data.ProtoLens.Prism
@@ -93,54 +93,54 @@ instance Control.DeepSeq.NFData Empty where
     = \ x__ -> Control.DeepSeq.deepseq (_Empty'_unknownFields x__) ()
 {- | Fields :
      
-         * 'Proto.Instrument_Fields.encoded' @:: Lens' Event Data.ByteString.ByteString@ -}
-data Event
-  = Event'_constructor {_Event'encoded :: !Data.ByteString.ByteString,
-                        _Event'_unknownFields :: !Data.ProtoLens.FieldSet}
+         * 'Proto.Instrument_Fields.payload' @:: Lens' Encoded Data.ByteString.ByteString@ -}
+data Encoded
+  = Encoded'_constructor {_Encoded'payload :: !Data.ByteString.ByteString,
+                          _Encoded'_unknownFields :: !Data.ProtoLens.FieldSet}
   deriving stock (Prelude.Eq, Prelude.Ord)
-instance Prelude.Show Event where
+instance Prelude.Show Encoded where
   showsPrec _ __x __s
     = Prelude.showChar
         '{'
         (Prelude.showString
            (Data.ProtoLens.showMessageShort __x) (Prelude.showChar '}' __s))
-instance Data.ProtoLens.Field.HasField Event "encoded" Data.ByteString.ByteString where
+instance Data.ProtoLens.Field.HasField Encoded "payload" Data.ByteString.ByteString where
   fieldOf _
     = (Prelude..)
         (Lens.Family2.Unchecked.lens
-           _Event'encoded (\ x__ y__ -> x__ {_Event'encoded = y__}))
+           _Encoded'payload (\ x__ y__ -> x__ {_Encoded'payload = y__}))
         Prelude.id
-instance Data.ProtoLens.Message Event where
-  messageName _ = Data.Text.pack "instrument.Event"
+instance Data.ProtoLens.Message Encoded where
+  messageName _ = Data.Text.pack "instrument.Encoded"
   packedMessageDescriptor _
     = "\n\
-      \\ENQEvent\DC2\CAN\n\
-      \\aencoded\CAN\SOH \SOH(\fR\aencoded"
+      \\aEncoded\DC2\CAN\n\
+      \\apayload\CAN\SOH \SOH(\fR\apayload"
   packedFileDescriptor _ = packedFileDescriptor
   fieldsByTag
     = let
-        encoded__field_descriptor
+        payload__field_descriptor
           = Data.ProtoLens.FieldDescriptor
-              "encoded"
+              "payload"
               (Data.ProtoLens.ScalarField Data.ProtoLens.BytesField ::
                  Data.ProtoLens.FieldTypeDescriptor Data.ByteString.ByteString)
               (Data.ProtoLens.PlainField
-                 Data.ProtoLens.Optional (Data.ProtoLens.Field.field @"encoded")) ::
-              Data.ProtoLens.FieldDescriptor Event
+                 Data.ProtoLens.Optional (Data.ProtoLens.Field.field @"payload")) ::
+              Data.ProtoLens.FieldDescriptor Encoded
       in
         Data.Map.fromList
-          [(Data.ProtoLens.Tag 1, encoded__field_descriptor)]
+          [(Data.ProtoLens.Tag 1, payload__field_descriptor)]
   unknownFields
     = Lens.Family2.Unchecked.lens
-        _Event'_unknownFields
-        (\ x__ y__ -> x__ {_Event'_unknownFields = y__})
+        _Encoded'_unknownFields
+        (\ x__ y__ -> x__ {_Encoded'_unknownFields = y__})
   defMessage
-    = Event'_constructor
-        {_Event'encoded = Data.ProtoLens.fieldDefault,
-         _Event'_unknownFields = []}
+    = Encoded'_constructor
+        {_Encoded'payload = Data.ProtoLens.fieldDefault,
+         _Encoded'_unknownFields = []}
   parseMessage
     = let
-        loop :: Event -> Data.ProtoLens.Encoding.Bytes.Parser Event
+        loop :: Encoded -> Data.ProtoLens.Encoding.Bytes.Parser Encoded
         loop x
           = do end <- Data.ProtoLens.Encoding.Bytes.atEnd
                if end then
@@ -164,8 +164,8 @@ instance Data.ProtoLens.Message Event where
                                        (do len <- Data.ProtoLens.Encoding.Bytes.getVarInt
                                            Data.ProtoLens.Encoding.Bytes.getBytes
                                              (Prelude.fromIntegral len))
-                                       "encoded"
-                                loop (Lens.Family2.set (Data.ProtoLens.Field.field @"encoded") y x)
+                                       "payload"
+                                loop (Lens.Family2.set (Data.ProtoLens.Field.field @"payload") y x)
                         wire
                           -> do !y <- Data.ProtoLens.Encoding.Wire.parseTaggedValueFromWire
                                         wire
@@ -174,12 +174,12 @@ instance Data.ProtoLens.Message Event where
                                      Data.ProtoLens.unknownFields (\ !t -> (:) y t) x)
       in
         (Data.ProtoLens.Encoding.Bytes.<?>)
-          (do loop Data.ProtoLens.defMessage) "Event"
+          (do loop Data.ProtoLens.defMessage) "Encoded"
   buildMessage
     = \ _x
         -> (Data.Monoid.<>)
              (let
-                _v = Lens.Family2.view (Data.ProtoLens.Field.field @"encoded") _x
+                _v = Lens.Family2.view (Data.ProtoLens.Field.field @"payload") _x
               in
                 if (Prelude.==) _v Data.ProtoLens.fieldDefault then
                     Data.Monoid.mempty
@@ -194,161 +194,46 @@ instance Data.ProtoLens.Message Event where
                          _v))
              (Data.ProtoLens.Encoding.Wire.buildFieldSet
                 (Lens.Family2.view Data.ProtoLens.unknownFields _x))
-instance Control.DeepSeq.NFData Event where
+instance Control.DeepSeq.NFData Encoded where
   rnf
     = \ x__
         -> Control.DeepSeq.deepseq
-             (_Event'_unknownFields x__)
-             (Control.DeepSeq.deepseq (_Event'encoded x__) ())
-{- | Fields :
-     
-         * 'Proto.Instrument_Fields.target' @:: Lens' RebuildRequest Data.Text.Text@ -}
-data RebuildRequest
-  = RebuildRequest'_constructor {_RebuildRequest'target :: !Data.Text.Text,
-                                 _RebuildRequest'_unknownFields :: !Data.ProtoLens.FieldSet}
-  deriving stock (Prelude.Eq, Prelude.Ord)
-instance Prelude.Show RebuildRequest where
-  showsPrec _ __x __s
-    = Prelude.showChar
-        '{'
-        (Prelude.showString
-           (Data.ProtoLens.showMessageShort __x) (Prelude.showChar '}' __s))
-instance Data.ProtoLens.Field.HasField RebuildRequest "target" Data.Text.Text where
-  fieldOf _
-    = (Prelude..)
-        (Lens.Family2.Unchecked.lens
-           _RebuildRequest'target
-           (\ x__ y__ -> x__ {_RebuildRequest'target = y__}))
-        Prelude.id
-instance Data.ProtoLens.Message RebuildRequest where
-  messageName _ = Data.Text.pack "instrument.RebuildRequest"
-  packedMessageDescriptor _
-    = "\n\
-      \\SORebuildRequest\DC2\SYN\n\
-      \\ACKtarget\CAN\SOH \SOH(\tR\ACKtarget"
-  packedFileDescriptor _ = packedFileDescriptor
-  fieldsByTag
-    = let
-        target__field_descriptor
-          = Data.ProtoLens.FieldDescriptor
-              "target"
-              (Data.ProtoLens.ScalarField Data.ProtoLens.StringField ::
-                 Data.ProtoLens.FieldTypeDescriptor Data.Text.Text)
-              (Data.ProtoLens.PlainField
-                 Data.ProtoLens.Optional (Data.ProtoLens.Field.field @"target")) ::
-              Data.ProtoLens.FieldDescriptor RebuildRequest
-      in
-        Data.Map.fromList
-          [(Data.ProtoLens.Tag 1, target__field_descriptor)]
-  unknownFields
-    = Lens.Family2.Unchecked.lens
-        _RebuildRequest'_unknownFields
-        (\ x__ y__ -> x__ {_RebuildRequest'_unknownFields = y__})
-  defMessage
-    = RebuildRequest'_constructor
-        {_RebuildRequest'target = Data.ProtoLens.fieldDefault,
-         _RebuildRequest'_unknownFields = []}
-  parseMessage
-    = let
-        loop ::
-          RebuildRequest
-          -> Data.ProtoLens.Encoding.Bytes.Parser RebuildRequest
-        loop x
-          = do end <- Data.ProtoLens.Encoding.Bytes.atEnd
-               if end then
-                   do (let missing = []
-                       in
-                         if Prelude.null missing then
-                             Prelude.return ()
-                         else
-                             Prelude.fail
-                               ((Prelude.++)
-                                  "Missing required fields: "
-                                  (Prelude.show (missing :: [Prelude.String]))))
-                      Prelude.return
-                        (Lens.Family2.over
-                           Data.ProtoLens.unknownFields (\ !t -> Prelude.reverse t) x)
-               else
-                   do tag <- Data.ProtoLens.Encoding.Bytes.getVarInt
-                      case tag of
-                        10
-                          -> do y <- (Data.ProtoLens.Encoding.Bytes.<?>)
-                                       (do len <- Data.ProtoLens.Encoding.Bytes.getVarInt
-                                           Data.ProtoLens.Encoding.Bytes.getText
-                                             (Prelude.fromIntegral len))
-                                       "target"
-                                loop (Lens.Family2.set (Data.ProtoLens.Field.field @"target") y x)
-                        wire
-                          -> do !y <- Data.ProtoLens.Encoding.Wire.parseTaggedValueFromWire
-                                        wire
-                                loop
-                                  (Lens.Family2.over
-                                     Data.ProtoLens.unknownFields (\ !t -> (:) y t) x)
-      in
-        (Data.ProtoLens.Encoding.Bytes.<?>)
-          (do loop Data.ProtoLens.defMessage) "RebuildRequest"
-  buildMessage
-    = \ _x
-        -> (Data.Monoid.<>)
-             (let
-                _v = Lens.Family2.view (Data.ProtoLens.Field.field @"target") _x
-              in
-                if (Prelude.==) _v Data.ProtoLens.fieldDefault then
-                    Data.Monoid.mempty
-                else
-                    (Data.Monoid.<>)
-                      (Data.ProtoLens.Encoding.Bytes.putVarInt 10)
-                      ((Prelude..)
-                         (\ bs
-                            -> (Data.Monoid.<>)
-                                 (Data.ProtoLens.Encoding.Bytes.putVarInt
-                                    (Prelude.fromIntegral (Data.ByteString.length bs)))
-                                 (Data.ProtoLens.Encoding.Bytes.putBytes bs))
-                         Data.Text.Encoding.encodeUtf8 _v))
-             (Data.ProtoLens.Encoding.Wire.buildFieldSet
-                (Lens.Family2.view Data.ProtoLens.unknownFields _x))
-instance Control.DeepSeq.NFData RebuildRequest where
-  rnf
-    = \ x__
-        -> Control.DeepSeq.deepseq
-             (_RebuildRequest'_unknownFields x__)
-             (Control.DeepSeq.deepseq (_RebuildRequest'target x__) ())
+             (_Encoded'_unknownFields x__)
+             (Control.DeepSeq.deepseq (_Encoded'payload x__) ())
 data Instrument = Instrument {}
 instance Data.ProtoLens.Service.Types.Service Instrument where
   type ServiceName Instrument = "Instrument"
   type ServicePackage Instrument = "instrument"
-  type ServiceMethods Instrument = '["notifyMe", "triggerRebuild"]
+  type ServiceMethods Instrument = '["api", "events"]
   packedServiceDescriptor _
     = "\n\
       \\n\
       \Instrument\DC24\n\
-      \\bNotifyMe\DC2\DC1.instrument.Empty\SUB\DC1.instrument.Event\"\NUL0\SOH\DC2A\n\
-      \\SOTriggerRebuild\DC2\SUB.instrument.RebuildRequest\SUB\DC1.instrument.Empty\"\NUL"
-instance Data.ProtoLens.Service.Types.HasMethodImpl Instrument "notifyMe" where
-  type MethodName Instrument "notifyMe" = "NotifyMe"
-  type MethodInput Instrument "notifyMe" = Empty
-  type MethodOutput Instrument "notifyMe" = Event
-  type MethodStreamingType Instrument "notifyMe" = 'Data.ProtoLens.Service.Types.ServerStreaming
-instance Data.ProtoLens.Service.Types.HasMethodImpl Instrument "triggerRebuild" where
-  type MethodName Instrument "triggerRebuild" = "TriggerRebuild"
-  type MethodInput Instrument "triggerRebuild" = RebuildRequest
-  type MethodOutput Instrument "triggerRebuild" = Empty
-  type MethodStreamingType Instrument "triggerRebuild" = 'Data.ProtoLens.Service.Types.NonStreaming
+      \\ACKEvents\DC2\DC1.instrument.Empty\SUB\DC3.instrument.Encoded\"\NUL0\SOH\DC21\n\
+      \\ETXApi\DC2\DC3.instrument.Encoded\SUB\DC3.instrument.Encoded\"\NUL"
+instance Data.ProtoLens.Service.Types.HasMethodImpl Instrument "events" where
+  type MethodName Instrument "events" = "Events"
+  type MethodInput Instrument "events" = Empty
+  type MethodOutput Instrument "events" = Encoded
+  type MethodStreamingType Instrument "events" = 'Data.ProtoLens.Service.Types.ServerStreaming
+instance Data.ProtoLens.Service.Types.HasMethodImpl Instrument "api" where
+  type MethodName Instrument "api" = "Api"
+  type MethodInput Instrument "api" = Encoded
+  type MethodOutput Instrument "api" = Encoded
+  type MethodStreamingType Instrument "api" = 'Data.ProtoLens.Service.Types.NonStreaming
 packedFileDescriptor :: Data.ByteString.ByteString
 packedFileDescriptor
   = "\n\
     \\DLEinstrument.proto\DC2\n\
     \instrument\"\a\n\
-    \\ENQEmpty\"!\n\
-    \\ENQEvent\DC2\CAN\n\
-    \\aencoded\CAN\SOH \SOH(\fR\aencoded\"(\n\
-    \\SORebuildRequest\DC2\SYN\n\
-    \\ACKtarget\CAN\SOH \SOH(\tR\ACKtarget2\133\SOH\n\
+    \\ENQEmpty\"#\n\
+    \\aEncoded\DC2\CAN\n\
+    \\apayload\CAN\SOH \SOH(\fR\apayload2u\n\
     \\n\
     \Instrument\DC24\n\
-    \\bNotifyMe\DC2\DC1.instrument.Empty\SUB\DC1.instrument.Event\"\NUL0\SOH\DC2A\n\
-    \\SOTriggerRebuild\DC2\SUB.instrument.RebuildRequest\SUB\DC1.instrument.Empty\"\NULJ\229\STX\n\
-    \\ACK\DC2\EOT\NUL\NUL\DC1\SOH\n\
+    \\ACKEvents\DC2\DC1.instrument.Empty\SUB\DC3.instrument.Encoded\"\NUL0\SOH\DC21\n\
+    \\ETXApi\DC2\DC3.instrument.Encoded\SUB\DC3.instrument.Encoded\"\NULJ\150\STX\n\
+    \\ACK\DC2\EOT\NUL\NUL\r\SOH\n\
     \\b\n\
     \\SOH\f\DC2\ETX\NUL\NUL\DC2\n\
     \\b\n\
@@ -363,7 +248,7 @@ packedFileDescriptor
     \\STX\EOT\SOH\DC2\EOT\ACK\NUL\b\SOH\n\
     \\n\
     \\n\
-    \\ETX\EOT\SOH\SOH\DC2\ETX\ACK\b\r\n\
+    \\ETX\EOT\SOH\SOH\DC2\ETX\ACK\b\SI\n\
     \\v\n\
     \\EOT\EOT\SOH\STX\NUL\DC2\ETX\a\STX\DC4\n\
     \\f\n\
@@ -374,41 +259,28 @@ packedFileDescriptor
     \\ENQ\EOT\SOH\STX\NUL\ETX\DC2\ETX\a\DC2\DC3\n\
     \\n\
     \\n\
-    \\STX\EOT\STX\DC2\EOT\n\
-    \\NUL\f\SOH\n\
+    \\STX\ACK\NUL\DC2\EOT\n\
+    \\NUL\r\SOH\n\
     \\n\
     \\n\
-    \\ETX\EOT\STX\SOH\DC2\ETX\n\
-    \\b\SYN\n\
+    \\ETX\ACK\NUL\SOH\DC2\ETX\n\
+    \\b\DC2\n\
     \\v\n\
-    \\EOT\EOT\STX\STX\NUL\DC2\ETX\v\STX\DC4\n\
+    \\EOT\ACK\NUL\STX\NUL\DC2\ETX\v\STX/\n\
     \\f\n\
-    \\ENQ\EOT\STX\STX\NUL\ENQ\DC2\ETX\v\STX\b\n\
+    \\ENQ\ACK\NUL\STX\NUL\SOH\DC2\ETX\v\ACK\f\n\
     \\f\n\
-    \\ENQ\EOT\STX\STX\NUL\SOH\DC2\ETX\v\t\SI\n\
+    \\ENQ\ACK\NUL\STX\NUL\STX\DC2\ETX\v\r\DC2\n\
     \\f\n\
-    \\ENQ\EOT\STX\STX\NUL\ETX\DC2\ETX\v\DC2\DC3\n\
-    \\n\
-    \\n\
-    \\STX\ACK\NUL\DC2\EOT\SO\NUL\DC1\SOH\n\
-    \\n\
-    \\n\
-    \\ETX\ACK\NUL\SOH\DC2\ETX\SO\b\DC2\n\
+    \\ENQ\ACK\NUL\STX\NUL\ACK\DC2\ETX\v\GS#\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\NUL\ETX\DC2\ETX\v$+\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\NUL\DC2\ETX\SI\STX/\n\
+    \\EOT\ACK\NUL\STX\SOH\DC2\ETX\f\STX'\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\SOH\DC2\ETX\SI\ACK\SO\n\
+    \\ENQ\ACK\NUL\STX\SOH\SOH\DC2\ETX\f\ACK\t\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\STX\DC2\ETX\SI\SI\DC4\n\
+    \\ENQ\ACK\NUL\STX\SOH\STX\DC2\ETX\f\n\
+    \\DC1\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\ACK\DC2\ETX\SI\US%\n\
-    \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\ETX\DC2\ETX\SI&+\n\
-    \\v\n\
-    \\EOT\ACK\NUL\STX\SOH\DC2\ETX\DLE\STX7\n\
-    \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\SOH\DC2\ETX\DLE\ACK\DC4\n\
-    \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\STX\DC2\ETX\DLE\NAK#\n\
-    \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\ETX\DC2\ETX\DLE.3b\ACKproto3"
+    \\ENQ\ACK\NUL\STX\SOH\ETX\DC2\ETX\f\FS#b\ACKproto3"
