@@ -76,6 +76,11 @@ maybe'data' ::
    Data.ProtoLens.Field.HasField s "maybe'data'" a) =>
   Lens.Family2.LensLike' f s a
 maybe'data' = Data.ProtoLens.Field.field @"maybe'data'"
+payload ::
+  forall f s a.
+  (Prelude.Functor f, Data.ProtoLens.Field.HasField s "payload" a) =>
+  Lens.Family2.LensLike' f s a
+payload = Data.ProtoLens.Field.field @"payload"
 stderr ::
   forall f s a.
   (Prelude.Functor f, Data.ProtoLens.Field.HasField s "stderr" a) =>

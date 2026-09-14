@@ -39,9 +39,22 @@ message ExecuteEvent {
   }
 }
 
+message Empty {}
+
+message Encoded {
+  bytes payload = 1;
+}
+
 service Worker {
   // TODO(ctolliday) delete once workers switch to Exec
   rpc Execute(ExecuteCommand) returns (ExecuteResponse) {};
 
   rpc Exec(stream ExecuteEvent) returns (ExecuteResponse) {};
+
+  // Extensions of the Buck protocol, not used by Buck.
+  // Stream the instrumentation events of the server.
+  rpc Events(Empty) returns (stream Encoded) {};
+
+  // Send a request to the server's API.
+  rpc Api(Encoded) returns (Encoded) {};
 }
