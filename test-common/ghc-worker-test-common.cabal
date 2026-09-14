@@ -17,6 +17,7 @@ common all
     DeriveAnyClass,
     DerivingStrategies,
     DuplicateRecordFields,
+    GADTs,
     LambdaCase,
     NamedFieldPuns,
     NoFieldSelectors,
@@ -26,6 +27,8 @@ common all
     OverloadedStrings,
     QuasiQuotes,
     RecordWildCards,
+    StandaloneDeriving,
+    StandaloneKindSignatures,
     StrictData,
     TypeFamilies
   build-depends:
@@ -85,7 +88,6 @@ library
     filepath,
     exceptions,
     extra,
-    generic-lens,
     ghc,
     ghc-paths,
     hashable,
@@ -100,4 +102,5 @@ library
     text,
     transformers,
     time,
+    stm,
     typed-process
