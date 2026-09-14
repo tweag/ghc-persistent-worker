@@ -12,6 +12,7 @@ import Data.Set (Set)
 import GHC.Unit.Types (UnitId (..))
 import Language.Haskell.Syntax.Module.Name (ModuleName (..))
 import System.Directory.OsPath (createDirectoryIfMissing)
+import qualified System.File.OsPath as OsPath
 import System.OsPath.Extra (OsPath, fromOsPath, osp, (</>))
 import Test.Build (metadataArgs)
 import Test.Data.Env (SessionEnv (..))
@@ -29,6 +30,7 @@ import Test.Data.Project (
 import Test.Data.Scheduler (Schedule (..), Task (..))
 import Test.Path (cachedUnitPath, moduleName, moduleSourcePath, unitCacheDir, unitName)
 import Types.Args (Args (..))
+import Types.ByteString (toUtf8Lazy)
 import Types.CachedDeps (
   CachedBuildPlan (..),
   CachedBuildPlans (..),
@@ -46,7 +48,7 @@ writeUnitArgs :: OsPath -> [String] -> UnitKey -> IO OsPath
 writeUnitArgs tempDir ghcOptions unit = do
   createDirectoryIfMissing True dir
   let argsPath = dir </> [osp|unit_args|]
-  writeFile (fromOsPath argsPath) (unlines ghcOptions)
+  OsPath.writeFile argsPath (toUtf8Lazy (unlines ghcOptions))
   pure argsPath
   where
     dir = tempDir </> unitCacheDir unit

@@ -83,7 +83,7 @@ data SessionEnv =
     env :: Env,
     -- | Per-package DB paths for external dependency packages, matching the Buck model where each
     -- external dep has its own package DB and the transitive closure is passed as separate @-package-db@ flags.
-    extDepDbs :: [FilePath],
+    extDepDbs :: [OsPath],
     -- | All external dependency indexes used by any module in the project.
     extDeps :: Set Int
   }
