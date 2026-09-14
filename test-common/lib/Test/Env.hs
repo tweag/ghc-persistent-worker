@@ -2,7 +2,7 @@ module Test.Env where
 
 import System.Directory (removeDirectoryRecursive)
 import System.IO.Temp (createTempDirectory, getCanonicalTemporaryDirectory)
-import System.OsPath.Extra (decodeUtf, encodeUtf)
+import System.OsPath.Extra (encodeUtf, fromOsPath, toOsPath)
 import Test.Data.Env (SessionEnv (..), TestEnv (..))
 import Test.Run (mkEnv)
 import Test.Tasty (TestTree, withResource)
@@ -18,16 +18,13 @@ import Types.Args (Args (..), buildPlanNoLegacy, emptyArgs)
 -- This is discarded and recreated when the second build is started, in 'newResumeSessionEnv'.
 newSessionEnv :: TestEnv -> IO SessionEnv
 newSessionEnv shared@TestEnv {rootDir} = do
-  rootDirFp <- decodeUtf rootDir
-  sourceDir <- encodeUtf =<< createTempDirectory rootDirFp "src"
-  tempDir <- encodeUtf =<< createTempDirectory rootDirFp "tmp"
+  sourceDir <- toOsPath <$> createTempDirectory (fromOsPath rootDir) "src"
+  tempDir <- toOsPath <$> createTempDirectory (fromOsPath rootDir) "tmp"
   (env, _) <- mkEnv
   pure SessionEnv {shared, sourceDir, tempDir, env, extDepDbs = [], extDeps = mempty}
 
 -- | Reuses the previous session's @srcDir@ and @tmpDir@ (preserving written sources and artifacts) but creates a fresh
 -- 'Env' with an empty 'WorkerState', simulating a worker restart.
---
--- Some of the artifacts are deleted by @BuildSystem@, representing an action performed by Buck.
 newResumeSessionEnv :: SessionEnv -> IO SessionEnv
 newResumeSessionEnv prev = do
   (env, _) <- mkEnv
@@ -42,9 +39,8 @@ acquireTestEnv = do
   pure TestEnv {rootDir, baseArgs = (emptyArgs []) {fields = Just buildPlanNoLegacy}}
 
 releaseTestEnv :: TestEnv -> IO ()
-releaseTestEnv env = do
-  rootDirFp <- decodeUtf env.rootDir
-  removeDirectoryRecursive rootDirFp
+releaseTestEnv env =
+  removeDirectoryRecursive (fromOsPath env.rootDir)
 
 withTestEnv :: (IO TestEnv -> TestTree) -> TestTree
 withTestEnv =
