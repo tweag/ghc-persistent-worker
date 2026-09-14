@@ -28,6 +28,9 @@ allow-newer:
   , ghc-debug-client:*
   , tasty-hedgehog:hedgehog
 
+constraints:
+  grapesy >= 1.1.1
+
 if (impl(ghc >= 9.11))
   allow-newer:
     time,

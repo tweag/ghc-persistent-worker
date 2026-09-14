@@ -27,13 +27,8 @@ import qualified Data.Vector
 import qualified Data.Vector.Generic
 import qualified Data.Vector.Unboxed
 import qualified Text.Read
-encoded ::
+payload ::
   forall f s a.
-  (Prelude.Functor f, Data.ProtoLens.Field.HasField s "encoded" a) =>
+  (Prelude.Functor f, Data.ProtoLens.Field.HasField s "payload" a) =>
   Lens.Family2.LensLike' f s a
-encoded = Data.ProtoLens.Field.field @"encoded"
-target ::
-  forall f s a.
-  (Prelude.Functor f, Data.ProtoLens.Field.HasField s "target" a) =>
-  Lens.Family2.LensLike' f s a
-target = Data.ProtoLens.Field.field @"target"
+payload = Data.ProtoLens.Field.field @"payload"
