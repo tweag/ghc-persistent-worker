@@ -379,8 +379,9 @@ depsFromModuleGraph nodes target =
           in (seen', maybe deps' (: deps') (cachedDep key))
 
     cachedDep = \case
-      NodeKey_Module (ModNodeKeyWithUid (GWIB name isBoot) uid) ->
-        Just CachedDep {name = JsonFs (bootName isBoot name), package = JsonFs uid}
+      NodeKey_Module (ModNodeKeyWithUid (GWIB name isBoot) uid) -> do
+        let bname = bootName isBoot name
+        Just CachedDep {name = JsonFs bname, package = JsonFs uid}
       _ ->
         Nothing
 
