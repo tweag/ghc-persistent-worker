@@ -134,7 +134,7 @@ createGhcMethods state features status traceId instrChan =
 runWorker :: CliOptions -> IO ()
 runWorker CliOptions {serve, features} = do
   state <- newState
-  status <- newMVar WorkerStatus {active = 0}
+  status <- newMVar WorkerStatus {active = 0, nextRequestId = 0}
   let
     methods = CreateMethods {
       createInstrumentation = createInstrumentMethods state,
