@@ -85,11 +85,12 @@ runBuildTask env label tempName expectedCodes action =
 runMetadata :: SessionEnv -> (GenUnit BuildModule -> Args) -> GenUnit BuildModule -> IO RequestResult
 runMetadata env mkArgs unit = do
   let args = mkArgs unit
+      srcFiles = [fromOsPath (env.sourceDir </> moduleSourcePath gm.key) | gm <- unit.modules]
   -- Ensure the build plan output directory exists for incremental state files
   for_ args.buildPlan \ (BuildPlanPath bp) ->
     createDirectoryIfMissing True (takeDirectory bp)
   runBuildTask env "metadata" (unitTmpDir unit.key) [] \ taskEnv -> do
-    fst <$> computeMetadata taskEnv {args}
+    fst <$> computeMetadata taskEnv {args = args {ghcOptions = args.ghcOptions ++ srcFiles}}
 
 compileTarget :: ModuleKey -> ModuleTarget
 compileTarget key =
@@ -137,7 +138,7 @@ metadataArgs env useIncremental GenUnit {key, modules, depUnits} =
   env.shared.baseArgs {
     buildPlan = Just buildPlanPath,
     sourceHashes = if useIncremental then Just perUnitMetaPath else Nothing,
-    ghcOptions = staticMetaArgs ++ extDepDbArgs ++ thArgs ++ extDepPkgArgs ++ metaArgs ++ unitDepArgs ++ srcFiles
+    ghcOptions = staticMetaArgs ++ extDepDbArgs ++ thArgs ++ extDepPkgArgs ++ metaArgs ++ unitDepArgs
   }
   where
     metaArgs = [
@@ -154,13 +155,11 @@ metadataArgs env useIncremental GenUnit {key, modules, depUnits} =
 
     allExtDeps = fold [m.extDeps | m <- modules]
 
-    extDepDbArgs = concatMap (\db -> ["-package-db", db]) env.extDepDbs
+    extDepDbArgs = concatMap (\ db -> ["-package-db", fromOsPath db]) env.extDepDbs
 
     extDepPkgArgs = concatMap (\ i -> ["-package", extDepName i]) (Set.toList allExtDeps)
 
     unitDepArgs = concatMap (\ d -> ["-package-id", unitName d]) depUnits
-
-    srcFiles = [fromOsPath (env.sourceDir </> moduleSourcePath gm.key) | gm <- modules]
 
     sessionTmpDir = env.tempDir </> unitTmpDir key
 

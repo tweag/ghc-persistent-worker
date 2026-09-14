@@ -72,6 +72,9 @@ extDepName i = "extdep" ++ show i
 extDepModuleName :: Int -> String
 extDepModuleName i = "Extdep" ++ show i
 
+extDepModulePath :: Int -> OsPath
+extDepModulePath i = [osp|Extdep|] <> toOsPath (show i)
+
 -- | Value name exported by an external dependency module, e.g. @"extdep_value_0"@.
 extDepValueName :: Int -> String
 extDepValueName i = "extdep_value_" ++ show i
