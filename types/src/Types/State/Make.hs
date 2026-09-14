@@ -135,6 +135,8 @@ data MakeState =
     -- membership in 'bcoCache', not stored here; this map only preserves the last known size\/access metadata so the
     -- instrumentation UI's bytecode browser can still display evicted modules after they've dropped out of
     -- 'bcoCache'.
+    --
+    -- TODO can't we just merge this into bcoCache and make the linkable Maybe
     bcoHistory :: M.Map Module BcoHistoryEntry
   }
 
