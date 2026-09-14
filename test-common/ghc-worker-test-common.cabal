@@ -43,6 +43,7 @@ library
     Test.Data.Env
     Test.Data.Project
     Test.Data.ProjectBuild
+    Test.Data.Schedule
     Test.Data.Scheduler
     Test.Data.SourceMode
     Test.Data.TestLog
@@ -62,6 +63,13 @@ library
     Test.Resume
     Test.Run
     Test.Scheduler
+    Test.Scheduler.Active
+    Test.Scheduler.Decision
+    Test.Scheduler.Dispatch
+    Test.Scheduler.Invariants
+    Test.Scheduler.Pending
+    Test.Scheduler.Simple
+    Test.Scheduler.State
     Test.Source
     Test.Target
   build-depends:
@@ -83,6 +91,7 @@ library
     lens,
     monad-control,
     mtl,
+    stm,
     tasty,
     tasty-hedgehog,
     temporary,

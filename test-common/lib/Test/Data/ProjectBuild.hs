@@ -4,7 +4,7 @@ import Data.Map (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
 import Test.Data.Project (Component (..), InitialProject (..), ModuleKey (..), ModuleSource, TaskKey (..))
-import Test.Data.Scheduler (Schedule (..), Task (..))
+import Test.Data.Schedule (Schedule (..), ScheduleNode (..))
 
 -- | Metadata that indicates which modules should be cleaned up and rebuilt.
 data RebuildSet =

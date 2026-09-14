@@ -13,7 +13,7 @@ import System.OsPath.Extra (OsPath, fromOsPath, osp, (<.>), (</>))
 import Test.Data.BuildSystem (BuildResult (..))
 import Test.Data.Project (InitialProject (..), ModuleKey (..), ModuleSource (..), TaskKey (..), taskModuleKeys)
 import Test.Data.ProjectBuild (ProjectBuild (..), RebuildSet (..), ResumePlan (..))
-import Test.Data.Scheduler (Schedule (..), Task (..), unexpectedFailure)
+import Test.Data.Schedule (Schedule (..), ScheduleNode (..), unexpectedFailure)
 import Test.Path (moduleName, moduleOutputBase, showUnit)
 
 showModuleKey :: ModuleKey -> String
@@ -27,7 +27,7 @@ showTaskKey = \case
   TaskMeta unit -> showUnit unit
   TaskCompile m -> showModuleKey m
 
-showTask :: Task TaskKey a -> String
+showTask :: ScheduleNode TaskKey a -> String
 showTask task
   | Set.null task.deps = showTaskKey task.key
   | otherwise = showTaskKey task.key ++ " <- " ++ intercalate ", " (fmap showTaskKey (Set.toList task.deps))

@@ -277,6 +277,7 @@
           "lens"
           "monad-control"
           "mtl"
+          "stm"
           "tasty"
           "tasty-hedgehog"
           "temporary"

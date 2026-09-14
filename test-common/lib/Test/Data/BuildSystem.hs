@@ -3,9 +3,9 @@ module Test.Data.BuildSystem where
 import Data.Map.Strict (Map)
 import Data.Set (Set)
 import Test.Data.Env (SessionEnv)
-import Test.Data.Project (Component, ModuleKey, TaskKey, ResumeComponent)
+import Test.Data.Project (Component, ModuleKey, ResumeComponent, TaskKey)
 import Test.Data.ProjectBuild (RebuildSet)
-import Test.Data.Scheduler (RequestFailure, Schedule (..))
+import Test.Data.Schedule (RequestFailure, Schedule (..))
 
 -- | Output of the scheduler for a single build.
 data BuildResult =
