@@ -61,7 +61,7 @@ writeUnitCache tmp srcDir unit = do
       CachedUnit {
         build_plan = Just modules,
         cache = Nothing,
-        is_binary = False,
+        is_binary = Nothing,
         unit_args = Just argsPath,
         unit_buck_args = Nothing,
         dep_units = Nothing
