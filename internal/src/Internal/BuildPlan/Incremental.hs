@@ -18,6 +18,8 @@ import GHC.Utils.Outputable (SDoc)
 import Internal.Cache.Metadata (loadCachedModules)
 import Internal.Compat.GHC914 (hscModuleGraph)
 import Internal.Json (optionalJsonFile, requiredJsonFile)
+import System.Directory (createDirectoryIfMissing)
+import System.FilePath (takeDirectory)
 import System.OsPath.Extra (OsPath, fromOsPath)
 import Types.BuckArgs (decodeJsonArg)
 import Types.BuildPlan (
@@ -68,9 +70,15 @@ loadIncrementalState incrementalState hashes targets = do
   pure $ state <&> \ s -> (sourceChanges s hashes targets, s.buildPlanJson)
 
 -- | Write the incremental state file after a successful metadata computation.
+--
+-- Recreates the containing directory if it's missing, since a scoped cache/output clean may have removed it since
+-- the last time metadata ran for this unit.
 writeIncrementalState :: IncrementalStatePath -> SourceHashes -> BuildPlanJson -> IO ()
-writeIncrementalState incrementalState hashes buildPlanJson =
-  encodeFile (fromOsPath incrementalState.path) (storeHashes hashes buildPlanJson)
+writeIncrementalState incrementalState hashes buildPlanJson = do
+  createDirectoryIfMissing True (takeDirectory path)
+  encodeFile path (storeHashes hashes buildPlanJson)
+  where
+    path = fromOsPath incrementalState.path
 
 -- | Merge the result of an incremental downsweep (targeting only modified modules)
 -- with the full cached module graph (containing all modules from the previous run).
