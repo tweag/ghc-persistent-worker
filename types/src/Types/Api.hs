@@ -107,6 +107,8 @@ targetFromWorkerSpec = \case
 data TaskKind =
   Metadata
   |
+  -- TODO this needs to be generalized, and stored in TaskTrigger.
+  -- We probably want something like "rebuild only target" vs "rebuild all deps".
   Build { rebuild :: Bool }
   |
   Execute
@@ -160,6 +162,7 @@ data Event =
   }
   |
   -- | The project structure at the point when a client connects.
+  -- TODO we need an update mechanism as well
   ProjectStructure { units :: [UnitSummary] }
   |
   -- | Sent when bytecode in the loader state was accessed.
