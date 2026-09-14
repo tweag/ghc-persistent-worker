@@ -15,7 +15,7 @@ import Test.Resource.Build (runResourceBuild)
 import Test.Resource.Project (mkUnit)
 import Test.Resource.Stats (PhaseReference (..))
 import Test.Run (unitTest)
-import Test.Tasty (DependencyType (..), TestTree, dependentTestGroup)
+import Test.Tasty (TestTree, inOrderTestGroup)
 
 -- | All units in dependency order for the resource test.
 -- Three units with TH enabled, 20 bindings per module, and 2 external dependency packages.
@@ -66,7 +66,7 @@ test_memory_basic =
 
 test_resources :: TestTree
 test_resources =
-    dependentTestGroup "resources" AllFinish [
+    inOrderTestGroup "resources" [
       test_memory_basic,
       test_memory_lazyByteCode
     ]

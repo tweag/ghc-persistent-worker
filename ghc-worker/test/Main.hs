@@ -17,11 +17,10 @@ import ScheduleTest (test_sortScheduleOrder)
 import System.IO (hSetEncoding, stderr, stdout, utf8)
 import Test.Data.Env (testConfigOptions)
 import Test.Tasty (
-  DependencyType (AllFinish),
   TestTree,
-  after,
   defaultIngredients,
   defaultMainWithIngredients,
+  inOrderTestGroup,
   includingOptions,
   testGroup,
   )
@@ -61,13 +60,10 @@ testsGeneral =
 
 tests :: TestTree
 tests =
-  testGroup "all" [
+  inOrderTestGroup "all" [
     test_resources,
-    afterResources (testGroup "general" testsGeneral)
+    testGroup "general" testsGeneral
   ]
-  where
-    -- tasty 1.5 has @sequentialTestGroup@, but the current Nix env has 1.4, so we'll make do with this for now.
-    afterResources = after AllFinish "resources"
 
 main :: IO ()
 main = do
