@@ -266,8 +266,7 @@ loadCachedModules ::
   CachedUnit ->
   IO [ModuleGraphNode]
 loadCachedModules useFixedNodes hsc_env unit CachedUnit {build_plan, cache} =
-  traverse (uncurry (loadCachedModule useFixedNodes hsc_env unit)) modules
-  -- mkModuleGraph . catMaybes <$> traverse (uncurry (loadCachedModule useFixedNodes hsc_env unit)) modules
+  catMaybes <$> traverse (uncurry (loadCachedModule useFixedNodes hsc_env unit)) modules
   where
     modules = Map.toList (fold (cache <|> build_plan))
 
@@ -324,8 +323,7 @@ insertPreparedUnit logger features hsc_env pu = do
 
   modify (updateMakeState (updateExtraLibs . insertUnitEnv hsc_env2))
   nodes <- liftIO $ traverse (uncurry (loadCachedModule features.fixedNodesCache hsc_env2 pu.unitId)) pu.moduleEntries
-  modify (updateMakeState (storeModuleGraphNodes nodes))
-  -- modify (updateMakeState (storeModuleGraph (mkModuleGraph (catMaybes nodes))))
+  modify (updateMakeState (storeModuleGraphNodes (catMaybes nodes)))
   pure hsc_env2
 
 loadCachedBuildPlan ::
