@@ -62,6 +62,7 @@ library
     GhcServer.Data.BuildSystem
     GhcServer.Data.Config
     GhcServer.Data.Request
+    GhcServer.Data.Unit
     GhcServer.Data.UnitConfig
     GhcServer.Cache
     GhcServer.Grpc
