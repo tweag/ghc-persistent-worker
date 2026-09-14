@@ -151,6 +151,8 @@
       library = {
         enable = true;
         dependencies = [
+          "async"
+          "aeson"
           "binary"
           "brick"
           "buck-worker-internal"
@@ -158,6 +160,8 @@
           "buck-worker-types"
           "bytestring"
           "containers"
+          "exceptions"
+          "extra"
           "generic-lens"
           "ghc-debug-brick"
           "directory"
@@ -165,9 +169,16 @@
           "fsnotify"
           "grapesy"
           "lens"
-          "microlens-platform"
+          "lifted-async"
+          "lifted-base"
+          "mtl"
+          "network"
+          "optparse-applicative"
+          "os-string"
+          "typed-process"
           "text"
           "time"
+          "unix"
           "vty"
         ];
       };
@@ -281,7 +292,6 @@
           "extra"
           "file-io"
           "filepath"
-          "generic-lens"
           "ghc"
           "ghc-paths"
           "hashable"
