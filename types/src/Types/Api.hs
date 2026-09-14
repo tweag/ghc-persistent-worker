@@ -2,12 +2,12 @@
 
 module Types.Api where
 
-import Data.Aeson (FromJSON, ToJSON)
+import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
 import Data.Binary (Binary)
 import Data.Map (Map)
 import Data.String (IsString)
 import qualified Data.Text as Text
-import Data.Text (Text)
+import Data.Text (Text, unpack)
 import qualified GHC
 import GHC.Generics (Generic)
 import GHC.Unit (Module, UnitId, mkModuleName, moduleName, moduleNameString, moduleUnitId, stringToUnitId, unitIdString)
@@ -115,6 +115,8 @@ targetFromWorkerSpec = \case
 data TaskKind =
   Metadata
   |
+  -- TODO this needs to be generalized, and stored in TaskTrigger.
+  -- We probably want something like "rebuild only target" vs "rebuild all deps".
   Build { rebuild :: Bool }
   |
   Execute
@@ -129,17 +131,46 @@ data TaskTrigger =
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary, FromJSON, ToJSON)
 
-data ApiRequest =
-  TriggerTask TaskTrigger
-  |
-  EvictBytecode Target
-  |
-  Clean Target
-  deriving stock (Eq, Show, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+data ApiRequest a where
+  TriggerTask :: { trigger :: TaskTrigger } -> ApiRequest ()
+  EvictBytecode :: { target :: Target } -> ApiRequest ()
+  Clean :: { target :: Target } -> ApiRequest ()
 
-data ApiResponse =
-  ApiSuccess
+deriving stock instance Eq (ApiRequest a)
+deriving stock instance Show (ApiRequest a)
+
+data SomeApiRequest where
+  SomeApiRequest :: ToJSON a => ApiRequest a -> SomeApiRequest
+
+instance ToJSON SomeApiRequest where
+  toJSON (SomeApiRequest req) = case req of
+    TriggerTask {trigger} ->
+      tagged "TriggerTask" ["trigger" .= toJSON trigger]
+    EvictBytecode {target} ->
+      tagged "EvictBytecode" ["target" .= toJSON target]
+    Clean {target} ->
+      tagged "Clean" ["target" .= toJSON target]
+    where
+      tagged (tag :: Text) fields = object $ ("tag" .= tag) : fields
+
+instance FromJSON SomeApiRequest where
+  parseJSON =
+    withObject "ApiRequest" \ o ->
+      o .: "tag" >>= \case
+        ("TriggerTask" :: Text) -> do
+          trigger <- o .: "trigger"
+          pure (SomeApiRequest TriggerTask {trigger})
+        "EvictByteCode" -> do
+          target <- o .: "target"
+          pure (SomeApiRequest EvictBytecode {target})
+        "Clean" -> do
+          target <- o .: "target"
+          pure (SomeApiRequest Clean {target})
+        tag ->
+          fail (unpack ("Invalid tag: " <> tag))
+
+data ApiResponse a =
+  ApiSuccess { payload :: a }
   |
   ApiFailure { message :: Text }
   deriving stock (Eq, Show, Generic)
@@ -168,6 +199,7 @@ data Event =
   }
   |
   -- | The project structure at the point when a client connects.
+  -- TODO we need an update mechanism as well
   ProjectStructure { units :: [UnitSummary] }
   |
   -- | Sent when bytecode in the loader state was accessed.
