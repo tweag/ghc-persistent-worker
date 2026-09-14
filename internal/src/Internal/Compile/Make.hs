@@ -3,6 +3,7 @@
 module Internal.Compile.Make where
 
 import Control.Exception (finally)
+import Data.Foldable (for_)
 import Data.IORef (readIORef)
 import qualified GHC
 import GHC (
@@ -44,7 +45,7 @@ import Internal.Debug (pprModuleFull)
 import Internal.Error (eitherMessages, noteGhc)
 import Internal.Log (logTimedD)
 import System.OsPath.Extra (fromOsPath)
-import Types.Api (Event (..))
+import Types.Api (Event (..), targetFromWorkerSpec)
 import Types.Log (Logger (..))
 import Types.Target (ModuleTarget (..), Target (..), TargetSpec (..))
 
@@ -149,9 +150,13 @@ compileModuleWithDepsInHpt ::
   -- | Sink for instrumentation events. Called with a 'PhaseEvent' for each 'GHC.Driver.Pipeline.Phases.TPhase'
   -- that 'phaseLabel' names, in addition to whatever other event kinds a future caller wants to report.
   (Event -> IO ()) ->
+  -- | Id correlating this compilation's events (see 'withPhase'), allocated once per compilation job\/task
+  -- dispatch by the caller (see @GhcServer.Build.Propagate.nextRequestId@, @GhcWorker.Instrumentation@'s
+  -- @allocRequestId@).
+  Int ->
   TargetSpec ->
   Ghc (Maybe ModIface)
-compileModuleWithDepsInHpt logger emitEvent target =
+compileModuleWithDepsInHpt logger emitEvent requestId target =
   logTimedD logger "Compiling" do
     initializeSessionPlugins
     hsc_env <- getSession
@@ -159,7 +164,7 @@ compileModuleWithDepsInHpt logger emitEvent target =
       summary <- ensureSummary logger hsc_env target
       (hsc_env', captured) <- prepareCapture hsc_env
       result <-
-        compileOne (withFrontendEvents emitEvent target (withPhaseEvents emitEvent target hsc_env')) (forceRecomp summary) 1 100000 Nothing
+        compileOne (withFrontendEvents emitEvent requestId target (withPhaseEvents emitEvent requestId target hsc_env')) (forceRecomp summary) 1 100000 Nothing
           (HomeModLinkable Nothing Nothing)
       cleanCurrentModuleTempFilesMaybe (hsc_logger hsc_env') (hsc_tmpfs hsc_env') summary.ms_hspp_opts
       applyCapture captured result
@@ -191,18 +196,29 @@ phaseLabel = \case
   T_HscBackend {} -> Just "backend"
   _ -> Nothing
 
-withPhase ::(Event -> IO ()) -> TargetSpec -> String -> IO a -> IO a
-withPhase _emitEvent _target _phase act = do
-  _startNs <- getMonotonicTimeNSec
+-- | Report a 'Types.Api.PhaseStart'\/'Types.Api.PhaseEnd' pair of 'Event's around running @act@,
+-- recording the wall-clock duration (in milliseconds) between the two. This is the single combinator used by every
+-- phase-observing hook in this module (see 'withPhaseEvents', 'frontendEvents'); it deliberately does not guarantee
+-- that 'PhaseEnd' is emitted if @act@ throws, since one of its use sites runs in GHC's 'Hsc' monad, which has no
+-- 'GHC.Utils.Exception.ExceptionMonad' instance (its internal warning-message state can't survive being caught) and
+-- therefore cannot support exception-safe cleanup in general.
+withPhase ::(Event -> IO ()) -> Int -> TargetSpec -> String -> IO a -> IO a
+withPhase emitEvent requestId spec phase act = do
+  for_ uiTarget \ target ->
+    emitEvent PhaseStart {target, phase, requestId}
+  startNs <- getMonotonicTimeNSec
   result <- finally act do
-    _endNs <- getMonotonicTimeNSec
-    pure ()
+    endNs <- getMonotonicTimeNSec
+    for_ uiTarget \ target ->
+      emitEvent PhaseEnd {target, durationMs = fromIntegral ((endNs - startNs) `div` 1_000_000), requestId}
   pure result
+  where
+    uiTarget = targetFromWorkerSpec spec
 
 -- | Install a 'GHC.Driver.Hooks.runPhaseHook' on the given 'HscEnv' that reports a 'PhaseEvent' for each phase named
 -- by 'phaseLabel'.
-withPhaseEvents :: (Event -> IO ()) -> TargetSpec -> HscEnv -> HscEnv
-withPhaseEvents emitEvent target hsc_env =
+withPhaseEvents :: (Event -> IO ()) -> Int -> TargetSpec -> HscEnv -> HscEnv
+withPhaseEvents emitEvent requestId target hsc_env =
   hsc_env {hsc_hooks = (hsc_hooks hsc_env) {runPhaseHook = Just (PhaseHook run)}}
   where
     run :: forall a . TPhase a -> IO a
@@ -211,20 +227,20 @@ withPhaseEvents emitEvent target hsc_env =
 
     wrap :: forall a . TPhase a -> IO a -> IO a
     wrap tPhase =
-      maybe id (withPhase emitEvent target) (phaseLabel tPhase)
+      maybe id (withPhase emitEvent requestId target) (phaseLabel tPhase)
 
 unliftHsc :: (forall a . IO a -> IO a) -> Hsc b -> Hsc b
 unliftHsc f (Hsc hsc) =
   Hsc \ e m -> f (hsc e m)
 
-frontendEvents :: (Event -> IO ()) -> TargetSpec -> ModSummary -> Hsc FrontendResult
-frontendEvents emitEvent target mod_summary = do
+frontendEvents :: (Event -> IO ()) -> Int -> TargetSpec -> ModSummary -> Hsc FrontendResult
+frontendEvents emitEvent requestId target mod_summary = do
   hpm <- (phase "parse" (hscParse' mod_summary))
   FrontendTypecheck <$> phase "typecheck" (tcRnModule' mod_summary False hpm)
   where
     phase :: String -> Hsc a -> Hsc a
-    phase name = unliftHsc (withPhase emitEvent target name)
+    phase name = unliftHsc (withPhase emitEvent requestId target name)
 
-withFrontendEvents :: (Event -> IO ()) -> TargetSpec -> HscEnv -> HscEnv
-withFrontendEvents emitEvent target hsc_env =
-  hsc_env {hsc_hooks = (hsc_hooks hsc_env) {hscFrontendHook = Just (frontendEvents emitEvent target)}}
+withFrontendEvents :: (Event -> IO ()) -> Int -> TargetSpec -> HscEnv -> HscEnv
+withFrontendEvents emitEvent requestId target hsc_env =
+  hsc_env {hsc_hooks = (hsc_hooks hsc_env) {hscFrontendHook = Just (frontendEvents emitEvent requestId target)}}
