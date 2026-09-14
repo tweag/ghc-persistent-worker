@@ -300,7 +300,7 @@ in {
       default-language: GHC2021
     EOF
 
-    ${testServerBuild "--cabal"}
+    ${testServerBuild ""}
     '';
 
     outputs.apps.profile-test = util.app (util.zscript "profile-test" ''
