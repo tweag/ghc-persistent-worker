@@ -13,7 +13,7 @@ import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC (GhcMonad, ModuleName (..))
 import GHC.Driver.Env (HscEnv (..), hscActiveUnitId)
-import GHC.Unit.Module.Graph (ModuleGraph, mgModSummaries', mkModuleGraph, mkNodeKey)
+import GHC.Unit.Module.Graph (ModuleGraph, ModuleGraphNode, mgModSummaries', mkModuleGraph, mkNodeKey)
 import GHC.Utils.Outputable (SDoc)
 import Internal.Cache.Metadata (loadCachedModules)
 import Internal.Compat.GHC914 (hscModuleGraph)
@@ -144,7 +144,7 @@ loadCachedGraph ::
   BuildPlanPath ->
   Set OsPath ->
   HscEnv ->
-  IO (ModuleGraph, Set ModuleName)
+  IO ([ModuleGraphNode], Set ModuleName)
 loadCachedGraph useFixedNodes buildPlanPath invalidated hsc_env = do
   cachedUnit <- decodeJsonArg @CachedUnit "cached module graph" buildPlanPath.path
   let (cachedUnitValid, invalidatedModules) = invalidateCachedUnit cachedUnit invalidated
@@ -155,9 +155,9 @@ loadCachedGraph useFixedNodes buildPlanPath invalidated hsc_env = do
 -- We should benchmark this by inlining it.
 -- TODO Merging the deps after downsweep works as well in the test, for some reason.
 -- We should check whether additional, useless, nodes have an impact on performance, and see why it works.
-mergeCacheAndDeps :: ModuleGraph -> HscEnv -> ModuleGraph
+mergeCacheAndDeps :: [ModuleGraphNode] -> HscEnv -> ModuleGraph
 mergeCacheAndDeps cached hsc_env =
-  mkModuleGraph (mgModSummaries' (hscModuleGraph hsc_env) ++ mgModSummaries' cached)
+  mkModuleGraph (mgModSummaries' (hscModuleGraph hsc_env) ++ cached)
 
 pruneCachedPlan :: Set ModuleName -> BuildPlanJson -> BuildPlanJson
 pruneCachedPlan invalidated BuildPlanJson {schema = BuildPlanSchema {..}, ..} =
