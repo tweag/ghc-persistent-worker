@@ -18,14 +18,14 @@ import Test.Data.Project (
   UnitKey,
   )
 import Test.Data.ProjectBuild (ProjectBuild (..), scheduleKeys)
-import Test.Data.Scheduler (Schedule (..), Task (..))
+import Test.Data.Schedule (Schedule (..), ScheduleNode (..))
 import Test.Gen.Project (genProject)
 import Test.Gen.Resume (DepGraph, genResumePlan)
 
 -- | A metadata task depends on other metadata tasks.
 metaTask :: GenUnit BuildModule -> Set UnitKey -> BuildTask
 metaTask unit depUnits =
-  Task {
+  ScheduleNode {
     key = TaskMeta unit.key,
     deps = Set.map TaskMeta depUnits,
     value = ComponentUnit unit
@@ -34,7 +34,7 @@ metaTask unit depUnits =
 -- | For a compile task, depend on the home unit's metadata as well as the module dependencies' compile tasks.
 moduleTask :: GenUnit a -> BuildModule -> BuildTask
 moduleTask GenUnit {key = unitKey} BuildModule {key = moduleKey, deps} =
-  Task {
+  ScheduleNode {
     key = TaskCompile moduleKey,
     deps = Set.insert (TaskMeta unitKey) (Set.map TaskCompile deps),
     value = ComponentModule moduleKey
@@ -49,7 +49,7 @@ unitTasks unit =
 --
 -- The tasks contain both units (metadata tasks) and modules (compile tasks), where metadata tasks depend only on other
 -- units, while compile tasks depend on other modules as well as their home unit's metadata.
-sortSchedule :: [Task TaskKey Component] -> (Schedule TaskKey Component, DepGraph)
+sortSchedule :: [ScheduleNode TaskKey Component] -> (Schedule TaskKey Component, DepGraph)
 sortSchedule tasks =
   (Schedule {tasks = G.node_payload <$> sorted}, graph)
   where

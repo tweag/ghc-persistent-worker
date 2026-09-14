@@ -34,7 +34,7 @@ import Test.Data.Project (
   weakenResumeComponent,
   )
 import Test.Data.ProjectBuild (ProjectBuild (..), RebuildSet (..), ResumePlan (..), scheduleKeys)
-import Test.Data.Scheduler (Schedule (..))
+import Test.Data.Schedule (Schedule (..))
 import Test.Env (newResumeSessionEnv, newSessionEnv, withTestEnv)
 import Test.Gen.ProjectBuild (metaTask, moduleTask, sortSchedule)
 import qualified Test.Path as Test

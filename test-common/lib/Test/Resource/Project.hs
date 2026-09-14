@@ -17,8 +17,16 @@ import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
-import Test.Data.Project (BuildModule (..), Component (..), GenUnit (..), ModuleKey (..), ModuleSource (..), TaskKey (..), UnitKey (..))
-import Test.Data.Scheduler (Schedule (..), Task (..))
+import Test.Data.Project (
+  BuildModule (..),
+  Component (..),
+  GenUnit (..),
+  ModuleKey (..),
+  ModuleSource (..),
+  TaskKey (..),
+  UnitKey (..),
+  )
+import Test.Data.Schedule (Schedule (..), ScheduleNode (..))
 
 modulesPerUnit :: Int
 modulesPerUnit = 3
@@ -64,25 +72,25 @@ allModuleSources units =
     | u <- units, bm <- u.modules]
 
 -- | Build a metadata task for one unit.
-metaTask :: GenUnit BuildModule -> Task TaskKey Component
+metaTask :: GenUnit BuildModule -> ScheduleNode TaskKey Component
 metaTask unit =
-  Task {
+  ScheduleNode {
     key = TaskMeta unit.key,
     deps = Set.map TaskMeta unit.depUnits,
     value = ComponentUnit unit
   }
 
 -- | Build a compile task for one module within a unit.
-moduleTask :: UnitKey -> BuildModule -> Task TaskKey Component
+moduleTask :: UnitKey -> BuildModule -> ScheduleNode TaskKey Component
 moduleTask unitKey BuildModule {key, deps} =
-  Task {
+  ScheduleNode {
     key = TaskCompile key,
     deps = Set.insert (TaskMeta unitKey) (Set.map TaskCompile deps),
     value = ComponentModule key
   }
 
 -- | Tasks for a single unit: one metadata task followed by all module compile tasks.
-unitTasks :: GenUnit BuildModule -> [Task TaskKey Component]
+unitTasks :: GenUnit BuildModule -> [ScheduleNode TaskKey Component]
 unitTasks unit =
   metaTask unit : [moduleTask unit.key bm | bm <- unit.modules]
 

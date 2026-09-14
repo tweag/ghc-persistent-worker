@@ -33,11 +33,11 @@ import Test.Data.Project (
   errorDiagnosticCode,
   taskModuleKeys,
   )
-import Test.Data.Scheduler (Dispatch (..), RequestFailure (..), RequestResult (..), Schedule (..), SchedulerState (..))
+import Test.Data.Schedule (Dispatch (..), RequestFailure (..), RequestResult (..), Schedule (..), ScheduleProgress (..))
 import Test.Data.TestLog (DiagnosticEntry (..), TestLog (..))
 import Test.Log (withTestLog)
 import Test.Path (compileTmpDir, extDepName, moduleName, moduleSourcePath, unitName, unitOutputDir, unitTmpDir)
-import Test.Scheduler (initScheduler, runScheduler)
+import Test.Scheduler.Simple (initScheduler, runScheduler)
 import Types.Api (eventsNoop)
 import qualified Types.Args as Args
 import Types.Args (Args (..))
@@ -194,7 +194,7 @@ resumeStrategy env fixErrors =
     ResumeModule key cache -> runCompile env (resumeCompileArgs env fixErrors cache) key
 
 -- | Extract the data required for properties and classifiers from the final state of the scheduler after a build.
-buildResult :: SchedulerState TaskKey component -> BuildResult
+buildResult :: ScheduleProgress TaskKey component -> BuildResult
 buildResult state =
   BuildResult {
     failures = state.failures,

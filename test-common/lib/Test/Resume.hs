@@ -13,7 +13,7 @@ import Test.Data.Env (SessionEnv (..))
 import Test.Data.Project (InitialProject (..), ModuleKey (..), ResumeComponent, TaskKey)
 import qualified Test.Data.Project as ModuleSource (ModuleSource (..))
 import Test.Data.ProjectBuild (ProjectBuild (..), RebuildSet (..), ResumePlan (..))
-import Test.Data.Scheduler (Schedule (..), Task (..))
+import Test.Data.Schedule (Schedule (..), ScheduleNode (..))
 import Test.Data.SourceMode (SourceMode (..), SourceRewrite (..))
 import Test.Path (moduleOutputBase, moduleSourcePath, removeIfExists)
 import Test.Source (moduleSource)
@@ -56,7 +56,7 @@ rewriteResumeSources sourceDir rewrites =
 trimResumeSchedule ::
   BuildResult ->
   RebuildSet ->
-  [Task TaskKey ResumeComponent] ->
+  [ScheduleNode TaskKey ResumeComponent] ->
   (Schedule TaskKey ResumeComponent, Set TaskKey)
 trimResumeSchedule initialResult rebuild tasks
   | rebuild.hasChanges || initialResult.hasErrors = (Schedule (filter include tasks), unmodified)

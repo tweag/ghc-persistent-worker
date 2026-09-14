@@ -5,7 +5,7 @@ import Data.Map.Strict (Map)
 import Data.Set (Set)
 import Numeric.Natural (Natural)
 import System.OsPath.Extra (OsPath)
-import Test.Data.Scheduler (Task (..))
+import Test.Data.Schedule (ScheduleNode (..))
 import Types.CachedDeps (CachedBuildPlans, CachedDeps)
 
 -- | Error variant for modules that should fail compilation.
@@ -169,9 +169,9 @@ data ResumeComponent =
   ResumeModule ModuleKey ModuleCache
   deriving stock (Eq, Show)
 
-type BuildTask = Task TaskKey Component
+type BuildTask = ScheduleNode TaskKey Component
 
-type ResumeBuildTask = Task TaskKey ResumeComponent
+type ResumeBuildTask = ScheduleNode TaskKey ResumeComponent
 
 weakenResumeComponent :: ResumeComponent -> Component
 weakenResumeComponent = \case

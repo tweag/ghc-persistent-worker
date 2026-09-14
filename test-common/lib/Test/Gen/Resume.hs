@@ -18,9 +18,9 @@ import Test.Data.Project (
   TaskKey (..),
   )
 import Test.Data.ProjectBuild (RebuildSet (..), ResumePlan (..))
-import Test.Data.Scheduler (Task (..))
+import Test.Data.Schedule (ScheduleNode (..))
 
-type DepGraph = Graph.Graph (Graph.Node TaskKey (Task TaskKey Component))
+type DepGraph = Graph.Graph (Graph.Node TaskKey (ScheduleNode TaskKey Component))
 
 -- | Compute the set of build tasks that need to be executed during a resume build.
 -- They consist of the modified modules and all modules that depend on them.
@@ -50,7 +50,7 @@ computeRebuildSet g mutations =
     roots =
       [
         G.DigraphNode {
-          node_payload = Task {key, deps = [], value = dummy},
+          node_payload = ScheduleNode {key, deps = [], value = dummy},
           node_key = key,
           node_dependencies = []
         }

@@ -3,7 +3,7 @@ module ScheduleTest where
 import qualified Data.Set as Set
 import Hedgehog (diff, property, withTests)
 import Test.Data.Project (Component (..), GenUnit (..), ModuleKey (..), TaskKey (..))
-import Test.Data.Scheduler (Task (..), Schedule (..))
+import Test.Data.Schedule (Schedule (..), ScheduleNode (..))
 import Test.Gen.ProjectBuild (sortSchedule)
 import Test.Tasty (TestTree)
 import Test.Tasty.Hedgehog (testProperty)
@@ -11,7 +11,7 @@ import Test.Tasty.Hedgehog (testProperty)
 -- | These task lists have the same content but different orderings.
 -- The dependency graph does not impose a total order, which we exploit
 -- to produce different schedules.
-tasks1, tasks2 :: [Task TaskKey Component]
+tasks1, tasks2 :: [ScheduleNode TaskKey Component]
 (tasks1, tasks2) =
   (
     [meta2, mod20, meta1, mod10, meta0, mod00, mod01],  -- reverse unit order
@@ -32,7 +32,7 @@ tasks1, tasks2 :: [Task TaskKey Component]
     mod20 = moduleTask 2 0 [TaskMeta 2, TaskCompile (moduleKey 1 0)]
 
     moduleTask unit number deps =
-      Task {
+      ScheduleNode {
         key = TaskCompile (moduleKey unit number),
         deps,
         value = ComponentModule (moduleKey unit number)
@@ -41,7 +41,7 @@ tasks1, tasks2 :: [Task TaskKey Component]
     moduleKey unit number = ModuleKey {unit, number, errorVariant = Nothing}
 
     unitTask key depUnits =
-      Task {
+      ScheduleNode {
         key = TaskMeta key,
         deps = Set.map TaskMeta depUnits,
         value = ComponentUnit GenUnit {key, depUnits, modules = []}

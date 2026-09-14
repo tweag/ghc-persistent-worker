@@ -26,7 +26,7 @@ import Test.Data.Project (
   UnitCache (..),
   UnitKey,
   )
-import Test.Data.Scheduler (Schedule (..), Task (..))
+import Test.Data.Schedule (Schedule (..), ScheduleNode (..))
 import Test.Path (cachedUnitPath, moduleName, moduleSourcePath, unitCacheDir, unitName)
 import Types.Args (Args (..))
 import Types.CachedDeps (
@@ -191,8 +191,8 @@ cacheTask ::
   Map UnitKey (Set UnitKey) ->
   -- | Dep graph of tasks, consisting of units and modules.
   Map TaskKey (Set TaskKey) ->
-  Task TaskKey Component ->
-  IO (Task TaskKey ResumeComponent)
+  ScheduleNode TaskKey Component ->
+  IO (ScheduleNode TaskKey ResumeComponent)
 cacheTask env directDeps taskDeps task =
   case task.value of
     ComponentUnit unit -> do
@@ -213,4 +213,4 @@ writeResumeCache env (Schedule tasks) =
   Schedule <$> traverse (cacheTask env directDeps taskDeps) tasks
   where
     taskDeps = Map.fromList [(task.key, task.deps) | task <- tasks]
-    directDeps = Map.fromList [(unit.key, unit.depUnits) | Task {value = ComponentUnit unit} <- tasks]
+    directDeps = Map.fromList [(unit.key, unit.depUnits) | ScheduleNode {value = ComponentUnit unit} <- tasks]
