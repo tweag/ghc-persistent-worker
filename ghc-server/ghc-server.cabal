@@ -44,6 +44,31 @@ library
   ghc-options: -O2
   hs-source-dirs: lib
   exposed-modules:
+    GhcClient.Run
+    GhcServer.Build
+    GhcServer.Build.Classify
+    GhcServer.Build.Compile
+    GhcServer.Build.Diff
+    GhcServer.Build.Execute
+    GhcServer.Build.Metadata
+    GhcServer.Build.Propagate
+    GhcServer.Build.Schedule
+    GhcServer.Cabal
+    GhcServer.Cabal.ExtDeps
+    GhcServer.Cabal.Setup
+    GhcServer.Data.BuildEnv
+    GhcServer.Data.BuildCache
+    GhcServer.Data.BuildEvent
+    GhcServer.Data.BuildSystem
+    GhcServer.Data.Config
+    GhcServer.Data.Request
+    GhcServer.Data.UnitConfig
+    GhcServer.Cache
+    GhcServer.Grpc
+    GhcServer.Handler
+    GhcServer.Log
+    GhcServer.Project
+    GhcServer.Run
   build-depends:
     aeson,
     async,
@@ -74,3 +99,49 @@ library
     text,
     time,
     transformers
+
+executable ghc-server
+  import: all
+  main-is: Main.hs
+  hs-source-dirs: app/ghc-server
+  ghc-options: -O2 -threaded "-with-rtsopts=-K512M -I5 -A128M -T -N"
+  build-depends:
+    ghc-server
+
+executable ghc-client
+  import: all
+  main-is: Main.hs
+  hs-source-dirs: app/ghc-client
+  ghc-options: -O2 -threaded "-with-rtsopts=-K512M -I5 -A128M -T -N"
+  build-depends:
+    ghc-server
+
+test-suite ghc-server-test
+  import: all
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: test
+  ghc-options: -threaded "-with-rtsopts=-K512M -I5 -A128M -T -N"
+  other-modules:
+    Test.BuildTest
+    Test.CabalTest
+    Test.CacheTest
+    Test.ScheduleTest
+    Test.SchedulerTest
+  build-depends:
+    aeson,
+    async,
+    buck-worker-internal,
+    buck-worker-types,
+    bytestring,
+    containers,
+    directory,
+    filepath,
+    ghc,
+    ghc-server,
+    ghc-worker-test-common,
+    hedgehog,
+    tasty >= 1.5,
+    tasty-hedgehog,
+    temporary,
+    text
