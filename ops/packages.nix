@@ -301,6 +301,96 @@
       };
     };
 
+    ghc-server = {
+      src = ../ghc-server;
+      cabal = {
+        meta.synopsis = "Standalone GHC build server and client";
+        default-extensions = ["NoFieldSelectors"];
+      };
+      cabal.ghc-options-exe = [
+        "-O2"
+        "-threaded"
+        "-rtsopts"
+        ''"-with-rtsopts=-K512M -I5 -A128M -T -N"''
+      ];
+
+      library = {
+        enable = true;
+        dependencies = [
+          "Cabal"
+          "Cabal-syntax"
+          "aeson"
+          "async"
+          "binary"
+          "buck-worker-grpc"
+          "buck-worker-internal"
+          "binary"
+          "buck-worker-proto"
+          "ghc-worker-test-common"
+          "buck-worker-types"
+          "cabal-install"
+          "bytestring"
+          "cabal-install"
+          "containers"
+          "directory"
+          "extra"
+          "file-io"
+          "filepath"
+          "ghc"
+          "ghc-paths"
+          "ghc-worker"
+          "ghc-worker-test-common"
+          "grapesy"
+          "optparse-applicative"
+          "parsec"
+          "process"
+          "silently"
+          "stm"
+          "text"
+          "time"
+          "transformers"
+        ];
+      };
+
+      executables.ghc-server = {
+        source-dirs = "app/ghc-server";
+      };
+
+      executables.ghc-client = {
+        source-dirs = "app/ghc-client";
+      };
+
+      tests.ghc-server-test = {
+        dependencies = [
+          "aeson"
+          "async"
+          "buck-worker-internal"
+          "buck-worker-types"
+          "bytestring"
+          "containers"
+          "directory"
+          "filepath"
+          "ghc"
+          "ghc-server"
+          "ghc-worker-test-common"
+          "hedgehog"
+          "tasty"
+          "tasty-hedgehog"
+          "temporary"
+        ];
+        source-dirs = "test";
+        component = {
+          default-extensions = ["NoFieldSelectors"];
+          ghc-options = [
+            "-threaded"
+            "-rtsopts"
+            ''"-with-rtsopts=-K512M -I5 -A128M -T -N"''
+          ];
+        };
+      };
+
+    };
+
   };
 
   cabal = {
