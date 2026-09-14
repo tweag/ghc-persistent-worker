@@ -62,6 +62,7 @@ library
     Test.Resume
     Test.Run
     Test.Scheduler
+    Test.Scheduler.Simple
     Test.Source
     Test.Target
   build-depends:
