@@ -3,6 +3,7 @@
   inherit (util) build;
 
   serverPkg = build.packages.min.ghc-server.package;
+  uiPkg = build.packages.min.ghc-ui.package;
 
   # Prebuilt ext dep packages for the mwb-26-07-linkables GHC, used by profiling apps.
   ghc = build.envs.min.toolchain.packages.ghc;
@@ -76,6 +77,10 @@
 in {
 
   config = {
+
+    outputs.apps.ui = util.zapp "ui" ''
+    exec ${uiPkg}/bin/ghc-ui --server-exe ${serverPkg}/bin/ghc-server "$@"
+    '';
 
     outputs.apps.rebuild-impure-worker = util.zapp "rebuild-impure-worker" ''
     if [[ -z $1 ]]
