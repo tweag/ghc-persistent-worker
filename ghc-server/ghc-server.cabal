@@ -67,6 +67,7 @@ library
     GhcServer.Grpc
     GhcServer.Handler
     GhcServer.Log
+    GhcServer.Path
     GhcServer.Project
     GhcServer.Run
   build-depends:
