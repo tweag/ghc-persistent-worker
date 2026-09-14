@@ -2,7 +2,8 @@
 module Test.Resource.Build where
 
 import Data.Foldable (fold)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.IORef (IORef, newIORef, readIORef)
+import Data.IORef.Extra (atomicModifyIORef'_)
 import Data.Set (Set)
 import Test.Build (initialStrategy, runSchedule)
 import Test.Data.BuildSystem (BuildResult (..))
@@ -30,7 +31,7 @@ measuredStrategy ::
 measuredStrategy inner name ref =
   Dispatch \ component -> do
     (result, phase) <- measurePhase (name component) (runDispatch inner component)
-    modifyIORef' ref (phase :)
+    atomicModifyIORef'_ ref (phase :)
     pure result
 
 -- | Run the full build sequentially, measuring allocations per task.
