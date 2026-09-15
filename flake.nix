@@ -24,12 +24,12 @@
     compilers = {
 
       mercury-ghc9101.source.build = {
-        url = "https://github.com/MercuryTechnologies/ghc";
+        url = "https://gitlab.haskell.org/ghc/ghc";
         version = "9.10.1";
         flavour = "release+split_sections+ipe";
-        # branch: wavewave/20260912-new
-        rev = "da7b82a0a3ce414b1d9efa94dad518a2e2c50dac";
-        hash = "sha256-8LPVP7jru1mwb28KLOb7XFb5Bmr/GQSqtNScbq2sKFY=";
+        # branch: wip/torsten.schmits/mwb-26-09/abstract-linkables
+        rev = "141cdf7724dfdae4d6adac2d7f987acdd5b24276";
+        hash = "sha256-U0cEt6fHMkcriTHrTGcVFjJUHNXacW8mxMMgjCjVJX8=";
       };
 
       mercury-ghc9141 = {
