@@ -48,17 +48,18 @@ import Types.Log (Logger (..))
 import Types.State (WorkerState (..))
 import Types.Target (TargetSpec (..), UnitTarget (..))
 
-#if !defined(MWB)
-
-import GHC (ModSummary)
-
-depJSON :: DynFlags -> Maybe FilePath
-depJSON _ = Nothing
-
-ms_opts :: ModSummary -> [String]
-ms_opts _ = []
-
-#endif
+-- NOTE: Currently, our supported custom GHC compilers (based on 9.10 and 9.14)
+--       have the dep-json extension. We plan to merge this into GHC HEAD.
+-- TODO: But the worker is not supposed to use depJSON from GHC any more.
+--       We should remove the use of "depJSON" at all.
+--
+-- import GHC (ModSummary)
+--
+-- depJSON :: DynFlags -> Maybe FilePath
+-- depJSON _ = Nothing
+--
+-- ms_opts :: ModSummary -> [String]
+-- ms_opts _ = []
 
 -- | When the build plan validates imports, it calls a GHC function that requires interface files to exist, unless
 -- @finder_bypassHiFileCheck@ in the @FinderOpts@ is 'False'.

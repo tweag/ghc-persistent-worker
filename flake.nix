@@ -38,9 +38,9 @@
           url = "https://github.com/MercuryTechnologies/ghc";
           version = "9.14.1";
           flavour = "release+split_sections+ipe";
-          # branch: wavewave/20260909-ghc914-reachability-index
-          rev = "eed112dfbe9aa5b694b279fee4db858f39797b95";
-          hash = "sha256-iHkrw4Zmj0yFGepStU5+Qi6jVfW7HXJh8PVt7j9CZP8=";
+          # branch: wavewave/20260916-dep-json
+          rev = "439bf2131f981564f075074421954f285a3e59ab";
+          hash = "sha256-vjOOff6cbg04vqTzjKcrKW8hONfsP4CS5LWoOmNSF/s=";
           bootCompiler = "ghc9103";
         };
       };
