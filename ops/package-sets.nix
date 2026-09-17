@@ -195,6 +195,11 @@ in {
       proto-lens-protobuf-types = force;
       proto-lens-protoc = force;
       proto-lens-runtime = force;
+
+      # Test error happened since GHC error message format changed.
+      # TODO: investigate and update.
+      sandwich = notest;
+
       string-interpolate = force;
       tasty = hackage "1.5.4" "0x6khif6n0rzfgkvrbiagg1sj0lwmjfr6qarjnjwmb9ywdk7598b";
       generic-lens = notest;
