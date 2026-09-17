@@ -1,12 +1,11 @@
 load("@buck2-haskell//:defs.bzl", "haskell_toolchain_library")
 load("@toolchains//:haskell_all.bzl", "haskell_toolchain_all")
 
+# Boot libraries ship in the locally built GHC's global package db.
 [haskell_toolchain_library(
     name = lib,
     visibility = ["//..."],
 ) for lib in [
-    "aeson",
-    "async",
     "base",
     "binary",
     "bytestring",
@@ -15,22 +14,31 @@ load("@toolchains//:haskell_all.bzl", "haskell_toolchain_all")
     "directory",
     "exceptions",
     "filepath",
-    "file-io",
-    "flatparse",
     "ghc",
     "ghc-boot",
+    "os-string",
+    "process",
+    "text",
+    "time",
+    "transformers",
+    "unix",
+]]
+
+# Third-party dependencies come from the cabal store db.
+[haskell_toolchain_library(
+    name = lib,
+    visibility = ["//..."],
+) for lib in [
+    "aeson",
+    "async",
+    "file-io",
+    "flatparse",
     "ghc-paths",
     "grapesy",
     "hashable",
     "lens-family",
     "optparse-applicative",
-    "os-string",
-    "process",
     "proto-lens",
     "split",
-    "text",
-    "time",
-    "transformers",
-    "unix",
     "vector",
 ]]
