@@ -9,6 +9,8 @@ import Ghc.Ui.Data.Log qualified as Log
 import Ghc.Ui.Data.Log (LogState)
 import Ghc.Ui.Data.Project qualified as Project
 import Ghc.Ui.Data.Project (ProjectState)
+import Ghc.Ui.Data.Settings qualified as Settings
+import Ghc.Ui.Data.Settings (SettingsState)
 import qualified Ghc.Ui.Data.Tasks as Tasks
 import Ghc.Ui.Data.Tasks (TasksState)
 import Ghc.Ui.Data.WorkerId (WorkerId)
@@ -52,9 +54,11 @@ instance Monoid Stats where
 
 data SessionState =
   SessionState {
+    sessionId :: SessionId,
     workers :: Map WorkerId Worker,
     tasks :: TasksState,
     project :: ProjectState,
+    settings :: SettingsState,
     log :: LogState,
     startTime :: UTCTime,
     endTime :: Maybe UTCTime,
@@ -69,12 +73,14 @@ data SessionEvent =
   }
   deriving stock (Show)
 
-initialState :: UTCTime -> SessionState
-initialState startTime =
+initialState :: SessionId -> UTCTime -> SessionState
+initialState sessionId startTime =
   SessionState {
+    sessionId,
     workers = [],
     tasks = Tasks.initialState,
     project = Project.initialState,
+    settings = Settings.initialState,
     log = Log.initialState,
     startTime = startTime,
     endTime = Nothing,

@@ -18,6 +18,7 @@ import Data.IORef.Lifted (newIORef, readIORef)
 import qualified Data.Text as Text
 import Data.Text (Text)
 import Ghc.Ui.Data.Main (MainEvent (..))
+import Ghc.Ui.Data.OpLog (OpLevel (..))
 import Ghc.Ui.Data.ServerHandlers (ServerHandlers (..))
 import Ghc.Ui.Data.ServerProcess (
   ServerConfig (..),
@@ -123,11 +124,6 @@ listenSubprocess socket = do
       liftIO (threadDelay 100_000)
       listenSubprocess socket
 
--- | Read lines from a spawned ghc-server's stdout\/stderr handle until it closes (EOF or the process exits),
--- dispatching each as a 'ProcessLog' event tagged with the given stream name. When given an accumulator
--- (used for stderr, see 'spawnedServer'), each line is also prepended to it, so the full text is available for
--- 'ServerFailed' if the process later exits with a failure code. Runs in its own thread so the two streams
--- (stdout, stderr) can be read concurrently without blocking each other.
 streamLines :: Text -> Handle -> Maybe (IORef [Text]) -> ServerM ()
 streamLines streamName h macc =
   spin
@@ -137,7 +133,7 @@ streamLines streamName h macc =
         line <- Text.pack <$> liftIO (IO.hGetLine h)
         for_ macc \ acc ->
           liftIO $ atomicModifyIORef'_ acc (line :)
-        logInfo streamName line
+        logOp OpDebug ("server " <> streamName <> ": " <> line)
         spin
 
 watchProcess ::
@@ -181,7 +177,7 @@ ensureServerOnSocket path socket config@ServerConfig {root, options} =
   ifM (isServerUp socket) connectExisting startNew
   where
     connectExisting = do
-      logOp ("Connecting to preexisting ghc-server process in " <> desc)
+      logInfo ("Connecting to preexisting ghc-server process in " <> desc)
       void $ async $ serverConnect (Just (withStatus ServerConnected)) socket
       pure (withStatus ServerStarting)
 
@@ -190,7 +186,7 @@ ensureServerOnSocket path socket config@ServerConfig {root, options} =
       liftIO (resolveServerExe env.executable) >>= \case
         Left err -> startFailed err
         Right exe -> do
-          logOp ("Starting ghc-server in " <> desc)
+          logInfo ("Starting ghc-server in " <> desc)
           handles <- liftIO $ startServerProcess exe path options
           attachSubprocess config socket handles
 
@@ -218,17 +214,17 @@ startServer config =
     _ ->
       ensureServer config
   where
-    alreadyStarted = logError "start-server" "Multiple servers started simultaneously, aborting"
+    alreadyStarted = logError "Multiple servers started simultaneously, aborting"
 
 -- | Reuse the path and options used when starting the server initially.
 restartServer :: ServerM ()
 restartServer = do
-  logOp "Attempting to restart the server"
+  logInfo "Attempting to restart the server"
   stopServer >>= \case
     Just config ->
       startServer config
     Nothing ->
-      logOp "No ghc-server configuration from previous process available for restart"
+      logError "No ghc-server configuration from previous process available for restart"
 
 serverHandlers :: ServerM ServerHandlers
 serverHandlers =

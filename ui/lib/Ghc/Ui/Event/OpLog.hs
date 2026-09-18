@@ -14,7 +14,6 @@ import Types.Text (showText)
 -- | Ignore events when logging:
 -- - 'SetTime' since it is emitted ten times per second
 -- - 'OpLogMessage' because that just ends up in the smae log
--- - 'ProcessLog' because it can also spam and is accessible in the session log
 logMainEvent ::
   MonadUi m =>
   MainEvent ->
@@ -22,7 +21,6 @@ logMainEvent ::
 logMainEvent = \case
   SetTime {} -> pure ()
   OpLogMessage {} -> pure ()
-  ProcessLog {} -> pure ()
   event -> do
     current <- use #currentFocus
     logOpDebug ("main event in " <> showText current <> ": " <> showText event)

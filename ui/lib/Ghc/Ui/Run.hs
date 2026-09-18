@@ -18,7 +18,7 @@ import Ghc.Ui.App (app)
 import Ghc.Ui.Cli (Options (..), optionsInfo)
 import qualified Ghc.Ui.Data.Main as Main
 import Ghc.Ui.Data.Main (MainEvent (..))
-import Ghc.Ui.Server.Monad (ServerEnv (..), ServerM, logOp, lowerServer, trySendEvent)
+import Ghc.Ui.Server.Monad (ServerEnv (..), ServerM, logError, logInfo, lowerServer, trySendEvent)
 import Ghc.Ui.Server.Process (isServerUp)
 import Ghc.Ui.Server.Start (defaultSocketPath, serverConnect, serverHandlers)
 import Ghc.Ui.Server.Stop (stopServer)
@@ -77,7 +77,7 @@ discover workers = do
   either createDirFailed pure created
   where
     createDirFailed err =
-      trySendEvent (OpLogMessage ("Failed to create worker directory: " <> Text.pack (displayException err)))
+      logError ("Failed to create worker directory: " <> Text.pack (displayException err))
 
 -- | Start an inotify watcher to detect newly started workers.
 runWorkerWatcher :: WorkerPath -> WatchManager -> ServerM (IO ())
@@ -88,7 +88,7 @@ runWorkerWatcher workers manager = do
         | let path = toOsPath dir
         , not (isInfixOf [osp|log|] path) ->
           lower do
-            logOp "Detected new worker"
+            logInfo "Detected new worker"
             connectAsync (path </> [osp|instrument|])
       _ -> pure ()
 

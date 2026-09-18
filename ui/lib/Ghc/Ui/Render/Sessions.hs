@@ -10,8 +10,8 @@ import Ghc.Ui.Data.Sessions (SessionsState)
 import Ghc.Ui.Render.Popup (popup)
 import Types.Text (showText)
 
-renderItem :: Int -> Bool -> (a, SessionState) -> Widget n
-renderItem index selected (_, SessionState {startTime, workers}) =
+renderItem :: Int -> Bool -> SessionState -> Widget n
+renderItem index selected SessionState {startTime, workers} =
   txt $ mconcat [
     if selected then "> " else "  ",
     "Session " <> showText index <> "  " <> Text.pack (take 19 (iso8601Show startTime)),

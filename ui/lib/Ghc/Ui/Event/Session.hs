@@ -12,6 +12,7 @@ import Ghc.Ui.Data.Name (Name)
 import Ghc.Ui.Data.Project (ProjectUnit (..))
 import qualified Ghc.Ui.Data.Session as Session
 import Ghc.Ui.Data.Session (SessionEvent (..), SessionState (..), Worker (..))
+import Ghc.Ui.Data.Settings qualified as Settings
 import qualified Ghc.Ui.Data.Tasks as Tasks
 import Ghc.Ui.Data.WorkerId (WorkerId)
 import qualified Ghc.Ui.Event.Log as Log
@@ -19,6 +20,7 @@ import Ghc.Ui.Event.Project qualified as Project
 import Ghc.Ui.Event.Tasks qualified as Tasks
 import qualified Types.Api as Api
 import Types.Api (Event (..), Target, UnitSummary (..))
+import Types.Settings (Settings (..))
 
 stripEscSeqs :: String -> String
 stripEscSeqs [] = []
@@ -62,9 +64,10 @@ handleApiEvent worker = \case
         cpu_ns = cpuNs
       }
 
-  ProjectStructure {..} ->
+  ProjectStructure {..} -> do
     zoom #project do
       Project.load [ProjectUnit {unit = name, modules} | UnitSummary {name, modules} <- units]
+    #settings %= Settings.load settings.features
 
   PhaseStart {phase, requestId} ->
     zoom #tasks do

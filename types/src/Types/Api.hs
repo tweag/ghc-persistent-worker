@@ -12,9 +12,10 @@ import Data.Text (Text, unpack)
 import qualified GHC
 import GHC.Generics (Generic)
 import GHC.Unit (Module, UnitId, mkModuleName, moduleName, moduleNameString, moduleUnitId, stringToUnitId, unitIdString)
-import Types.FeatureFlags (FeatureFlag)
+import Types.Settings (Settings)
 import qualified Types.Target as Worker
 import Types.Target (ModuleTarget (..), TargetSpec, UnitTarget (..))
+import Types.FeatureFlags (Feature)
 
 newtype UnitName =
   UnitName { text :: Text }
@@ -137,6 +138,8 @@ data ApiRequest a where
   TriggerTask :: { trigger :: TaskTrigger } -> ApiRequest ()
   EvictBytecode :: { target :: Target } -> ApiRequest ()
   Clean :: { target :: Target } -> ApiRequest ()
+  -- | Toggle a single 'Feature', sent by the @ghc-ui@ feature-flags panel when a checkbox is toggled.
+  ToggleFeature :: { feature :: Feature } -> ApiRequest ()
 
 deriving stock instance Eq (ApiRequest a)
 deriving stock instance Show (ApiRequest a)
@@ -152,6 +155,8 @@ instance ToJSON SomeApiRequest where
       tagged "EvictBytecode" ["target" .= toJSON target]
     Clean {target} ->
       tagged "Clean" ["target" .= toJSON target]
+    ToggleFeature {feature} ->
+      tagged "ToggleFeatureFlag" ["feature" .= toJSON feature]
     where
       tagged (tag :: Text) fields = object $ ("tag" .= tag) : fields
 
@@ -168,6 +173,9 @@ instance FromJSON SomeApiRequest where
         "Clean" -> do
           target <- o .: "target"
           pure (SomeApiRequest Clean {target})
+        "ToggleFeatureFlag" -> do
+          feature <- o .: "feature"
+          pure (SomeApiRequest ToggleFeature {feature})
         tag ->
           fail (unpack ("Invalid tag: " <> tag))
 
@@ -202,7 +210,10 @@ data Event =
   |
   -- | The project structure at the point when a client connects.
   -- TODO we need an update mechanism as well
-  ProjectStructure { units :: [UnitSummary] }
+  ProjectStructure {
+    units :: [UnitSummary],
+    settings :: Settings
+  }
   |
   -- | Sent when bytecode in the loader state was accessed.
   BytecodeSnapshot { entries :: [TrackedBytecode] }

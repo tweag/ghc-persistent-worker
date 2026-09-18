@@ -32,45 +32,48 @@ library
   import: all
   hs-source-dirs: lib
   exposed-modules:
-    Ghc.Ui.Attr
     Ghc.Ui.App
+    Ghc.Ui.Attr
     Ghc.Ui.Cli
     Ghc.Ui.Data.Log
     Ghc.Ui.Data.Main
-    Ghc.Ui.Data.Session
-    Ghc.Ui.Data.Sessions
+    Ghc.Ui.Data.Name
+    Ghc.Ui.Data.OpLog
+    Ghc.Ui.Data.Project
     Ghc.Ui.Data.ServerApi
     Ghc.Ui.Data.ServerHandlers
     Ghc.Ui.Data.ServerProcess
+    Ghc.Ui.Data.Session
+    Ghc.Ui.Data.Sessions
+    Ghc.Ui.Data.Settings
     Ghc.Ui.Data.Tasks
-    Ghc.Ui.Data.Project
-    Ghc.Ui.Data.Name
-    Ghc.Ui.Data.OpLog
     Ghc.Ui.Data.WorkerId
     Ghc.Ui.Event.Log
     Ghc.Ui.Event.Main
     Ghc.Ui.Event.OpLog
     Ghc.Ui.Event.Popup
+    Ghc.Ui.Event.Project
     Ghc.Ui.Event.Session
     Ghc.Ui.Event.Sessions
+    Ghc.Ui.Event.Settings
     Ghc.Ui.Event.Tasks
-    Ghc.Ui.Event.Project
-    Ghc.Ui.Render.Format
     Ghc.Ui.GhcDebug
     Ghc.Ui.Monad
     Ghc.Ui.OpLog
-    Ghc.Ui.Render.Layer
+    Ghc.Ui.Render.Format
+    Ghc.Ui.Render.Layout
     Ghc.Ui.Render.Log
     Ghc.Ui.Render.Logo
     Ghc.Ui.Render.Main
     Ghc.Ui.Render.OpLog
     Ghc.Ui.Render.Popup
+    Ghc.Ui.Render.Project
     Ghc.Ui.Render.Section
     Ghc.Ui.Render.Session
     Ghc.Ui.Render.Sessions
+    Ghc.Ui.Render.Settings
     Ghc.Ui.Render.Target
     Ghc.Ui.Render.Tasks
-    Ghc.Ui.Render.Project
     Ghc.Ui.Run
     Ghc.Ui.Server.Api
     Ghc.Ui.Server.Monad

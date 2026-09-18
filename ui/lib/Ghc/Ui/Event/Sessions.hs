@@ -2,7 +2,7 @@ module Ghc.Ui.Event.Sessions where
 
 import Brick (EventM, zoom)
 import Brick.Widgets.List (listElementsL, listInsert, listMoveToEnd)
-import Control.Lens (Traversal', _2, at, each, filtered, preuse, (%=), (?=))
+import Control.Lens (Traversal', at, each, filtered, preuse, (%=), (?=))
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (modify')
@@ -19,7 +19,7 @@ import Network.GRPC.Client (Connection)
 
 sessionLens :: SessionId -> Traversal' SessionsState SessionState
 sessionLens sessionId =
-  listElementsL . each . filtered ((== sessionId) . fst) . _2
+  listElementsL . each . filtered \ s -> sessionId == s.sessionId
 
 addWorker :: SessionId -> WorkerId -> UTCTime -> Connection -> EventM Name SessionsState ()
 addWorker sessionId workerId startTime connection = do
@@ -33,7 +33,7 @@ addWorker sessionId workerId startTime connection = do
 startSession :: SessionId -> UTCTime -> EventM Name SessionsState ()
 startSession sessionId startTime =
   modify' \ sessions ->
-    listMoveToEnd (listInsert (length sessions) (sessionId, Session.initialState startTime) sessions)
+    listMoveToEnd (listInsert (length sessions) (Session.initialState sessionId startTime) sessions)
 
 handleSessionsEvent :: SessionsEvent -> EventM Name SessionsState ()
 handleSessionsEvent = \case

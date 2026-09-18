@@ -10,7 +10,7 @@ import Network.GRPC.Client (Connection)
 
 -- TODO why is this a tuple?
 -- If the index is required, can it be a Map?
-type SessionsState = GenericList Name Seq (SessionId, SessionState)
+type SessionsState = GenericList Name Seq SessionState
 
 newtype GrpcConnection =
   GrpcConnection Connection
