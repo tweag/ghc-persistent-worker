@@ -56,6 +56,11 @@ newtype PrimarySocketName =
   PrimarySocketName { path :: OsPath }
   deriving stock (Eq, Show)
 
+-- | buck-proxy instance id, if we have multiple instances of buck-proxy
+newtype ProxyInstance =
+  ProxyInstance { instanceId :: String }
+  deriving stock (Eq, Show)
+
 -- | For project socket, use the trace id extracted from server socket path.
 projectSocketDirectory ::
   -- | base path
