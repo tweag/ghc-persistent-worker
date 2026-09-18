@@ -21,10 +21,10 @@ import System.Exit (exitFailure)
 import System.File.OsPath (withFile)
 import System.IO (IOMode (..), hGetLine, hPutStr)
 import System.OsPath.Extra (encodeUtf, fromOsPath, takeDirectory)
-import System.OsString (dropWhileEnd, unsafeFromChar)
 import qualified System.OsString as OsString
+import System.OsString (dropWhileEnd, unsafeFromChar)
 import System.Process (ProcessHandle, getProcessExitCode)
-import Types.FeatureFlags (FeatureFlags (..))
+import Types.FeatureFlags (Feature (..))
 import Types.Grpc (CommandEnv, RequestArgs (..))
 import Types.Orchestration (
   InstrumentSocketPath (..),
@@ -36,6 +36,7 @@ import Types.Orchestration (
   primarySocketDiscoveryIn,
   spawnedSocketDirectory,
   )
+import Types.Settings (Settings (..), featureOn)
 
 -- | The implementation of an app consisting of two gRPC servers, implementing the protocols 'Worker' and 'Instrument'.
 -- The 'Instrument' component is intended to be optional.
@@ -119,12 +120,12 @@ waitForCentralGhc proc socket = do
     dbg "Spawned process for the GHC server exited after starting up."
 
 -- | Run a GHC server synchronously.
-runCentralGhcSpawned :: CreateMethods -> FeatureFlags -> ServerSocketPath -> IO ()
-runCentralGhcSpawned methods features socket =
+runCentralGhcSpawned :: CreateMethods -> Settings -> ServerSocketPath -> IO ()
+runCentralGhcSpawned methods settings socket =
   runCentralGhc methods primaryFile socket instrumentSocket
   where
     instrumentSocket =
-      if features.instrument
+      if (featureOn FeatureInstrument settings)
       then Just (instrumentSocketIn dir)
       else Nothing
 

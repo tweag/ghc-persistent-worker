@@ -1,4 +1,4 @@
--- | LRU tracking and unloading of lazily-loaded bytecode (the @lazyByteCode@ feature, see 'Types.FeatureFlags').
+-- | LRU tracking and unloading of lazily-loaded bytecode (the @lazyByteCode@ feature, see 'Types.Settings').
 module Internal.Cache.Bytecode where
 
 import Data.Bifunctor (bimap)

@@ -11,11 +11,11 @@ import GHC.Paths (libdir)
 import GHC.Unit (UnitId)
 import GHC.Utils.Outputable (showPprUnsafe)
 import System.OsPath.Extra (OsPath, toOsPath)
+import Types.BuildPlan (ModuleKey)
 import Types.BuildPlan.Incremental (BuckHashesPath, BuildPlanPath, IncrementalStatePath)
 import Types.CachedDeps (CachedBuildPlans, CachedDeps)
-import Types.FeatureFlags (FeatureFlags, defaultFeatureFlags)
+import Types.Settings (Settings, defaultSettings)
 import Types.Target (ModuleTarget)
-import Types.BuildPlan (ModuleKey)
 
 newtype TargetId = TargetId {string :: String}
   deriving newtype (Show, Eq, Ord)
@@ -111,7 +111,7 @@ data Args =
     cachedDeps :: Maybe CachedDeps,
     homeUnit :: Maybe OsPath,
     isBinary :: Bool,
-    features :: FeatureFlags,
+    settings :: Settings,
     unitArgsPath :: Maybe String,
     unitBuckArgsPath :: Maybe String,
     depUnitsPath :: Maybe String
@@ -138,7 +138,7 @@ emptyArgs env =
     cachedDeps = Nothing,
     homeUnit = Nothing,
     isBinary = False,
-    features = defaultFeatureFlags,
+    settings = defaultSettings,
     unitArgsPath = Nothing,
     unitBuckArgsPath = Nothing,
     depUnitsPath = Nothing
