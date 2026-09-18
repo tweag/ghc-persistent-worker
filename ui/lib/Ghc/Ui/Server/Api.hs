@@ -10,10 +10,9 @@ import Data.ByteString (toStrict)
 import Data.Text qualified as Text
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import Ghc.Ui.Data.Main (MainEvent (OpLogMessage))
 import Ghc.Ui.Data.ServerApi (ServerApi (..))
 import Ghc.Ui.Data.ServerHandlers (ApiConfig (..))
-import Ghc.Ui.Server.Monad (ServerEnv, ServerM, logOp, trySendEvent)
+import Ghc.Ui.Server.Monad (ServerEnv, ServerM, logError)
 import Internal.Error (nonAsync)
 import Network.GRPC.Client (rpc)
 import Network.GRPC.Client.StreamType.IO (nonStreaming)
@@ -29,6 +28,7 @@ import Types.Api (
   TaskTrigger (..),
   renderTarget,
   )
+import Types.FeatureFlags (Feature)
 
 data RequestEnv =
   RequestEnv {
@@ -57,14 +57,14 @@ makeRequest command handleResponse = do
   RequestEnv {config = ApiConfig {sync}} <- ask
   (if sync then id else void . async) do
     catch send $ nonAsync \ err ->
-      liftServer $ trySendEvent (OpLogMessage ("API request failed: " <> err))
+      liftServer $ logError ("API request failed: " <> err)
   where
     send = do
       RequestEnv {config = ApiConfig {connections}} <- ask
       liftServer $ forConcurrently_ connections \ connection -> do
         output <- liftIO (nonStreaming connection (rpc @(Protobuf GhcServer "api")) message)
         case eitherDecodeStrict' output.payload of
-          Left err -> logOp ("Failed to decode grpc response: " <> Text.pack err)
+          Left err -> logError ("Failed to decode grpc response: " <> Text.pack err)
           Right (payload) -> handleResponse payload
 
     message =
@@ -81,7 +81,7 @@ requestLogError ::
 requestLogError request desc =
   makeRequest request \case
     ApiSuccess _ -> pure ()
-    ApiFailure err -> logOp (desc <> " failed: " <> err)
+    ApiFailure err -> logError (desc <> " failed: " <> err)
 
 triggerTask :: Target -> TaskKind -> RequestM ()
 triggerTask target task =
@@ -94,7 +94,7 @@ evictBytecode target =
 
 clean :: Target -> RequestM ()
 clean target =
-  makeRequest (Clean target) (logOp . errorMessage)
+  makeRequest (Clean target) (logError . errorMessage)
   where
     errorMessage = \case
       ApiFailure err -> "Cleaning " <> rendered <> " failed: " <> err
@@ -102,12 +102,18 @@ clean target =
 
     rendered = renderTarget target
 
+-- | Request that a single feature flag be toggled on the connected server(s).
+toggleFeature :: Feature -> RequestM ()
+toggleFeature feature =
+  requestLogError (ToggleFeature feature) ("Toggling feature " <> Text.pack (show feature))
+
 serverApi :: ServerEnv -> ApiConfig -> ServerApi
 serverApi server config =
   ServerApi {
     triggerTask = \ t k -> run (triggerTask t k),
     evictBytecode = run . evictBytecode,
-    clean = run . clean
+    clean = run . clean,
+    toggleFeature = run . toggleFeature
   }
   where
     run = flip runReaderT RequestEnv {..}

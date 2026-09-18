@@ -1,4 +1,4 @@
-module Ghc.Ui.Render.Layer where
+module Ghc.Ui.Render.Layout where
 
 import Brick (
   Context,
@@ -12,8 +12,14 @@ import Brick (
   availWidth,
   getContext,
   image,
+  vLimit,
   )
+import Brick.Widgets.List (GenericList (..))
 import Graphics.Vty (imageHeight, imageWidth, translate)
+
+translateResult :: Int -> Int -> Result n -> Result n
+translateResult x y result =
+  addResultOffset (Location (x, y)) result {image = translate x y (image result)}
 
 wrap ::
   (Result n -> Context n -> (Int, Int)) ->
@@ -23,11 +29,18 @@ wrap compute widget = do
   result <- render widget
   ctx <- getContext
   let (x, y) = compute result ctx
-  pure if x > 0 || y > 0 then addOffset x y result else result
+  pure if x > 0 || y > 0 then translateResult x y result else result
+
+-- | Position a widget as a transparent, non-space-filling layer -- the horizontal, right-anchored analogue of
+-- 'vAnchorLayer' (and of 'Brick.Widgets.Center.hCenterLayer', which this would reproduce if the margin were
+-- chosen to center rather than right-align) -- so that its right edge sits the given number of columns from
+-- the right edge of the whole screen. Only usable as a top-level layer, for the same reason as 'vAnchorLayer'.
+hAnchorRightLayer :: Int -> Widget n -> Widget n
+hAnchorRightLayer marginRight widget =
+  Widget Greedy (vSize widget) (wrap computeOffset widget)
   where
-    addOffset x y result =
-      addResultOffset (Location (x, y)) $
-      result {image = translate x y (image result)}
+    computeOffset result ctx =
+      (availWidth ctx - imageWidth (image result) - marginRight, 0)
 
 -- | Position a widget as a transparent, non-space-filling layer -- like 'Brick.Widgets.Center.vCenterLayer',
 -- which this generalizes (a fraction of 0.5 reproduces it exactly) -- so that its vertical center sits at the
@@ -37,18 +50,15 @@ wrap compute widget = do
 -- height happens to be at the point it renders.
 vAnchorLayer :: Double -> Widget n -> Widget n
 vAnchorLayer frac widget =
-  Widget (hSize widget) Greedy $ wrap computeOffset widget
+  Widget (hSize widget) Greedy (wrap computeOffset widget)
   where
     computeOffset result ctx =
       (0, round (frac * fromIntegral (availHeight ctx)) - imageHeight (image result) `div` 2)
 
--- | Position a widget as a transparent, non-space-filling layer -- the horizontal, right-anchored analogue of
--- 'vAnchorLayer' (and of 'Brick.Widgets.Center.hCenterLayer', which this would reproduce if the margin were
--- chosen to center rather than right-align) -- so that its right edge sits the given number of columns from
--- the right edge of the whole screen. Only usable as a top-level layer, for the same reason as 'vAnchorLayer'.
-hAnchorRightLayer :: Int -> Widget n -> Widget n
-hAnchorRightLayer marginRight widget =
-  Widget Greedy (vSize widget) $ wrap computeOffset widget
-  where
-    computeOffset result ctx =
-      (availWidth ctx - imageWidth (image result) - marginRight, 0)
+limitList ::
+  Foldable t =>
+  GenericList n t e ->
+  Widget n ->
+  Widget n
+limitList items =
+  vLimit (length items.listElements)

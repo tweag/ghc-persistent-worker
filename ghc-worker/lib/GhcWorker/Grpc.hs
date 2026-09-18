@@ -30,7 +30,10 @@ import Types.Api (
   homeModuleFromGhc,
   homeModuleMatchTarget,
   )
+import Types.FeatureFlags (Feature (..))
 import Types.Grpc (CommandEnv (..), RequestArgs (..))
+import Types.Settings (toggleFlag)
+import qualified Types.State as State
 import Types.State (WorkerState (..))
 import Types.State.Make (BcoHistoryEntry (..), MakeState (..))
 
@@ -130,6 +133,12 @@ evictBytecode stateVar chan req = do
   applyEviction stateVar req
   pushBytecodeState stateVar chan
 
+-- | Flip a single 'Feature' in 'WorkerState', shared by both 'GhcWorker.Grpc.apiRequest' and
+-- 'GhcServer.Grpc.runCommand'.
+toggleFeature :: MVar WorkerState -> Feature -> IO ()
+toggleFeature stateVar feature =
+  modifyMVar_ stateVar \ state -> pure state {State.settings = toggleFlag feature state.settings}
+
 -- | Dispatch a single decoded 'Command' to the appropriate handler, producing the 'Response'
 -- to be JSON-encoded back into the @Send@ RPC's 'Instr.CommandResponse'.
 apiRequest ::
@@ -145,6 +154,8 @@ apiRequest chan stateVar recompile = \case
     ApiSuccess () <$ evictBytecode stateVar chan req
   Clean _ ->
     pure (ApiFailure "Cleaning not supported")
+  ToggleFeature {feature} ->
+    ApiSuccess () <$ toggleFeature stateVar feature
 
 -- | Implementation of the unified @Send@ RPC: decodes the JSON 'Instr.Command' payload, runs it via the supplied
 -- dispatcher, and JSON-encodes the resulting 'Response' back into an 'Instr.CommandResponse'. Exported

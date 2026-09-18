@@ -1,10 +1,11 @@
 module Ghc.Ui.Event.Main where
 
-import Brick (BrickEvent (..), halt, suspendAndResume', zoom)
+import Brick (BrickEvent (..), EventM, halt, suspendAndResume', zoom)
 import Brick.Forms (formState)
-import Control.Lens (preuse, use, (.=))
+import Control.Lens (Lens', preuse, use, (.=))
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.State (get, gets)
 import Control.Monad.Trans (lift)
 import Data.Foldable (for_, toList, traverse_)
 import Data.Maybe (fromMaybe)
@@ -23,15 +24,16 @@ import Ghc.Ui.Data.ServerProcess (ServerConfig, describeServerRoot)
 import Ghc.Ui.Data.Session (SessionState (..))
 import qualified Ghc.Ui.Data.Sessions as Sessions
 import Ghc.Ui.Data.WorkerId (WorkerId (..))
-import Ghc.Ui.Event.Log (handleLogEvent, logMessage)
+import Ghc.Ui.Event.Log (handleLogEvent)
 import Ghc.Ui.Event.OpLog (handleOpLogEvent, logMainEvent)
 import Ghc.Ui.Event.Popup (focus, handleForm, handleListEventOf, listKeyEvent, openPopup, popupKeyEvent, staticDialog)
 import qualified Ghc.Ui.Event.Project as Project
 import Ghc.Ui.Event.Sessions (handleSessionsEvent)
+import Ghc.Ui.Event.Settings qualified as Settings
 import Ghc.Ui.Event.Tasks qualified as Tasks
 import Ghc.Ui.GhcDebug (debug)
 import Ghc.Ui.Monad (MainM, MonadUi, UiM, server, withApi, withApiSync)
-import Ghc.Ui.OpLog (logOp, logOpDebug)
+import Ghc.Ui.OpLog (logOp, logOpDebug, logOpLevel)
 import qualified Ghc.Ui.Render.Log as Log
 import Graphics.Vty (Event (..), Key (..))
 import Internal.Debug (debugSocketPathTarget)
@@ -41,25 +43,47 @@ import qualified Types.Api as TaskKind
 import Types.Api (Target (..), TaskKind, renderTarget)
 import Types.Text (showText)
 
-withTarget ::
+inSession ::
+  Lens' SessionState s ->
+  (EventM Name s a) ->
+  (a -> MainM ()) ->
+  MainM ()
+inSession lens zoomedAction resultAction =
+  lift (getFirst <$> zoom (currentSession . lens) (First . Just <$> zoomedAction)) >>= \case
+    Just a -> resultAction a
+    Nothing -> logOpDebug "Tried to use the current session with empty state"
+
+inSession_ ::
+  Lens' SessionState s ->
+  (EventM Name s ()) ->
+  MainM ()
+inSession_ lens action =
+  inSession lens action pure
+
+whenFocused ::
+  Name ->
+  MainM () ->
+  MainM ()
+whenFocused name run = do
+  current <- use #currentFocus
+  when (name == current) run
+
+-- TODO this isn't really used well
+withTask ::
   (WorkerId -> Target -> MainM ()) ->
   MainM ()
-withTarget handler = do
-  current <- use #currentFocus
-  First mtarget <- case current of
-    Tasks -> zoom (currentSession . #tasks) (First <$> Tasks.getSelectedTarget)
-    _ -> pure (First Nothing)
-  case mtarget of
-    Nothing -> logOp "No task selected"
-    Just (wid, target) -> handler wid target
+withTask handler =
+  whenFocused Tasks do
+    inSession #tasks Tasks.getSelectedTarget \case
+      Just (wid, target) -> handler wid target
+      Nothing -> logOp "No task selected"
 
 withProjectTargets ::
   (ProjectState -> Maybe a) ->
   (a -> MainM ()) ->
   MainM ()
-withProjectTargets select handle = do
-  project <- preuse (currentSession . #project)
-  case select =<< project of
+withProjectTargets select handle =
+  inSession #project (gets select) \case
     Just targets ->
       handle targets
     _ ->
@@ -70,12 +94,9 @@ inProject = zoom (currentSession . #project)
 
 writeLogToFile :: MainM ()
 writeLogToFile = do
-  preuse currentSession >>= \case
-    Nothing -> logOp "Cannot write the log to a file when no session is active"
-    Just state -> do
-      let rendered = Log.formatEntry <$> toList state.log
-      liftIO $ Text.writeFile "ui.log" (Text.unlines rendered)
-      logOp ("Wrote " <> showText (length rendered) <> " log entries to ui.log")
+  inSession #log get \ messages -> do
+    liftIO $ Text.writeFile "ui.log" (Text.unlines (Log.formatEntry <$> toList messages))
+    logOp ("Wrote session log to ui.log")
 
 -- TODO resetting the session state to show the splash screen is sloppy
 requestQuit :: MainM ()
@@ -97,7 +118,7 @@ triggerTask ::
   MainM ()
 triggerTask select kind =
   withProjectTargets select $ traverse_ \ target -> do
-    logMessage "trigger" "debug" ("Trigger " <> showText kind <> ": " <> showText target)
+    logOpDebug ("Trigger " <> showText kind <> ": " <> showText target)
     withApi \ api -> api.triggerTask target kind
 
 startServer :: ServerConfig -> MainM ()
@@ -112,6 +133,14 @@ evictBytecode target = do
   withApi \ api -> api.evictBytecode target
   inProject (Project.evictedBco target)
 
+toggleFeature :: MainM ()
+toggleFeature =
+  inSession #settings Settings.toggleSelected \case
+    Nothing ->
+      logOp "No setting selected"
+    Just flag ->
+      withApi \ api -> api.toggleFeature flag
+
 handleMainEvent ::
   MainEvent ->
   MainM ()
@@ -125,22 +154,19 @@ handleMainEvent = \case
     -- The first session to appear is auto-selected (see 'Sessions.handleEvent's 'StartSession' case)
     -- without the user dismissing any modal, so the idle screen's initial focus (the start-server form) has to be
     -- moved off explicitly here once that happens, mirroring what the other modals' "hide" logic does on Esc\/Enter.
-    current <- use #currentFocus
-    when (current == StartServer) do
+    whenFocused StartServer do
       focus Project
-
-  ProcessLog level stream line ->
-    logMessage level stream line
 
   ServerStopped {..} ->
     for_ failedPath \ path ->
       logOp ("Failed to start ghc-server in " <> describeServerRoot path <> ": " <> stderr)
 
-  OpLogMessage message -> logOp message
+  OpLogMessage {..} -> logOpLevel level message
 
   CleanCompleted target -> do
     inProject (Project.clearMarks target)
-    lift $ zoom (currentSession . #tasks) (Tasks.addSeparator ("Cleaned " <> renderTarget target))
+    inSession_ #tasks do
+      Tasks.addSeparator ("Cleaned " <> renderTarget target)
 
   ShutdownComplete -> do
     logOp "Shutdown complete"
@@ -163,11 +189,11 @@ handleGlobalKey current event = \case
     openPopup StartServer
 
   KChar 'K' -> do
-    logMessage "server" "info" "Killing ghc-server"
+    logOp "Killing ghc-server"
     server.stop
 
   KChar 'R' -> do
-    logMessage "server" "info" "Restarting ghc-server"
+    logOp "Restarting ghc-server"
     server.restart
 
   KChar 'c' -> do
@@ -185,20 +211,22 @@ handleGlobalKey current event = \case
   KChar 'W' -> writeLogToFile
 
   KChar 'd' ->
-    withTarget \ _ target -> do
+    withTask \ _ target -> do
       result <- lift $ suspendAndResume' $ debug (debugSocketPathTarget target)
       either (\ err -> logOp ("ghc-debug: " <> Text.pack err)) pure result
 
   KChar '\t' ->
     case current of
       Tasks -> focus Project
-      Project -> focus Tasks
+      Project -> focus Settings
+      Settings -> focus Tasks
       _ -> pure ()
 
   _ ->
     lift case current of
       Tasks -> handleListEventOf (currentSession . #tasks) event
       Project -> handleListEventOf (currentSession . #project . #rows) event
+      Settings -> handleListEventOf (currentSession . #settings . #rows) event
       _ -> pure ()
 
 -- | Keys that operate on the project view specifically: build\/execute triggers (which read their targets from
@@ -239,15 +267,19 @@ projectKey event = \case
 -- TODO wtf is this inline details thing
 tasksKey :: Event -> Key -> MainM ()
 tasksKey event = \case
-  -- KChar 'p' ->
-  --   withTarget \ _ _ -> #currentFocus .= TaskDetails
-
   KEnter ->
     -- This ensures the cursor is not on a separator
     -- TODO improve
-    withTarget \ _ _ -> openPopup TaskDetails
-
+    withTask \ _ _ -> openPopup TaskDetails
   key -> handleGlobalKey Tasks event key
+
+-- | Keys that operate on the feature-flags view specifically: 'Enter' toggles the currently selected flag's
+-- checkbox and sends the corresponding API request. Any other key falls through to 'handleGlobalKey'.
+settingsKey :: Event -> Key -> MainM ()
+settingsKey event = \case
+  KEnter -> toggleFeature
+  KChar ' ' -> toggleFeature
+  key -> handleGlobalKey Settings event key
 
 keyEvent ::
   (Event -> Key -> MainM ()) ->
@@ -278,6 +310,9 @@ vtyEvent = \case
 
   Project ->
     keyEvent projectKey
+
+  Settings ->
+    keyEvent settingsKey
 
   Tasks ->
     keyEvent tasksKey

@@ -10,8 +10,11 @@ import Brick (AttrName, Padding (Pad), Widget (..), hBox, padLeft, str, vBox, wi
 -- content area is offset two more cells past the rectangle's width.
 drawSection :: AttrName -> Widget n -> Widget n -> Widget n
 drawSection attr headline content =
-  vBox
-    [ padLeft (Pad 4) headline
-    , str " "
-    , hBox [withAttr attr (vBox (replicate 6 (str (replicate 3 '\9608')))), padLeft (Pad 2) content]
+  vBox [
+    padLeft (Pad 4) headline,
+    str " ",
+    hBox [
+      withAttr attr (vBox (replicate 6 (str (replicate 3 '\9608')))),
+      padLeft (Pad 2) content
     ]
+  ]
