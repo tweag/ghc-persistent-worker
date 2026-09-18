@@ -43,6 +43,7 @@ import Types.Grpc (CommandEnv (..), RequestArgs (..))
 import Types.Orchestration (
   PrimarySocketName (..),
   PrimarySocketPath (..),
+  ProxyInstance (..),
   ServerSocketPath (..),
   SocketDirectory (..),
   extractTraceIdAndWorkerSpecId,
@@ -70,24 +71,29 @@ data WorkerResource =
     processHandle :: ProcessHandle
   }
 
-
-
 proxyHandler ::
   MVar (Map TargetId WorkerResource) ->
   GhcWorkerCommand ->
   -- | Worker socket path determined by proxy socket path
   PrimarySocketName ->
+  -- | Proxy instance id
+  Maybe ProxyInstance ->
   -- | CLI override for the socket path
   Maybe PrimarySocketName ->
   Proto ExecuteCommand ->
   IO (Proto ExecuteResponse)
-proxyHandler workerMap command socketDefault socketOverride req = do
+proxyHandler workerMap command socketDefault mProxyInstance socketOverride req = do
   let cmdEnv = commandEnv req.env
       argv = Text.unpack . decodeUtf8Lenient <$> req.argv
       -- Get the build ID for the primary socket path from the command environment, and fall back to the value extracted
       -- from the gRPC socket path if the key is absent from the env.
       -- If an override was specified on the command line with @--socket-name@, it has precedence over both.
-      socketId = fromMaybe socketDefault (socketOverride <|> coerce (toOsPath <$> cmdEnv.values !? "BUCK_BUILD_ID"))
+      mkSocketPathFromBuildID = do
+        buildId <- cmdEnv.values !? "BUCK_BUILD_ID"
+        let suffix = maybe "" (\s -> "_" ++ s.instanceId) mProxyInstance
+        pure $ coerce (toOsPath (buildId ++ suffix))
+      socketPath = fromMaybe socketDefault (socketOverride <|> mkSocketPathFromBuildID)
+
   buckArgs <- either (throwIO . userError) pure (parseBuckArgs cmdEnv (RequestArgs argv))
   case buckArgs.workerTargetId of
     Nothing -> throwIO (userError "No --worker-target-id passed")
@@ -96,7 +102,7 @@ proxyHandler workerMap command socketDefault socketOverride req = do
         modifyMVar workerMap \wmap -> do
           case Map.lookup targetId wmap of
             Nothing -> do
-              let workerSocketDir = projectSocketDirectory socketId targetId
+              let workerSocketDir = projectSocketDirectory socketPath targetId
               void $ try @IOError (createDirectoryIfMissing True workerSocketDir.path)
               resource <- spawnGhcWorker command workerSocketDir
               dbg $ "No primary socket for " ++ show targetId ++ ", so created it on " ++ fromOsPath resource.primarySocket.path
@@ -115,26 +121,27 @@ proxyServer ::
   MVar (Map TargetId WorkerResource) ->
   GhcWorkerCommand ->
   ServerSocketPath ->
+  Maybe ProxyInstance ->
   Maybe PrimarySocketName ->
   IO ()
-proxyServer workerMap command socket workerSocketOverride = do
+proxyServer workerMap command buckSocket mProxyInstance workerSocketOverride = do
   try launch >>= \case
     Right () ->
-      dbg ("Shutting down buck-proxy on " ++ fromOsPath socket.path)
+      dbg ("Shutting down buck-proxy on " ++ fromOsPath buckSocket.path)
     Left (err :: IOError) -> do
-      dbg ("buck-proxy on" ++ fromOsPath socket.path ++ " crashed" ++ show err)
+      dbg ("buck-proxy on" ++ fromOsPath buckSocket.path ++ " crashed" ++ show err)
       exitFailure
   where
-    (traceId, workerSpecId) = extractTraceIdAndWorkerSpecId socket.path
+    (traceId, workerSpecId) = extractTraceIdAndWorkerSpecId buckSocket.path
     workerSocketDefault = PrimarySocketName (toOsPath $ traceId ++ "-" ++ workerSpecId)
     methods :: Methods IO (ProtobufMethodsOf Worker)
     methods =
       Method (mkClientStreaming streamingNotImplemented) $
-      Method (mkNonStreaming (proxyHandler workerMap command workerSocketDefault workerSocketOverride)) $
+      Method (mkNonStreaming (proxyHandler workerMap command workerSocketDefault mProxyInstance workerSocketOverride)) $
       NoMoreMethods
     launch = do
-      dbg ("Starting buck-proxy on " ++ fromOsPath socket.path)
-      runGrpcServer socket.path methods
+      dbg ("Starting buck-proxy on " ++ fromOsPath buckSocket.path)
+      runGrpcServer buckSocket.path methods
 
 
 

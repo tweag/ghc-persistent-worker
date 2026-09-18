@@ -29,7 +29,7 @@ import System.OsPath.Extra (toOsPath)
 import System.Posix.Signals (sigKILL, signalProcess)
 import System.Process (waitForProcess)
 import System.Process.Internals (ProcessHandle__ (OpenHandle), withProcessHandle)
-import Types.Orchestration (PrimarySocketName (..), ServerSocketPath (..))
+import Types.Orchestration (PrimarySocketName (..), ProxyInstance (..), ServerSocketPath (..))
 
 
 -- | Global options for the worker, passed when the process is started, in contrast to request options stored in
@@ -44,9 +44,15 @@ data CliOptions =
     -- terminated by Buck).
     remain :: Bool,
 
+    -- | Identifier for this buck proxy instance. In a single build, multiple instances of buck-proxy can be spawned
+    -- if new WorkerInfo instance is created. So by default, Build id and this instance id are used for creating
+    -- a unique socket name and log directory.
+    proxyInstance :: Maybe ProxyInstance,
+
     -- | Override the name of the worker socket instead of using @$BUCK_BUILD_ID@.
     -- This can be used with 'remain' to reuse a worker across builds.
-    workerSocket :: Maybe PrimarySocketName
+    -- NOTE: This is a brute-force socket file override. This is not recommended to be used.
+    workerSocketOverride :: Maybe PrimarySocketName
   }
   deriving stock (Eq, Show)
 
@@ -55,14 +61,16 @@ cliOptionsParser =
   build
     <$> optional (strOption (long "exe" <> metavar "EXE" <> help "Path to the ghc-worker executable"))
     <*> switch (long "remain" <> help "Don't kill the ghc-worker process after the build")
-    <*> optional (strOption (long "socket-name" <> metavar "NAME" <> help "Override the worker socket name"))
+    <*> optional (strOption (long "proxy-instance" <> metavar "INSTANCE" <> help "Proxy instance id"))
+    <*> optional (strOption (long "socket-override" <> metavar "SOCKET" <> help "Override the worker socket"))
     <*> many (strArgument (metavar "ARGS..."))
   where
-    build exe remain workerSocket args =
+    build exe remain mProxyInstance mWorkerSocketOverride args =
       CliOptions {
         command = exe <&> \ e -> GhcWorkerCommand {exe = WorkerExe e, args},
         remain,
-        workerSocket = PrimarySocketName . toOsPath <$> workerSocket
+        proxyInstance = ProxyInstance <$> mProxyInstance,
+        workerSocketOverride = PrimarySocketName . toOsPath <$> mWorkerSocketOverride
       }
 
     (<&>) = flip fmap
@@ -79,7 +87,7 @@ run ::
   CliOptions ->
   MVar (IO ()) ->
   IO ()
-run socket CliOptions {command, remain, workerSocket} refHandler
+run buckSocket CliOptions {command, remain, proxyInstance, workerSocketOverride} refHandler
   | Nothing <- command
   = throwIO (userError "No ghc-worker executable specified on the command line")
   | Just cmd <- command
@@ -91,12 +99,12 @@ run socket CliOptions {command, remain, workerSocket} refHandler
         wmap <- readMVar refWorkerMap
         for_ wmap \resource -> do
           -- Force to kill the worker process.
-          withProcessHandle resource.processHandle $ \handle -> 
+          withProcessHandle resource.processHandle $ \handle ->
               case handle of
                   OpenHandle pid -> signalProcess sigKILL pid
                   _ -> pure ()
           void $ waitForProcess resource.processHandle
-    proxyServer refWorkerMap cmd socket workerSocket
+    proxyServer refWorkerMap cmd buckSocket proxyInstance workerSocketOverride
 
 parseCliArgs :: IO CliOptions
 parseCliArgs = execParser cliOptionsParserInfo
