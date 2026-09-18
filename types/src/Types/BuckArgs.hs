@@ -16,7 +16,7 @@ import Data.Maybe (fromMaybe, isJust)
 import GHC (mkModule, mkModuleName)
 import GHC.Paths (libdir)
 import GHC.Unit (Definite (..), GenUnit (RealUnit), stringToUnitId)
-import System.OsPath.Extra (OsPath, fromOsPath, takeDirectory, toOsPath, encodeUtf)
+import System.OsPath.Extra (OsPath, encodeUtf, fromOsPath, takeDirectory, toOsPath)
 import qualified Types.Args
 import Types.Args (
   Args (Args),
@@ -29,8 +29,8 @@ import Types.Args (
   )
 import Types.BuildPlan.Incremental (BuckHashesPath (..), BuildPlanPath (..), IncrementalStatePath (..))
 import Types.Compat.GHC914 (sanitizeGhcArgs)
-import Types.FeatureFlags (FeatureFlags, defaultFeatureFlags)
 import Types.Grpc (CommandEnv (..), RequestArgs (..))
+import Types.Settings (Settings, defaultSettings)
 import Types.Target (ModuleTarget (..))
 
 data Mode =
@@ -267,8 +267,8 @@ parseField = \case
 
     keys = intercalate " | " ("all" : (buildPlanKey <$> toList buildPlanAll))
 
-toGhcArgs :: BuckArgs -> Maybe FeatureFlags -> IO Args
-toGhcArgs args features = do
+toGhcArgs :: BuckArgs -> Maybe Settings -> IO Args
+toGhcArgs args settings = do
   cachedDeps <- traverse (decodeJsonArg "--dep-modules" . toOsPath) args.depModules
   cachedBuildPlans <- traverse (decodeJsonArg "--dep-units" . toOsPath) args.depUnits
   staticBuildPlans <- traverse (decodeJsonArg "--dep-units-static" . toOsPath) args.depUnitsStatic
@@ -306,7 +306,7 @@ toGhcArgs args features = do
     cachedDeps,
     homeUnit = args.homeUnit,
     isBinary = args.isBinary,
-    features = fromMaybe defaultFeatureFlags features,
+    settings = fromMaybe defaultSettings settings,
     unitArgsPath = args.ghcArgsFile,
     unitBuckArgsPath = args.unitBuckArgsPath,
     depUnitsPath = args.depUnitsPath
