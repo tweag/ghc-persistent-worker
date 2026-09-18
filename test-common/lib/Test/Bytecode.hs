@@ -17,9 +17,11 @@ import GHC.Utils.Outputable (showPprUnsafe)
 import Hedgehog (TestT, evalMaybe)
 import Internal.Compat.Linkables (support_Linkables)
 import Test.Data.Env (TestEnv (..))
+import qualified Types.Args as Args
 import Types.Args (Args (..))
 import Types.Env (Env (..))
-import Types.FeatureFlags (FeatureFlags (..))
+import Types.FeatureFlags (Feature (..))
+import Types.Settings (Settings (..), setFeature)
 import Types.State (WorkerState (..))
 import Types.State.Make (MakeState (..))
 
@@ -27,7 +29,7 @@ enableLazyByteCode :: TestEnv -> TestEnv
 enableLazyByteCode testEnv =
   testEnv {
     baseArgs = testEnv.baseArgs {
-      features = testEnv.baseArgs.features {lazyByteCode = support_Linkables}
+      Args.settings = setFeature FeatureLazyByteCode support_Linkables testEnv.baseArgs.settings
     }
   }
 
@@ -35,7 +37,7 @@ enableByteCodeCacheLimit :: Int -> TestEnv -> TestEnv
 enableByteCodeCacheLimit limit testEnv =
   testEnv {
     baseArgs = testEnv.baseArgs {
-      features = testEnv.baseArgs.features {lazyByteCodeCacheLimit = Just limit}
+      Args.settings = testEnv.baseArgs.settings {lazyByteCodeCacheLimit = Just limit}
     }
   }
 

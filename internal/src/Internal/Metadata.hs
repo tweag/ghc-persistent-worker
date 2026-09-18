@@ -45,7 +45,7 @@ import Types.BuildPlan (BuildPlan (..))
 import Types.BuildPlan.Incremental (BuildPlanPath (..))
 import Types.CachedDeps (CachedBuildPlans)
 import Types.Env (Env (..))
-import Types.FeatureFlags (FeatureFlags (..))
+import Types.Settings (Settings (..))
 import Types.Log (Logger (..))
 import Types.State (WorkerState (..))
 import Types.Target (TargetSpec (..), UnitTarget (..))
@@ -154,13 +154,13 @@ writeMetadata ::
   Set UnitId ->
   [String] ->
   Ghc ModuleGraph
-writeMetadata args@Args {buildPlan = path, features, sourceHashes, incrementalState, perModuleFlags} logger staticUnits srcs = do
+writeMetadata args@Args {buildPlan = path, settings, sourceHashes, incrementalState, perModuleFlags} logger staticUnits srcs = do
   initializeSessionPlugins
   withTempSession metadataTempSession do
     hsc_env <- getSession
     writeLegacyMakefile hsc_env
     buildPlanPath <- resolveBuildPlanPath hsc_env path
-    plan <- buildPlanForSources features logger fields perModuleFlags staticUnits buildPlanPath incrementalState sourceHashes (toOsPath <$> srcs)
+    plan <- buildPlanForSources settings logger fields perModuleFlags staticUnits buildPlanPath incrementalState sourceHashes (toOsPath <$> srcs)
     liftIO $ writeBuildPlanWith args buildPlanPath.path plan
     pure plan.graph
   where
@@ -184,7 +184,7 @@ computeMetadata env = do
       dflags <- getSessionDynFlags
       for_ env.args.cachedBuildPlans \ bp ->
         withSession \ hsc_env ->
-          liftIO $ modifyMVar env.state \ state -> loadCachedDepUnits env.log dflags bp env.args.features (state, hsc_env)
+          liftIO $ modifyMVar env.state \ state -> loadCachedDepUnits env.log dflags bp env.args.settings (state, hsc_env)
       pure (Just ())
     logTimed env.log "Computing module graph" do
       MaybeT $ runSession env $ withDynFlags \ dflags srcs -> do
@@ -194,7 +194,7 @@ computeMetadata env = do
         module_graph <- writeMetadata env.args env.log staticUnits (fst <$> srcs)
         liftIO do
           unless (transientUnit env) $
-            updateMakeStateVar env.state (storeModuleGraph env.args.features.useIncrModGraph module_graph)
+            updateMakeStateVar env.state (storeModuleGraph env.args.settings.useIncrModGraph module_graph)
           for_ dflags.stubDir \ stubdir -> do
             env.log.debug ("Creating stubdir: " ++ stubdir)
             createDirectoryIfMissing False stubdir

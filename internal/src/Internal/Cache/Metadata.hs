@@ -62,8 +62,9 @@ import Types.CachedDeps (
   CachedUnit (..),
   JsonFs (..),
   )
-import Types.FeatureFlags (FeatureFlags (..))
+import Types.FeatureFlags (Feature (..))
 import Types.Log (Logger (..))
+import Types.Settings (Settings (..), featureOn)
 import Types.State (WorkerState (..))
 import Types.State.Make (LibLoadState (..), MakeState (..))
 
@@ -242,8 +243,7 @@ loadCachedModules ::
   CachedUnit ->
   IO [ModuleGraphNode]
 loadCachedModules useFixedNodes hsc_env unit CachedUnit {build_plan, cache} =
-  traverse (uncurry (loadCachedModule useFixedNodes hsc_env unit)) modules
-  -- mkModuleGraph . catMaybes <$> traverse (uncurry (loadCachedModule useFixedNodes hsc_env unit)) modules
+  catMaybes <$> traverse (uncurry (loadCachedModule useFixedNodes hsc_env unit)) modules
   where
     modules = Map.toList (fold (cache <|> build_plan))
 
@@ -282,8 +282,8 @@ data PreparedUnit =
     buckArgs :: Maybe OsPath
   }
 
-insertPreparedUnit :: Logger -> FeatureFlags -> HscEnv -> PreparedUnit -> StateT WorkerState IO HscEnv
-insertPreparedUnit logger features hsc_env pu = do
+insertPreparedUnit :: Logger -> Settings -> HscEnv -> PreparedUnit -> StateT WorkerState IO HscEnv
+insertPreparedUnit logger settings hsc_env pu = do
   logDebugD logger (text "Loading cached unit" <+> quotes (ppr pu.unitId))
   traverse_ loadCachedArgs pu.buckArgs
   hsc_env2 <- liftIO do
@@ -299,22 +299,21 @@ insertPreparedUnit logger features hsc_env pu = do
          in make {extraLib = LibLoadState requested' make.extraLib.loaded}
 
   modify (updateMakeState (updateExtraLibs . insertUnitEnv hsc_env2))
-  nodes <- liftIO $ traverse (uncurry (loadCachedModule features.fixedNodesCache hsc_env2 pu.unitId)) pu.moduleEntries
-  modify (updateMakeState (storeModuleGraphNodes nodes))
-  -- modify (updateMakeState (storeModuleGraph (mkModuleGraph (catMaybes nodes))))
+  nodes <- liftIO $ traverse (uncurry (loadCachedModule (featureOn FeatureFixedNodesCache settings) hsc_env2 pu.unitId)) pu.moduleEntries
+  modify (updateMakeState (storeModuleGraphNodes (catMaybes nodes)))
   pure hsc_env2
 
 loadCachedBuildPlan ::
   HscEnv ->
   DynFlags ->
-  FeatureFlags ->
+  Settings ->
   Set UnitId ->
   CachedBuildPlan ->
   IO (Maybe PreparedUnit)
-loadCachedBuildPlan hsc_env1 dflags0 features allUnitIds CachedBuildPlan {name = JsonFs unitId, build_plan} = do
+loadCachedBuildPlan hsc_env1 dflags0 settings allUnitIds CachedBuildPlan {name = JsonFs unitId, build_plan} = do
   cachedUnit@CachedUnit {unit_args} <- decodeJsonBuildPlan build_plan
   for unit_args \ argsFile -> do
-    dflags1 <- readParseGHCArgs features.flagParser hsc_env1 dflags0 argsFile
+    dflags1 <- readParseGHCArgs (featureOn FeatureFlagParser settings) hsc_env1 dflags0 argsFile
     (dflags2, dbs, unitState, homeUnit) <- initUnitsAndPlatform hsc_env1 dflags1 allUnitIds
     let moduleEntries = Map.toList (fold (cachedUnit.cache <|> cachedUnit.build_plan))
     pure PreparedUnit {
@@ -366,15 +365,15 @@ loadCachedDepUnits ::
   Logger ->
   DynFlags ->
   CachedBuildPlans ->
-  FeatureFlags ->
+  Settings ->
   (WorkerState, HscEnv) ->
   IO (WorkerState, HscEnv)
-loadCachedDepUnits logger dflags0 (CachedBuildPlans buildPlans) features (state0, hsc_env0) = do
+loadCachedDepUnits logger dflags0 (CachedBuildPlans buildPlans) settings (state0, hsc_env0) = do
   let hsc_env1 = Make.loadState hsc_env0 state0.make
   logTimed logger "Loading cached dep units" $ fmap swap do
     let (total, missing) = compareUnits hsc_env1 buildPlans
-    prepared <- catMaybes <$> traverser (loadCachedBuildPlan hsc_env1 dflags0 features total) missing
-    (hsc_env2, state1) <- runStateT (foldM (insertPreparedUnit logger features) hsc_env1 prepared) state0
-    pure (hsc_env2, updateMakeState (Make.rebuildModuleGraph features.useIncrModGraph) state1)
+    prepared <- catMaybes <$> traverser (loadCachedBuildPlan hsc_env1 dflags0 settings total) missing
+    (hsc_env2, state1) <- runStateT (foldM (insertPreparedUnit logger settings) hsc_env1 prepared) state0
+    pure (hsc_env2, updateMakeState (Make.rebuildModuleGraph settings.useIncrModGraph) state1)
   where
-    traverser = if features.concurrentInitUnits then processConcurrent else traverse
+    traverser = if (featureOn FeatureConcurrentInitUnits settings) then processConcurrent else traverse

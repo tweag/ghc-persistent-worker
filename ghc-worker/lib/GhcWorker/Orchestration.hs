@@ -18,8 +18,8 @@ import System.Exit (exitFailure)
 import System.File.OsPath (withFile)
 import System.IO (IOMode (..), hGetLine, hPutStr)
 import System.OsPath.Extra (encodeUtf, fromOsPath, takeDirectory)
-import System.OsString (dropWhileEnd, unsafeFromChar)
 import qualified System.OsString as OsString
+import System.OsString (dropWhileEnd, unsafeFromChar)
 import System.Process (ProcessHandle, getProcessExitCode)
 import Types.Orchestration (
   PrimarySocketDiscoveryPath (..),

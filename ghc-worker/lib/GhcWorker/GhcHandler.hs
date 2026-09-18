@@ -34,7 +34,7 @@ import Types.Args (Args (..))
 import qualified Types.BuckArgs
 import Types.BuckArgs (BuckArgs, IsInterpreted (..), Mode (..), parseBuckArgs, toGhcArgs)
 import Types.Env (Env (..))
-import Types.FeatureFlags (FeatureFlags (..))
+import Types.Settings (Settings (..))
 import Types.Grpc (RequestArgs (..))
 import Types.Log (Logger (..), TraceId, newLog)
 import Types.State (WorkerState (..))
@@ -109,7 +109,7 @@ dispatch hooks env args =
         env.log.setTarget target
 #ifdef GHC_DEBUG
         let path = debugSocketPath target
-        (if env.args.features.instrument then withGhcDebugUnix path else id) $
+        (if featureOn FeatureInstrument env.args.settings then withGhcDebugUnix path else id) $
           reflectGhc (f target) session <&> fmap \ r -> (r, target)
 #else
         reflectGhc (f target) session <&> fmap \ r -> (r, target)
@@ -150,15 +150,15 @@ processResult hooks logger _stateVar result = do
 ghcHandler ::
   -- | first req lock hack
   MVar WorkerState ->
-  FeatureFlags ->
+  Settings ->
   Maybe TraceId ->
   InstrumentedHandler
-ghcHandler state features traceId =
+ghcHandler state settings traceId =
   InstrumentedHandler \ hooks -> GrpcHandler \ commandEnv argv -> do
     log <- newLogger <$> newLog traceId
     result <- try do
       buckArgs <- either parseError pure (parseBuckArgs commandEnv argv)
-      args <- toGhcArgs buckArgs (Just features)
+      args <- toGhcArgs buckArgs (Just settings)
       log.debug (unlines (coerce argv))
       let env = Env {log, state, args = args}
       dispatch hooks env buckArgs
