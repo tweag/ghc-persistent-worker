@@ -9,6 +9,7 @@ import Control.Monad.Reader (MonadReader (..), ReaderT (..))
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Ghc.Ui.Data.Main (MainEvent (..))
+import Ghc.Ui.Data.OpLog (OpLevel (..))
 import Ghc.Ui.Data.ServerProcess (ServerProcess)
 import System.OsPath (OsPath)
 
@@ -43,28 +44,27 @@ trySendEvent event = do
   ServerEnv {events} <- ask
   void $ liftIO $ writeBChanNonBlocking events event
 
+logOp ::
+  MonadIO m =>
+  OpLevel ->
+  Text ->
+  ReaderT ServerEnv m ()
+logOp level message =
+  trySendEvent OpLogMessage {..}
+
 logInfo ::
   MonadIO m =>
   Text ->
-  Text ->
   ReaderT ServerEnv m ()
-logInfo name message =
-  trySendEvent ProcessLog {level = "info", ..}
+logInfo =
+  logOp OpInfo
 
 logError ::
   MonadIO m =>
   Text ->
-  Text ->
   ReaderT ServerEnv m ()
-logError name message =
-  trySendEvent ProcessLog {level = "error", ..}
-
-logOp ::
-  MonadIO m =>
-  Text ->
-  ReaderT ServerEnv m ()
-logOp message =
-  trySendEvent (OpLogMessage message)
+logError =
+  logOp OpError
 
 trackProcess ::
   (Maybe ServerProcess -> ServerM ServerProcess) ->

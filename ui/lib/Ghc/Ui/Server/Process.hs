@@ -9,7 +9,7 @@ import Data.Either.Extra (maybeToEither)
 import Data.Foldable (traverse_)
 import Data.Text qualified as Text
 import Data.Text (Text)
-import Ghc.Ui.Server.Monad (ServerM, logOp)
+import Ghc.Ui.Server.Monad (ServerM, logInfo)
 import Network.Socket (Family (AF_UNIX), SockAddr (SockAddrUnix), SocketType (Stream), close, connect, socket)
 import System.Directory (findExecutable)
 import System.IO (Handle)
@@ -74,7 +74,7 @@ killGhcServer process = do
   where
     wait = do
       threadDelay 200_000
-      logOp "Server is busy, waiting for 5 seconds..."
+      logInfo "Server is busy, waiting for 5 seconds..."
       threadDelay 5_000_000
-      logOp "Sending signal KILL to the server process"
+      logInfo "Sending signal KILL to the server process"
       liftIO $ traverse_ (signalProcess sigKILL) =<< getPid process

@@ -11,6 +11,8 @@ data Name =
   |
   Project
   |
+  Settings
+  |
   Sessions
   |
   StartServer

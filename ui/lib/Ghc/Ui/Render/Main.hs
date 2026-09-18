@@ -10,10 +10,9 @@ import Ghc.Ui.Attr qualified as Attr
 import Ghc.Ui.Data.Main (MainEvent, MainState (..))
 import Ghc.Ui.Data.Name (Name (..))
 import Ghc.Ui.Data.ServerProcess (ServerConfig)
-import Ghc.Ui.Data.Session qualified as Session
-import Ghc.Ui.Data.Session (SessionState)
+import Ghc.Ui.Data.Session (SessionState (..))
 import Ghc.Ui.Data.Tasks (rowTask)
-import Ghc.Ui.Render.Layer (vAnchorLayer)
+import Ghc.Ui.Render.Layout (vAnchorLayer)
 import Ghc.Ui.Render.Log (renderLogPopup)
 import Ghc.Ui.Render.Logo (renderLogo)
 import Ghc.Ui.Render.OpLog (renderOpLogIdle, renderOpLogPopup)
@@ -71,5 +70,5 @@ renderMain state@MainState {sessions, currentFocus, serverForm, opLog} =
   maybe [renderOpLogIdle opLog, renderStartServerIdle serverForm] (const []) session
   ++
   [renderLogo, renderInfo state session]
- where
-  session = snd . snd <$> listSelectedElement sessions
+  where
+    session = snd <$> listSelectedElement sessions

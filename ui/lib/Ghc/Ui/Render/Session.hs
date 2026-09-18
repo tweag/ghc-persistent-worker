@@ -1,6 +1,6 @@
 module Ghc.Ui.Render.Session where
 
-import Brick (Padding (..), Widget, hBox, hLimitPercent, padAll, padRight, txt, vBox, vLimit)
+import Brick (Padding (..), Widget (..), fill, hBox, hLimitPercent, padAll, padRight, txt, vBox, vLimit)
 import Brick.Widgets.Border (hBorder)
 import Data.Map qualified as Map
 import qualified Data.Text as Text
@@ -11,6 +11,7 @@ import Ghc.Ui.Data.Session (SessionState (..), Stats (..), Worker (..))
 import Ghc.Ui.Render.Format (formatBytes, formatPs)
 import Ghc.Ui.Render.OpLog (renderOpLogEmbed)
 import Ghc.Ui.Render.Project (renderProject)
+import Ghc.Ui.Render.Settings (renderSettings)
 import Ghc.Ui.Render.Tasks (renderTasks)
 import Types.Text (showText)
 
@@ -31,12 +32,13 @@ renderStats workerCount Stats {..} =
     memoryStats = Text.concat [" " <> k <> "=" <> formatBytes v | (k, v) <- Map.toList memory]
 
 renderSession :: Name -> UTCTime -> OpLogState -> SessionState -> Widget Name
-renderSession current now opLog SessionState {project, tasks, workers, finishedWorkerStats} =
+renderSession current now opLog SessionState {project, tasks, workers, finishedWorkerStats, settings} =
   vBox [
     padAll 2 $ hBox [
-      hLimitPercent 50 $ padRight (Pad 3) $ renderProject current project,
+      hLimitPercent 50 $ padRight (Pad 3) $ vBox [renderProject current project, fill ' '],
       renderTasks current now tasks
     ],
+    padAll 2 $ renderSettings current settings,
     hBorder,
     renderStats (length workers) (foldMap (.stats) workers <> finishedWorkerStats),
     hBorder,

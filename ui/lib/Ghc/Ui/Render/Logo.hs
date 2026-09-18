@@ -4,7 +4,7 @@ import Brick (AttrName, Padding (Pad), Widget (..), hBox, padTop, txt, vBox, wit
 import qualified Data.Text as Text
 import Ghc.Ui.Attr qualified as Attr
 import Ghc.Ui.Data.Name (Name)
-import Ghc.Ui.Render.Layer (hAnchorRightLayer)
+import Ghc.Ui.Render.Layout (hAnchorRightLayer)
 
 data Cell =
   Cell {

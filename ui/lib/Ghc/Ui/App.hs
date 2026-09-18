@@ -50,6 +50,7 @@ attrMapMain _ =
     (Attr.taskResult, fg brightYellow),
     (Attr.sectionActiveTasks, bold' (fg yellow)),
     (Attr.sectionProject, bold' (fg cyan)),
+    (Attr.sectionSettings, bold' (fg magenta)),
     (Attr.opLogIndicator, bold' (fg green)),
     (Attr.opLogText, fg brightWhite),
     (Attr.startServerLabel, fg blue),

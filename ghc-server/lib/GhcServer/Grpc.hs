@@ -43,14 +43,17 @@ import Types.Api (
   UnitName (..),
   UnitSummary (..),
   )
-import Types.State (WorkerState)
+import Types.Settings (Settings (..))
+import Types.State (WorkerState (settings))
 
 -- | Build a snapshot of the project's units and modules for the instrument UI's task tree, from the units
--- discovered at server startup (source file basenames as module names, no compilation required).
-projectStructureEvent :: Project -> Event
-projectStructureEvent project =
+-- discovered at server startup (source file basenames as module names, no compilation required), alongside the
+-- currently active feature flags.
+projectStructureEvent :: Project -> Settings -> Event
+projectStructureEvent project settings =
   ProjectStructure {
-    units = [UnitSummary {name, modules = [ModuleName (Text.pack (moduleNameString m)) | (m, _) <- unit.modules]} | (name, unit) <- Map.toList project.units]
+    units = [UnitSummary {name, modules = [ModuleName (Text.pack (moduleNameString m)) | (m, _) <- unit.modules]} | (name, unit) <- Map.toList project.units],
+    settings
   }
 
 -- | Implementation of the 'Events' RPC: streams instrumentation data pulled from the server's shared event
@@ -69,9 +72,9 @@ events ::
   IO ()
 events _ _ Nothing callback = callback NoNextElem
 events project stateVar (Just chan) callback = do
-  callback $ NextElem $
-    defMessage & Fields.payload .~ toStrict (Binary.encode (projectStructureEvent project))
   state <- readMVar stateVar
+  callback $ NextElem $
+    defMessage & Fields.payload .~ toStrict (Binary.encode (projectStructureEvent project state.settings))
   stats <- Worker.mkStats state
   callback $ NextElem $
     defMessage & Fields.payload .~ toStrict (Binary.encode stats)
@@ -150,6 +153,7 @@ runCommand mchan build env project = \case
     for_ mchan (Worker.pushBytecodeState env.stateVar)
     pure (ApiSuccess ())
   Clean target -> runClean build env target
+  ToggleFeature {feature} -> ApiSuccess () <$ Worker.toggleFeature env.stateVar feature
 
 -- | Implementation of the unified 'Api' RPC: JSON-decodes the 'Command' from the request 'GS.Json'\'s
 -- @payload@ field, runs it via the supplied dispatcher, and JSON-encodes the resulting 'Response'
