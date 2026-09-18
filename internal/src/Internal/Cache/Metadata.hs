@@ -57,8 +57,9 @@ import Types.CachedDeps (
   CachedUnit (..),
   JsonFs (..),
   )
-import Types.FeatureFlags (FeatureFlags (..))
+import Types.FeatureFlags (Feature (..))
 import Types.Log (Logger (..))
+import Types.Settings (Settings (..), featureOn)
 import Types.State (WorkerState (..))
 import Types.State.Make (LibLoadState (..), MakeState (..))
 
@@ -322,21 +323,21 @@ insertPreparedUnit logger features hsc_env pu = do
          in make {extraLib = LibLoadState requested' make.extraLib.loaded}
 
   modify (updateMakeState (updateExtraLibs . insertUnitEnv hsc_env2))
-  nodes <- liftIO $ traverse (uncurry (loadCachedModule features.fixedNodesCache hsc_env2 pu.unitId)) pu.moduleEntries
+  nodes <- liftIO $ traverse (uncurry (loadCachedModule (featureOn FeatureFixedNodesCache settings) hsc_env2 pu.unitId)) pu.moduleEntries
   modify (updateMakeState (storeModuleGraphNodes (catMaybes nodes)))
   pure hsc_env2
 
 loadCachedBuildPlan ::
   HscEnv ->
   DynFlags ->
-  FeatureFlags ->
+  Settings ->
   Set UnitId ->
   CachedBuildPlan ->
   IO (Maybe PreparedUnit)
-loadCachedBuildPlan hsc_env1 dflags0 features allUnitIds CachedBuildPlan {name = JsonFs unitId, build_plan} = do
+loadCachedBuildPlan hsc_env1 dflags0 settings allUnitIds CachedBuildPlan {name = JsonFs unitId, build_plan} = do
   cachedUnit@CachedUnit {unit_args} <- decodeJsonBuildPlan build_plan
   for unit_args \ argsFile -> do
-    dflags1 <- readParseGHCArgs features.flagParser hsc_env1 dflags0 argsFile
+    dflags1 <- readParseGHCArgs (featureOn FeatureFlagParser settings) hsc_env1 dflags0 argsFile
     (dflags2, dbs, unitState, homeUnit) <- initUnitsAndPlatform hsc_env1 dflags1 allUnitIds
     let moduleEntries = Map.toList (fold (cachedUnit.cache <|> cachedUnit.build_plan))
     pure PreparedUnit {
@@ -399,4 +400,4 @@ loadCachedDepUnits logger dflags0 (CachedBuildPlans buildPlans) features (state0
     (hsc_env2, state1) <- runStateT (foldM (insertPreparedUnit logger features) hsc_env1 prepared) state0
     pure (hsc_env2, updateMakeState (Make.rebuildModuleGraph features.useIncrModGraph) state1)
   where
-    traverser = if features.concurrentInitUnits then processConcurrent else traverse
+    traverser = if (featureOn FeatureConcurrentInitUnits settings) then processConcurrent else traverse

@@ -59,7 +59,7 @@ import GHC.Unit.Module.WholeCoreBindings (WholeCoreBindings (..))
 import GHC.Utils.Misc (modificationTimeIfExists)
 import GHC.Utils.Outputable (ppr, ($+$))
 import GHC.Utils.Panic (throwGhcExceptionIO, tryMost)
-import Internal.Cache.Metadata (loadCachedHomeUnit, loadCachedDepUnits, readParseGHCArgs)
+import Internal.Cache.Metadata (loadCachedDepUnits, loadCachedHomeUnit, readParseGHCArgs)
 import qualified Internal.Compat.FixedNodes as FixedNodes
 import Internal.Compat.FixedNodes (pattern CompileNode, pattern FixedNode)
 import Internal.Compat.GHC914 (edgeTarget, setExtraDecls)
@@ -69,8 +69,9 @@ import System.FilePath ((<.>), (</>))
 import System.OsPath.Extra (OsPath, fromOsPath, toOsPath)
 import Types.BuckArgs (IsInterpreted (Compiled, Interpreted), decodeJsonArg)
 import Types.CachedDeps (CachedDep (..), CachedDeps (..), CachedUnit (..), JsonFs (..))
-import Types.FeatureFlags (FeatureFlags (..))
+import Types.FeatureFlags (Feature (..))
 import Types.Log (Logger (..))
+import Types.Settings (Settings (..), featureOn)
 import Types.State (WorkerState (make))
 import Types.State.Make (bcoLoadState)
 
@@ -232,14 +233,14 @@ prepareHmiLoader hpt name = do
 -- Maybe this could reuse some stuff in @hscRecompStatus@?
 loadCachedDep ::
   Logger ->
-  FeatureFlags ->
+  Settings ->
   IsInterpreted ->
   HscEnv ->
   ModuleName ->
   OsPath ->
   ModuleLoadState ->
   IO ModuleLoadState
-loadCachedDep log features interp hsc_env name ifaceFile mod_load_state =
+loadCachedDep log settings interp hsc_env name ifaceFile mod_load_state =
   case mod_load_state of
     Loaded -> pure Loaded
     Waiting lock -> readMVar lock >> pure Loaded
@@ -261,17 +262,17 @@ loadCachedDep log features interp hsc_env name ifaceFile mod_load_state =
     loadHmiFull HomeModInfo {hm_iface, hm_details} = do
       logTimed log ("Loading HPT module from cache (BCO): " ++ fromOsPath ifaceFile) do
         homeMod_bytecode <-
-          if features.lazyByteCode
+          if featureOn FeatureLazyByteCode settings
 #if defined(LINKABLES)
           then pure Nothing
 #else
           then throwGhcExceptionIO $
             PprProgramError
              "ghc-worker error"
-             (text "features.lazyByteCode is on, but buck-worker-internal is not compiled with -flinkables")
+             (text "settings.lazyByteCode is on, but buck-worker-internal is not compiled with -flinkables")
 #endif
           else loadCachedByteCode hsc_env (fromOsPath ifaceFile) hm_iface hm_details
-        let hm_iface' = (if features.lazyByteCode then id else setExtraDecls Nothing) hm_iface
+        let hm_iface' = (if featureOn FeatureLazyByteCode settings then id else setExtraDecls Nothing) hm_iface
         let hmi' = HomeModInfo {
           hm_iface = hm_iface',
           hm_linkable = HomeModLinkable {homeMod_object = Nothing, homeMod_bytecode},
@@ -455,4 +456,4 @@ loadHomeUnit log dflags0 features unit (state0, hsc_env0) path
       loadCachedDepUnits log dflags0 deps features (state0, hsc_env0)
     dflags <- maybe (pure dflags0) (readParseGHCArgs features.flagParser hsc_env1 dflags0) unit_args
     logTimed log "Loading cached home unit" $ fmap swap do
-      runStateT (loadCachedHomeUnit log features.fixedNodesCache features.useIncrModGraph hsc_env1 unit (cachedUnit, dflags)) state1
+      runStateT (loadCachedHomeUnit log (featureOn FeatureFixedNodesCache settings) settings.useIncrModGraph hsc_env1 unit (cachedUnit, dflags)) state1

@@ -1,75 +1,40 @@
 module Types.FeatureFlags where
 
-import Data.Char (isDigit)
-import Data.Either.Extra (maybeToEither)
-import Text.Read (readMaybe)
+import Data.Aeson (FromJSON, ToJSON)
+import Data.Binary (Binary)
+import Data.Text (Text)
+import GHC.Generics (Generic)
 
-data FeatureFlag =
+data Feature =
+  -- | Use fixed module graph nodes instead of calling 'summariseFile' when restoring from cache.
   FeatureFixedNodesCache
   |
+  -- | Use the custom flatparse-based flag parser instead of GHC's 'parseDynamicFlags'.
   FeatureFlagParser
   |
+  -- | When restoring units from cache, perform as much work as possible concurrently.
   FeatureConcurrentInitUnits
   |
+  -- | Run another gRPC server for instrumentation.
   FeatureInstrument
   |
+  -- | Use incremental metadata (only re-downsweep changed modules).
   FeatureIncrementalBuildPlan
   |
+  -- | Load bytecode on demand when linking splices or evaluating tests.
   FeatureLazyByteCode
-  deriving stock (Eq, Show)
+  deriving stock (Eq, Show, Ord, Enum, Bounded, Generic)
+  deriving anyclass (Binary, FromJSON, ToJSON)
 
--- | Runtime feature flags that control alternative implementations.
-data FeatureFlags =
-  FeatureFlags {
-    -- | Use fixed module graph nodes instead of calling 'summariseFile' when restoring from cache.
-    fixedNodesCache :: Bool,
-    -- | Use the custom flatparse-based flag parser instead of GHC's 'parseDynamicFlags'.
-    flagParser :: Bool,
-    -- | When restoring units from cache, perform as much work as possible concurrently.
-    concurrentInitUnits :: Bool,
-    -- | Integrated with accompanying monitoring instrument app
-    instrument :: Bool,
-    -- | Use incremental metadata (only re-downsweep changed modules).
-    incrementalBuildPlan :: Bool,
-    -- | Load bytecode on demand when linking splices or evaluating tests.
-    lazyByteCode :: Bool,
-    -- | Use incremental update of ModuleGraph.
-    useIncrModGraph :: Bool,
-    -- | Limit the number of BCOs that may reside in the loader state.
-    --
-    -- When set and 'lazyByteCode' is enabled, the least recently used entries are unloaded at the end of each compile
-    -- job once the tracked total exceeds this limit. 'Nothing' disables unloading entirely.
-    lazyByteCodeCacheLimit :: Maybe Int
-  }
-  deriving stock (Eq, Show)
+allFeatures :: [Feature]
+allFeatures = [minBound .. maxBound]
 
--- | Parse a @--max-bytecode@ CLI argument: a decimal number followed by an optional @k@, @M@ or @G@ suffix.
-parseByteSize :: String -> Either String Int
-parseByteSize s = do
-  number <- maybeToEither invalid (readMaybe digits)
-  factor <- parseFactor suffix
-  pure (number * factor)
-  where
-    invalid = "Invalid --max-bytecode value: " ++ s
-
-    parseFactor = \case
-      "" -> Right 1
-      "k" -> Right 1000
-      "M" -> Right 1000000
-      "G" -> Right 1000000000
-      _ -> Left ("Invalid --max-bytecode suffix (expected k, M or G): " ++ suffix)
-
-    (digits, suffix) = span isDigit s
-
-defaultFeatureFlags :: FeatureFlags
-defaultFeatureFlags =
-  FeatureFlags {
-    fixedNodesCache = True,
-    flagParser = False,
-    concurrentInitUnits = True,
-    instrument = False,
-    incrementalBuildPlan = True,
-    lazyByteCode = True,
-    lazyByteCodeCacheLimit = Nothing,
-    useIncrModGraph = True
-  }
+parseFeatureFlag :: Text -> Either Text Feature
+parseFeatureFlag = \case
+  "fixed-nodes-cache" -> Right FeatureFixedNodesCache
+  "flag-parser" -> Right FeatureFlagParser
+  "concurrent-init-units" -> Right FeatureConcurrentInitUnits
+  "instrument" -> Right FeatureInstrument
+  "incremental-build-plan" -> Right FeatureIncrementalBuildPlan
+  "lazy-byte-code" -> Right FeatureLazyByteCode
+  flag -> Left ("Invalid feature flag: " <> flag)

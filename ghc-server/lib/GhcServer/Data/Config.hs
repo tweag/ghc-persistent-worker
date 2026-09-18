@@ -2,7 +2,7 @@
 module GhcServer.Data.Config where
 
 import System.OsPath (OsPath)
-import Types.FeatureFlags (FeatureFlags (..))
+import Types.Settings (Settings)
 
 -- | Configuration for the server, parsed from CLI args.
 data ServerConfig =
@@ -16,8 +16,8 @@ data ServerConfig =
     -- | Force @unit.json@-based project discovery even if a @.cabal@ file is present in the project root. Normally
     -- discovery auto-detects: a @.cabal@ file triggers Cabal-based discovery, otherwise @unit.json@ files are used.
     jsonConfig :: Bool,
-    -- | Runtime feature flags.
-    features :: FeatureFlags
+    -- | Initial settings.
+    settings :: Settings
   }
   deriving stock (Show)
 

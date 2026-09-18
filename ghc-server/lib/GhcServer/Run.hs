@@ -7,6 +7,8 @@ import Common.Grpc (runGrpcServer)
 import Control.Applicative (many, optional, (<|>))
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
+import Data.Bifunctor (first)
+import Data.Text (pack, unpack)
 import GhcServer.Cabal.Setup (cabalSetup)
 import GhcServer.Data.Config (ServerConfig (..))
 import GhcServer.Grpc (serverMethods)
@@ -43,10 +45,11 @@ import System.Exit (die)
 import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
 import System.OsPath (OsPath, (</>))
 import System.OsPath.Extra (fromOsPath, toOsPath)
-import Types.FeatureFlags (FeatureFlag (..), FeatureFlags (..), defaultFeatureFlags, parseByteSize)
+import Types.FeatureFlags (parseFeatureFlag)
+import Types.Settings (Settings (..), defaultSettings, parseByteSize, setFeature)
 
 -- | Parser for runtime feature flags.
-featureFlagsParser :: Parser FeatureFlags
+featureFlagsParser :: Parser Settings
 featureFlagsParser =
   (\ flags maxBytecode -> flags {lazyByteCodeCacheLimit = maxBytecode}) <$> flagsParser <*> maxBytecodeParser
   where
@@ -57,27 +60,13 @@ featureFlagsParser =
         (option (flagOption False) (long "disable" <> metavar "FEATURE" <> help "Disable an optional feature"))
         )
 
-    applyFlags =
-      flip foldl' defaultFeatureFlags \ flags -> \case
-        (fixedNodesCache, FeatureFixedNodesCache) -> flags {fixedNodesCache}
-        (flagParser, FeatureFlagParser) -> flags {flagParser}
-        (concurrentInitUnits, FeatureConcurrentInitUnits) -> flags {concurrentInitUnits}
-        (incrementalBuildPlan, FeatureIncrementalBuildPlan) -> flags {incrementalBuildPlan}
-        (lazyByteCode, FeatureLazyByteCode) -> flags {lazyByteCode}
-        (instrument, FeatureInstrument) -> flags {instrument}
+    applyFlags = flip foldr defaultSettings (uncurry setFeature)
 
     flagOption v = do
-      flag <- eitherReader \case
-        "fixed-nodes-cache" -> Right FeatureFixedNodesCache
-        "flag-parser" -> Right FeatureFlagParser
-        "concurrent-init-units" -> Right FeatureConcurrentInitUnits
-        "incremental-build-plan" -> Right FeatureIncrementalBuildPlan
-        "lazy-byte-code" -> Right FeatureLazyByteCode
-        "instrument" -> Right FeatureInstrument
-        flag -> Left ("Invalid feature flag: " ++ flag)
-      pure (v, flag)
+      flag <- eitherReader (first unpack . parseFeatureFlag . pack)
+      pure (flag, v)
 
--- | Parser for '--max-bytecode', bounding the lazily-loaded bytecode cache (see 'FeatureFlags.lazyByteCodeCacheLimit').
+-- | Parser for '--max-bytecode', bounding the lazily-loaded bytecode cache (see 'Settings.lazyByteCodeCacheLimit').
 maxBytecodeParser :: Parser (Maybe Int)
 maxBytecodeParser =
   optional (
@@ -102,7 +91,7 @@ data RawServerConfig =
     maxJobs :: Int,
     verbose :: Bool,
     jsonConfig :: Bool,
-    features :: FeatureFlags
+    settings :: Settings
   }
   deriving stock (Show)
 
@@ -113,7 +102,7 @@ serverConfigParser = do
   maxJobs <- option auto (long "jobs" <> short 'j' <> metavar "N" <> help "Maximum concurrent jobs" <> value 4)
   verbose <- switch (long "verbose" <> short 'v' <> help "Print the build log on success")
   jsonConfig <- switch (long "json-config" <> help "Force unit.json-based project discovery even if a .cabal file is present")
-  features <- featureFlagsParser
+  settings <- featureFlagsParser
   pure RawServerConfig {..}
 
 -- | Resolve a 'RawServerConfig' into a 'ServerConfig', defaulting the project root to the current directory when
@@ -133,7 +122,7 @@ resolveServerConfig raw = do
     maxJobs = raw.maxJobs,
     verbose = raw.verbose,
     jsonConfig = raw.jsonConfig,
-    features = raw.features
+    settings = raw.settings
   }
 
 cabalSetupParser :: Parser [String]

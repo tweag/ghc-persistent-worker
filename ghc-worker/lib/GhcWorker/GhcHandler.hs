@@ -39,7 +39,7 @@ import Types.Args (Args (..))
 import qualified Types.BuckArgs
 import Types.BuckArgs (BuckArgs, IsInterpreted (..), Mode (..), checkModuleTarget, parseBuckArgs, toGhcArgs)
 import Types.Env (Env (..))
-import Types.FeatureFlags (FeatureFlags (..))
+import Types.Settings (Settings (..))
 import Types.Grpc (RequestArgs (..))
 import Types.Log (Logger (..), TraceId, newLog)
 import Types.State (WorkerState (..))
@@ -145,7 +145,7 @@ dispatch hooks env args =
         env.log.setTarget target
 #ifdef GHC_DEBUG
         let path = debugSocketPath target
-        (if env.args.features.instrument then withGhcDebugUnix path else id) $
+        (if env.args.settings.instrument then withGhcDebugUnix path else id) $
           reflectGhc (f target) session <&> fmap \ r -> (r, target)
 #else
         reflectGhc (f target) session <&> fmap \ r -> (r, target)

@@ -48,6 +48,7 @@ library
     Types.Api
     Types.Log
     Types.Orchestration
+    Types.Settings
     Types.State
     Types.State.Make
     Types.Target

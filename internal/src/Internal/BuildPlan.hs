@@ -85,8 +85,9 @@ import Types.BuildPlan.Incremental (
   emptySourceHashes,
   )
 import Types.CachedDeps (JsonFs (..))
-import Types.FeatureFlags (FeatureFlags (..))
+import Types.FeatureFlags (Feature (..))
 import Types.Log (Logger (..))
+import Types.Settings (Settings (..), featureOn)
 
 #if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
 
@@ -455,7 +456,7 @@ buildPlanIncremental useFixedNodes logger fields perModuleFlags staticUnits buil
 
 buildPlanForSources ::
   GhcMonad m =>
-  FeatureFlags ->
+  Settings ->
   Logger ->
   Set BuildPlanField ->
   Map ModuleKey [String] ->
@@ -465,8 +466,8 @@ buildPlanForSources ::
   Maybe BuckHashesPath ->
   [OsPath] ->
   m BuildPlan
-buildPlanForSources features logger fields perModuleFlags staticUnits buildPlanPath incrementalArg buckHashesPath targets
-  | features.incrementalBuildPlan
+buildPlanForSources settings logger fields perModuleFlags staticUnits buildPlanPath incrementalArg buckHashesPath targets
+  | featureOn FeatureIncrementalBuildPlan settings
   , Just incrementalStatePath <- incrementalArg
   = maybe full (withHashes incrementalStatePath) =<< traverse (readSourceHashes tset) buckHashesPath
   | otherwise
@@ -481,7 +482,7 @@ buildPlanForSources features logger fields perModuleFlags staticUnits buildPlanP
       pure plan
 
     incremental (changes, cachedJson) =
-      buildPlanIncremental features.fixedNodesCache logger fields perModuleFlags staticUnits buildPlanPath changes cachedJson
+      buildPlanIncremental (featureOn FeatureFixedNodesCache settings) logger fields perModuleFlags staticUnits buildPlanPath changes cachedJson
 
     full = buildPlanFull logger fields perModuleFlags staticUnits targets
 

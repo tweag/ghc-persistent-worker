@@ -15,7 +15,7 @@ import qualified Internal.State.Make as Make
 import Internal.State.UnitIndex (newUnitIndex)
 import System.Environment (lookupEnv)
 import System.OsPath.Extra (toOsPath)
-import Types.FeatureFlags (FeatureFlags (..))
+import Types.Settings (Settings (..))
 import Types.Log (Logger (..))
 import Types.State (BinPath (..), WorkerState (..))
 import Types.State.Make (

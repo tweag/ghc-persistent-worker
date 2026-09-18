@@ -44,9 +44,10 @@ import qualified Text.Parsec as Parsec
 import Types.Api (ApiResponse (..), HomeModule (..), Target (..), UnitName (..), toGhcModuleName)
 import qualified Types.Args as Args
 import Types.Args (emptyArgs)
-import Types.FeatureFlags (FeatureFlags (..))
+import Types.FeatureFlags (Feature (..))
 import Types.Grpc (CommandEnv (..), RequestArgs (..))
 import Types.Log (Logger)
+import Types.Settings (featureOn)
 
 -- | Parsed schedule command with optional flags.
 data ScheduleCommand =
@@ -224,13 +225,13 @@ buildEnv config outputDir tmpDir project log = do
   events <- newBuildEvents
   extDepsDb <- newMVar Nothing
   instrChan <-
-    if config.features.instrument
+    if featureOn FeatureInstrument config.settings
     then Just <$> newChan
     else pure Nothing
   diff <- newMVar Map.empty
   requestIdCounter <- newIORef 0
   pure BuildEnv {
-    baseArgs = (emptyArgs Map.empty) {Args.features = config.features},
+    baseArgs = (emptyArgs Map.empty) {Args.settings = config.settings},
     projectRoot = config.projectRoot,
     outputDir,
     tmpDir,
