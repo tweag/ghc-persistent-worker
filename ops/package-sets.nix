@@ -82,7 +82,7 @@
     (overrides_mwb_flag flags)
   ];
 
-  defaultGhciArgs = ["-DMWB" "-DDOWNSWEEP_CACHE" "-DUNIT_INDEX" "-DFIXED_NODES"];
+  defaultGhciArgs = ["-DMWB" "-DDOWNSWEEP_CACHE" "-DUNIT_INDEX" "-DFIXED_NODES" "-DLINKABLES"];
 
   defaultEnv = extra: {
     hls.enable = lib.mkForce false;
