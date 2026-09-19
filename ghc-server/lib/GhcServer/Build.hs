@@ -52,6 +52,7 @@ import Test.Scheduler (
   )
 import Internal.State (newState)
 import Prelude hiding (log)
+import Types.Settings (Settings)
 import Types.Log (Logger (..))
 import Types.State (WorkerState)
 
@@ -165,5 +166,5 @@ runBuild maxJobs taskTimeout env schedule = do
   stopBuild cb
 
 -- | Create a fresh 'WorkerState' for use with 'runBuild'.
-newBuildState :: IO (MVar WorkerState)
+newBuildState :: Settings -> IO (MVar WorkerState)
 newBuildState = newState

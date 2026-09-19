@@ -25,8 +25,8 @@ import Types.State.Make (
   emptyLibLoadState,
   )
 
-newState :: IO (MVar WorkerState)
-newState = do
+newState :: Settings -> IO (MVar WorkerState)
+newState settings = do
   initialPath <- lookupEnv "PATH"
   unitIndex <- newUnitIndex
   let bcoLoadState = M.empty
@@ -36,6 +36,7 @@ newState = do
       extra = mempty
     },
     baseSession = Nothing,
+    settings,
     make = MakeState {
       moduleGraphState = emptyEModuleGraph,
       moduleGraphNodes = M.empty,
@@ -66,16 +67,15 @@ updateMakeStateVar var f = modifyMakeState var (\ s -> pure (f s, ()))
 
 -- | Restore the HUG, module graph and interpreter state from the worker state, since those are the only two components
 -- modified by the worker that aren't already shared by the base session.
--- After the program completes, if lazy bytecode unloading is enabled ('FeatureFlags.lazyByteCodeCacheLimit'), evicts
+-- After the program completes, if lazy bytecode unloading is enabled ('Settings.lazyByteCodeCacheLimit'), evicts
 -- least-recently-used lazily-loaded bytecode entries exceeding the configured size limit.
 withState ::
   Logger ->
-  FeatureFlags ->
   MVar WorkerState ->
   ((WorkerState, HscEnv) -> IO (WorkerState, HscEnv)) ->
   Ghc a ->
   Ghc a
-withState logger features stateVar setup prog = do
+withState logger stateVar setup prog = do
   modifySessionM restore
   prog <* withSession store
   where
@@ -87,7 +87,7 @@ withState logger features stateVar setup prog = do
     store hsc_env =
       liftIO $ modifyMVar_ stateVar \ state -> do
         make0 <- Make.storeState logger hsc_env state.make
-        make1 <- maybe (pure make0) (\ limit -> evictBcoCache hsc_env limit make0) features.lazyByteCodeCacheLimit
+        make1 <- maybe (pure make0) (\ limit -> evictBcoCache hsc_env limit make0) state.settings.lazyByteCodeCacheLimit
         make2 <- evictSpecific hsc_env make1.pendingEvictions make1
         pure state {make = make2 {pendingEvictions = mempty}}
 
