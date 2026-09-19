@@ -33,6 +33,7 @@ import Test.Tasty (TestTree, testGroup)
 import Types.Args (Args (..), BuildPlanField (..), buildPlanAll, emptyArgs)
 import Types.BuildPlan (BuildPlan (..), BuildPlanJson (..), BuildPlanSchema (..))
 import Types.CachedDeps (CachedModule (..), CachedPackageDep (..), JsonFs (..))
+import Types.Settings (defaultSettings)
 import Types.Log (newLog)
 
 jmn :: String -> JsonFs ModuleName
@@ -201,7 +202,7 @@ test_buildPlan_make =
     unitTest "build plan JSON with persistent state" do
       tmp <- liftIO tmpResource
       writeDummies tmp unit2Spec
-      state <- liftIO $ newState
+      state <- liftIO $ newState defaultSettings
       testUnit1 tmp state
       testUnit2 tmp state
   where

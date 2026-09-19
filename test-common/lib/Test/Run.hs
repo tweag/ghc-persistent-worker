@@ -29,6 +29,7 @@ import Test.Tasty (TestName, TestTree, withResource)
 import Test.Tasty.Hedgehog (testProperty)
 import Types.Args (Args (..), emptyArgs)
 import Types.Env (Env (..))
+import Types.Settings (defaultSettings)
 import Types.State (WorkerState)
 
 unitTest ::
@@ -73,12 +74,12 @@ persistentSession state ghcOptions ma =
 -- | Convenience session runner that creates a one-time use @WorkerState@ prints all log messages to stderr afterwards.
 transientSession :: (MonadIO m, MonadTest m) => [String] -> Ghc a -> m a
 transientSession ghcOptions ma = do
-  state <- liftIO newState
+  state <- liftIO (newState defaultSettings)
   persistentSession state ghcOptions ma
 
 mkEnv :: IO (Env, IORef TestLog)
 mkEnv = do
-  state <- newState
+  state <- newState defaultSettings
   (log, logVar) <- newTestLog
   pure (Env {
     log,
@@ -227,7 +228,7 @@ testSession ::
   TestSessionConfig a ->
   TestT IO a
 testSession desc conf = do
-  state <- maybe (liftIO newState) pure conf.state
+  state <- maybe (liftIO (newState conf.args.settings)) pure conf.state
   result <- testSessionMain state conf.args conf.program
   withFrozenCallStack do
     checkSessionResult desc conf.checkLog result

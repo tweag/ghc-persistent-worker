@@ -9,7 +9,7 @@ import Control.Concurrent.QSem (newQSem, signalQSem, waitQSem)
 import Control.Exception (bracket_, throwIO)
 import Control.Monad (foldM, (>=>))
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Trans.State.Strict (StateT (..), modify, modifyM)
+import Control.Monad.Trans.State.Strict (StateT (..), get, modify, modifyM)
 import Data.Aeson (eitherDecodeFileStrict')
 import qualified Data.ByteString as BS
 import Data.ByteString (ByteString)
@@ -23,8 +23,8 @@ import qualified Data.Text as Text
 import Data.Text.Encoding (decodeUtf8)
 import Data.Traversable (for)
 import Data.Tuple (swap)
-import GHC (DynFlags (..), IsBootInterface (..), ModuleName)
 import qualified GHC as GHC
+import GHC (DynFlags (..), IsBootInterface (..), ModuleName)
 import GHC.Driver.Env (HscEnv (..), hscSetActiveUnitId)
 import GHC.Driver.Errors.Types (DriverMessages, GhcMessage (..))
 import GHC.Driver.Make (ModNodeKeyWithUid (..), summariseFile)
@@ -306,8 +306,9 @@ data PreparedUnit =
     buckArgs :: Maybe OsPath
   }
 
-insertPreparedUnit :: Logger -> FeatureFlags -> HscEnv -> PreparedUnit -> StateT WorkerState IO HscEnv
-insertPreparedUnit logger features hsc_env pu = do
+insertPreparedUnit :: Logger -> HscEnv -> PreparedUnit -> StateT WorkerState IO HscEnv
+insertPreparedUnit logger hsc_env pu = do
+  settings <- (.settings) <$> get
   logDebugD logger (text "Loading cached unit" <+> quotes (ppr pu.unitId))
   traverse_ loadCachedArgs pu.buckArgs
   hsc_env2 <- liftIO do
@@ -389,15 +390,17 @@ loadCachedDepUnits ::
   Logger ->
   DynFlags ->
   CachedBuildPlans ->
-  FeatureFlags ->
   (WorkerState, HscEnv) ->
   IO (WorkerState, HscEnv)
-loadCachedDepUnits logger dflags0 (CachedBuildPlans buildPlans) features (state0, hsc_env0) = do
-  let hsc_env1 = Make.loadState hsc_env0 state0.make
+loadCachedDepUnits logger dflags0 (CachedBuildPlans buildPlans) (state0, hsc_env0) =
   logTimed logger "Loading cached dep units" $ fmap swap do
     let (total, missing) = compareUnits hsc_env1 buildPlans
-    prepared <- catMaybes <$> traverser (loadCachedBuildPlan hsc_env1 dflags0 features total) missing
-    (hsc_env2, state1) <- runStateT (foldM (insertPreparedUnit logger features) hsc_env1 prepared) state0
-    pure (hsc_env2, updateMakeState (Make.rebuildModuleGraph features.useIncrModGraph) state1)
+    prepared <- catMaybes <$> traverser (loadCachedBuildPlan hsc_env1 dflags0 settings total) missing
+    (hsc_env2, state1) <- runStateT (foldM (insertPreparedUnit logger) hsc_env1 prepared) state0
+    pure (hsc_env2, updateMakeState (Make.rebuildModuleGraph settings.useIncrModGraph) state1)
   where
+    hsc_env1 = Make.loadState hsc_env0 state0.make
+
     traverser = if (featureOn FeatureConcurrentInitUnits settings) then processConcurrent else traverse
+
+    settings = state0.settings

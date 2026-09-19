@@ -56,7 +56,6 @@ import Internal.Log (logDebugD, logTimed)
 import Language.Haskell.Syntax.Expr (GhciLStmt)
 import Language.Haskell.Syntax.Module.Name (ModuleName (..), mkModuleName)
 import System.OsPath.Extra (toOsPath)
-import Types.Args (Args (..))
 import Types.Env (Env (..))
 import Types.State (WorkerState (..))
 import Types.State.Make (EModuleGraph (..), MakeState (..))
@@ -75,7 +74,7 @@ evaluate env mHomeUnit target@(ModuleTarget modu) imports expr = do
         logDebugD env.log (text (show homeUnit))
         hsc_env2 <- liftIO $ withMVar env.state \ state -> do
           (_, hsc_env1) <-
-            loadHomeUnit env.log dflags0 env.args.features (moduleUnitId target.module_) (state, hsc_env0) (toOsPath homeUnit)
+            loadHomeUnit env.log dflags0 (moduleUnitId target.module_) (state, hsc_env0) (toOsPath homeUnit)
           pure hsc_env1 {hsc_mod_graph = state.make.moduleGraphState.moduleGraph}
         let hsc_env = hscSetActiveUnitId (moduleUnitId target.module_) (hsc_env2)
         GHC.setSession hsc_env
@@ -197,7 +196,7 @@ executeMain env mHomeUnit target@(ModuleTarget modu) = do
       Just homeUnit -> do
         hsc_env2 <- liftIO $ withMVar env.state \ state -> do
           (_, hsc_env1) <-
-            loadHomeUnit env.log dflags0 env.args.features (moduleUnitId target.module_) (state, hsc_env0) (toOsPath homeUnit)
+            loadHomeUnit env.log dflags0 (moduleUnitId target.module_) (state, hsc_env0) (toOsPath homeUnit)
           pure hsc_env1 {hsc_mod_graph = state.make.moduleGraphState.moduleGraph}
         let hsc_env = hscSetActiveUnitId (moduleUnitId target.module_) hsc_env2
         GHC.setSession hsc_env

@@ -72,7 +72,7 @@ import Types.CachedDeps (CachedDep (..), CachedDeps (..), CachedUnit (..), JsonF
 import Types.FeatureFlags (Feature (..))
 import Types.Log (Logger (..))
 import Types.Settings (Settings (..), featureOn)
-import Types.State (WorkerState (make))
+import Types.State (WorkerState (make, settings))
 import Types.State.Make (bcoLoadState)
 
 #if !defined(LINKABLES)
@@ -95,7 +95,7 @@ import GHC.Unit.Module.ModIface (mi_sc_extra_decls, mi_sc_foreign)
 
 #if defined(MWB)
 
-import GHC.Driver.Main(compileWholeCoreBindings)
+import GHC.Driver.Main (compileWholeCoreBindings)
 
 -- This is basically initWholeCoreBindings, but strict version and
 -- does not add empty HMI to HPT.
@@ -398,12 +398,11 @@ depsFromModuleGraph nodes target =
 -- module, assuming its deps to be available to the compiler.
 loadCachedDeps ::
   Logger ->
-  FeatureFlags ->
   IsInterpreted ->
   (WorkerState, HscEnv) ->
   CachedDeps ->
   IO (WorkerState, HscEnv)
-loadCachedDeps log features interp (state0, hsc_env0) (CachedDeps deps) =
+loadCachedDeps log interp (state0, hsc_env0) (CachedDeps deps) =
   logTimed log "Loading cached deps" do
     (state1, hsc_env1) <- foldM loadDepUnit (state0, hsc_env0) byUnit
     pure (state1, hscSetActiveUnitId (hscActiveUnitId hsc_env0) hsc_env1)
@@ -422,8 +421,8 @@ loadCachedDeps log features interp (state0, hsc_env0) (CachedDeps deps) =
       flip execStateT state do
         mod_plans <- traverse (prepareDep hsc_env) mods
         liftIO $ for_ mod_plans \ (name, iface, mod_load_state) -> do
-          mod_load_state' <- loadCachedDep log features interp hsc_env name iface mod_load_state
-          loadCachedDep log features interp hsc_env name iface mod_load_state'
+          mod_load_state' <- loadCachedDep log state.settings interp hsc_env name iface mod_load_state
+          loadCachedDep log state.settings interp hsc_env name iface mod_load_state'
 
     prepareDep hsc_env CachedDep {name = JsonFs name, package = JsonFs uid} = do
       mod_load_state <- prepareHmiLoader (hsc_HPT hsc_env) name
@@ -440,12 +439,11 @@ loadCachedDeps log features interp (state0, hsc_env0) (CachedDeps deps) =
 loadHomeUnit ::
   Logger ->
   DynFlags ->
-  FeatureFlags ->
   UnitId ->
   (WorkerState, HscEnv) ->
   OsPath ->
   IO (WorkerState, HscEnv)
-loadHomeUnit log dflags0 features unit (state0, hsc_env0) path
+loadHomeUnit log dflags0 unit (state0, hsc_env0) path
   | hasUnit unit hsc_env0
   = pure (state0, hsc_env0)
   | otherwise
@@ -453,7 +451,8 @@ loadHomeUnit log dflags0 features unit (state0, hsc_env0) path
     cachedUnit@CachedUnit {unit_args} <- decodeJsonArg "--home-unit" path
     (state1, hsc_env1) <- fmap (fromMaybe (state0, hsc_env0)) $ for cachedUnit.dep_units \ file -> do
       deps <- decodeJsonArg "--home-unit" file
-      loadCachedDepUnits log dflags0 deps features (state0, hsc_env0)
-    dflags <- maybe (pure dflags0) (readParseGHCArgs features.flagParser hsc_env1 dflags0) unit_args
+      loadCachedDepUnits log dflags0 deps (state0, hsc_env0)
+    let settings = state1.settings
+    dflags <- maybe (pure dflags0) (readParseGHCArgs (featureOn FeatureFlagParser settings) hsc_env1 dflags0) unit_args
     logTimed log "Loading cached home unit" $ fmap swap do
       runStateT (loadCachedHomeUnit log (featureOn FeatureFixedNodesCache settings) settings.useIncrModGraph hsc_env1 unit (cachedUnit, dflags)) state1

@@ -48,6 +48,7 @@ import Types.FeatureFlags (Feature (..))
 import Types.Grpc (CommandEnv (..), RequestArgs (..))
 import Types.Log (Logger)
 import Types.Settings (featureOn)
+import Types.State (WorkerState (settings))
 
 -- | Parsed schedule command with optional flags.
 data ScheduleCommand =
@@ -221,7 +222,7 @@ buildEnv ::
   Logger ->
   IO BuildEnv
 buildEnv config outputDir tmpDir project log = do
-  stateVar <- newBuildState
+  stateVar <- newBuildState config.settings
   events <- newBuildEvents
   extDepsDb <- newMVar Nothing
   instrChan <-
@@ -442,7 +443,8 @@ invalidateModuleState build unit modName =
 -- KB entry).
 resetWorkerState :: BuildEnv -> IO ()
 resetWorkerState env = do
-  freshVar <- newState
+  currentFeatures <- (.settings) <$> readMVar env.stateVar
+  freshVar <- newState currentFeatures
   fresh <- readMVar freshVar
   modifyMVar_ env.stateVar (const (pure fresh))
 

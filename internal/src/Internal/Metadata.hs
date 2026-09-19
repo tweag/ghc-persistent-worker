@@ -143,18 +143,19 @@ resolveBuildPlanPath hsc_env path =
 -- We need to use a temporary session because 'doMkDependHS' uses some custom settings that we don't want to leak,
 -- though it's not been thoroughly tested what precisely the impact is.
 writeMetadata ::
+  Settings ->
   Args ->
   Logger ->
   Set UnitId ->
   [String] ->
   Ghc ModuleGraph
-writeMetadata args@Args {buildPlan = path, features, sourceHashes, incrementalState, perModuleFlags} logger staticUnits srcs = do
+writeMetadata settings args@Args {buildPlan = path, sourceHashes, incrementalState, perModuleFlags} logger staticUnits srcs = do
   initializeSessionPlugins
   withTempSession metadataTempSession do
     hsc_env <- getSession
     writeLegacyMakefile hsc_env
     buildPlanPath <- resolveBuildPlanPath hsc_env path
-    plan <- buildPlanForSources features logger fields perModuleFlags staticUnits buildPlanPath incrementalState sourceHashes (toOsPath <$> srcs)
+    plan <- buildPlanForSources settings logger fields perModuleFlags staticUnits buildPlanPath incrementalState sourceHashes (toOsPath <$> srcs)
     liftIO $ writeBuildPlanWith args buildPlanPath.path plan
     pure plan.graph
   where
@@ -178,17 +179,20 @@ computeMetadata env = do
       dflags <- getSessionDynFlags
       for_ env.args.cachedBuildPlans \ bp ->
         withSession \ hsc_env ->
-          liftIO $ modifyMVar env.state \ state -> loadCachedDepUnits env.log dflags bp env.args.features (state, hsc_env)
+          liftIO $ modifyMVar env.state \ state -> loadCachedDepUnits env.log dflags bp (state, hsc_env)
       pure (Just ())
     logTimed env.log "Computing module graph" do
       MaybeT $ runSession env $ withDynFlags \ dflags srcs -> do
         (unit, staticUnits) <- prepareSession dflags
         let target = TargetUnit (UnitTarget unit)
         liftIO $ env.log.setTarget target
-        module_graph <- writeMetadata env.args env.log staticUnits (fst <$> srcs)
+        module_graph <- do
+          settings <- liftIO ((.settings) <$> readMVar env.state)
+          writeMetadata settings env.args env.log staticUnits (fst <$> srcs)
         liftIO do
-          unless (transientUnit env) $
-            updateMakeStateVar env.state (storeModuleGraph env.args.features.useIncrModGraph module_graph)
+          unless (transientUnit env) do
+            useIncrModGraph <- (.settings.useIncrModGraph) <$> readMVar env.state
+            updateMakeStateVar env.state (storeModuleGraph useIncrModGraph module_graph)
           for_ dflags.stubDir \ stubdir -> do
             env.log.debug ("Creating stubdir: " ++ stubdir)
             createDirectoryIfMissing False stubdir
@@ -208,4 +212,4 @@ computeMetadata env = do
 proxyMetadata :: Env -> IO Bool
 proxyMetadata env =
   fmap isJust $ runSession env $ withGhcInSession \ srcs ->
-    Just () <$ writeMetadata env.args env.log mempty (fst <$> srcs)
+    Just () <$ writeMetadata env.args.settings env.args env.log mempty (fst <$> srcs)

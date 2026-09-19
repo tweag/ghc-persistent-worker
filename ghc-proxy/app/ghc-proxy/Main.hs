@@ -22,7 +22,7 @@ envFromArgs argv = do
   sourceHashes <- optionalEnv "buck_source_hashes"
   buckArgs <- either parseError pure (parseBuckArgs (CommandEnv sourceHashes) (RequestArgs argv))
   args <- toGhcArgs buckArgs Nothing
-  state <- newState
+  state <- newState args.settings
   log <- newLog (TraceId . show <$> args.unit)
   pure (Env {log = newLogger log, state, args}, log)
   where

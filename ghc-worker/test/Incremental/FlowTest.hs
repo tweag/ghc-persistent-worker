@@ -70,6 +70,7 @@ import Types.BuildPlan.Incremental (
   unsafeSourceHashes,
   )
 import Types.CachedDeps (CachedBuildPlans (..))
+import Types.Settings (defaultSettings)
 import Types.State (WorkerState)
 
 --------------------------------------------------------------------------------
@@ -244,7 +245,7 @@ prepareInitialBuild IncrementalPaths {tempDir, srcDir, hashesInitial, sourcesIni
   initUnitSources srcDir unit1
   initUnitSources srcDir unit2
   meta <- writeHashesFromPaths hashesInitial sourcesInitial
-  state <- liftIO newState
+  state <- liftIO (newState defaultSettings)
   unit1Plans <- writeUnitCache tempDir srcDir unit1
   pure (meta, state, unit1Plans)
 
@@ -269,7 +270,7 @@ prepareRebuild :: IncrementalPaths -> IO (LazyByteString, MVar WorkerState)
 prepareRebuild IncrementalPaths {srcDir, hashesRebuild, sourcesRebuild} = do
   initUnitSources srcDir unit2_modified
   meta <- writeHashesFromPaths hashesRebuild sourcesRebuild
-  state <- newState
+  state <- newState defaultSettings
   pure (meta, state)
 
 --------------------------------------------------------------------------------
