@@ -206,7 +206,7 @@ withGhcSource cacheWrapper =
 -- | Like @withGhcSource@, using the make cache handler @withCacheMake@.
 withGhcMakeSource :: Env -> (Target -> Ghc (Maybe a)) -> IO (Maybe a)
 withGhcMakeSource env =
-  withGhcSource (\ _ logger stateVar ma -> withState logger env.args.features stateVar pure ma) env
+  withGhcSource (\ _ logger stateVar ma -> withState logger stateVar pure ma) env
 
 -- | Run a GHC session with multiple home unit support for a module target.
 --
@@ -224,7 +224,7 @@ withGhcMakeModule interp target =
     dflags0 <- getSessionDynFlags
     ensureNoArgs srcs
     logDebugD env.log (text "Compiling module target" <+> ppr target)
-    withState env.log env.args.features env.state (setup env dflags0) do
+    withState env.log env.state (setup env dflags0) do
       initializeSessionPlugins
       run (targetSpec target)
   where
@@ -238,7 +238,7 @@ withGhcMakeModule interp target =
 
     restoreCachedHomeUnit env dflags0 =
       maybeArg env.args.homeUnit $
-        loadHomeUnit env.log dflags0 env.args.features (moduleUnitId target.module_)
+        loadHomeUnit env.log dflags0 (moduleUnitId target.module_)
 
     setSessionModuleGraph (state, hsc_env) = pure (state, hscSetModuleGraph state.make.moduleGraphState.moduleGraph hsc_env)
 
@@ -246,7 +246,7 @@ withGhcMakeModule interp target =
 
     -- When the dependency closure is not provided with --dep-modules, compute it from the module graph.
     restoreCachedModules env (state, hsc_env) =
-      liftIO (loadCachedDeps env.log env.args.features interp (state, hsc_env) deps)
+      liftIO (loadCachedDeps env.log interp (state, hsc_env) deps)
       where
         deps = fromMaybe (depsFromModuleGraph state.make.moduleGraphNodes target.module_) env.args.cachedDeps
 
