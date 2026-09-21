@@ -83,6 +83,7 @@ messageCompileStart _args target requestId =
   CompileStart {
     target,
     debuggable = True,
+    process = False,
     requestId
   }
 
@@ -94,6 +95,7 @@ messageCompileEnd target exitCode output requestId =
     exitCode = fromIntegral exitCode,
     stderr = unlines output,
     result = Nothing,
+    processStats = Nothing,
     requestId
   }
 

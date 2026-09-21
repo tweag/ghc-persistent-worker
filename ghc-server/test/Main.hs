@@ -1,6 +1,6 @@
 module Main where
 
-import GhcServer.Build.Process (runProcessEval)
+import GhcServer.Build.ProcessChild (runProcessEval)
 import GhcServer.Data.ProcessEval (ProcessEvalOptions (..))
 import System.Environment (getArgs)
 import Test.BuildTest (test_serverBuild)
