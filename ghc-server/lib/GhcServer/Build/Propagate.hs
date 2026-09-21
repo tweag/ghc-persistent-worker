@@ -23,7 +23,7 @@ import GHC (ModuleName)
 import qualified GHC.Utils.Outputable as O
 import GHC.Utils.Outputable (ppr, (<+>))
 import GhcServer.Build.Compile (compileSingleModule)
-import GhcServer.Build.Diff (UnitDiff (..), changedModuleKeys, moduleGraphDelta, staleClosure)
+import GhcServer.Build.Diff (UnitDiff (..), changedModuleKeys, moduleGraphDelta, processScopeModules, staleClosure)
 import GhcServer.Build.Execute (executeModuleTask)
 import GhcServer.Build.Metadata (runMetadata)
 import GhcServer.Build.Process (executeModuleTaskProcess)
@@ -40,8 +40,8 @@ import GhcServer.Build.Schedule (
   )
 import GhcServer.Data.BuildCache (BuildCache (..))
 import GhcServer.Data.BuildEnv (BuildEnv (..))
-import GhcServer.Data.Unit (Project (..), Unit (..))
 import GhcServer.Data.BuildEvent (BuildEvent (..), logEvent)
+import GhcServer.Data.Unit (Project (..), Unit (..))
 import GhcServer.Log qualified as Log
 import GhcServer.Log (emitLog)
 import GhcWorker.Grpc (pushBytecodeState)
@@ -155,10 +155,11 @@ dispatchTask env ext task =
         withTaskEvents env requestId (moduleEventTarget name) (compile ext env unit name requestId)
       ExecuteModule _ name -> do
         requestId <- nextRequestId env
-        processUnits <- readMVar env.processUnits
-        let runExecute
-              | Set.member unitName processUnits = executeModuleTaskProcess env unit name
-              | otherwise = executeModuleTask env ext unit name requestId Nothing
+        let
+          moduleKey = ModuleKey {unit = unitName, name}
+          runExecute
+            | Set.member moduleKey ext.process = executeModuleTaskProcess env unit name
+            | otherwise = executeModuleTask env ext unit name requestId Nothing
         runExecute >>= \case
           Nothing -> pure (TaskSuccess Nothing)
           Just result -> do
@@ -228,13 +229,19 @@ propagateCompletion cache env (MetaTask name) (TaskSuccess _) state =
           | otherwise = Set.empty
         stale = staleClosure (seeds <> priorStale) merged
         newResolutions = resolutionsFromModuleMap stale state.ext.moduleMap newModules
-        ext' = BuildExt {moduleMap = merged, stale, staleGen = state.generation}
+        -- Like 'stale', a unit's process-enabled modules must not survive into a later
+        -- generation whose request never asked for @--process@ -- see 'BuildExt.process'.
+        priorProcess
+          | state.ext.staleGen == state.generation = state.ext.process
+          | otherwise = Set.empty
+        process = priorProcess <> maybe Set.empty ((`processScopeModules` newModules) . (.processScope)) unitDiff
+        ext' = BuildExt {moduleMap = merged, stale, staleGen = state.generation, process}
       emitLog env.instrChan (Text.unpack name.text ++ ":propagate") "debug" $
         "gen=" ++ show state.generation
-          ++ " seeds=" ++ show (Set.toList seeds)
-          ++ " priorStale=" ++ show (Set.toList priorStale)
-          ++ " stale=" ++ show (Set.toList stale)
-          ++ " newResolutions=" ++ show (Map.keys newResolutions)
+        ++ " seeds=" ++ show (Set.toList seeds)
+        ++ " priorStale=" ++ show (Set.toList priorStale)
+        ++ " stale=" ++ show (Set.toList stale)
+        ++ " newResolutions=" ++ show (Map.keys newResolutions)
       pure (addResolutions newResolutions state {ext = ext'})
 propagateCompletion _ _ _ _ state =
   pure state

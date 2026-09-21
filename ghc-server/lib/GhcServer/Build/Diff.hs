@@ -25,7 +25,7 @@ import GHC.Fingerprint (getFileHash)
 import GHC.Generics (Generic)
 import GhcServer.Build.Schedule (ModuleInfo (..), ModuleKey (..), resolveFromCachedUnit)
 import GhcServer.Cache (loadCachedUnit)
-import GhcServer.Data.Unit (Unit (..), UnitCache (..), unitSources)
+import GhcServer.Data.Unit (ClientModule, Unit (..), UnitCache (..), clientModuleName, unitSources)
 import Internal.Error (throwText)
 import System.Directory.OsPath (createDirectoryIfMissing, doesFileExist, getFileSize, getModificationTime, removeFile)
 import System.OsPath (OsPath)
@@ -51,6 +51,32 @@ data SourceDigest =
 -- | Per-unit digest record: one entry per source file, keyed by absolute path.
 type DigestRecord = Map FilePath SourceDigest
 
+-- | The unit-level scope of the request's @--process@ flag (see 'GhcServer.Data.BuildEnv.BuildEnv.process'),
+-- decided at classification time ('GhcServer.Build.Classify.classifyBuildRequest') from the unit's request
+-- scope. Threaded through 'UnitDiff' to metadata-completion time, where 'processScopeModules' resolves it
+-- against the unit's freshly-resolved module map into a set of 'ModuleKey's -- mirroring how
+-- 'moduleGraphDelta'\/'staleClosure' resolve other classification-time decisions once modules are known.
+data ProcessScope =
+  -- | @--process@ was not requested for this unit.
+  ProcessNone
+  |
+  -- | @--process@ applies to every module of the unit ('GhcServer.Data.Request.UnitExecute').
+  ProcessAll
+  |
+  -- | @--process@ applies only to the named modules ('GhcServer.Data.Request.UnitExecuteModules').
+  ProcessModules (Set ClientModule)
+
+-- | Resolve a unit's 'ProcessScope' against its freshly-resolved module map into the set of 'ModuleKey's whose
+-- execute task should run in a subprocess.
+processScopeModules :: ProcessScope -> Map ModuleKey ModuleInfo -> Set ModuleKey
+processScopeModules scope modules =
+  case scope of
+    ProcessNone -> Set.empty
+    ProcessAll -> Map.keysSet modules
+    ProcessModules mods -> Map.keysSet (Map.filterWithKey (\ key _ -> Set.member key.name selected) modules)
+      where
+        selected = Set.map clientModuleName mods
+
 -- | The result of the Phase 0\/Phase 2 pre-analysis for one unit, computed once per batch at
 -- classification time and consumed when the unit's metadata task completes.
 data UnitDiff =
@@ -71,7 +97,10 @@ data UnitDiff =
     -- | Whether the metadata step must run for this unit (decided here, executed blindly).
     runMeta :: Bool,
     -- | Whether the unit's entire module set is forced into the stale closure (@--recompile@).
-    forceAll :: Bool
+    forceAll :: Bool,
+    -- | This unit's @--process@ scope for the current batch (see 'ProcessScope'), resolved into
+    -- 'ModuleKey's at metadata-completion time by 'processScopeModules'.
+    processScope :: ProcessScope
   }
 
 -- | Hash a single source file, reusing the stored digest when the mtime is unchanged.
@@ -140,8 +169,10 @@ writeSourceHashes cache record = do
 --
 -- @rebuild@ discards the stored digest record first, treating every source as changed.
 -- @forceAll@ (from @--recompile@ for explicitly named units) is recorded for the closure phase.
-computeUnitDiff :: OsPath -> Bool -> Bool -> Unit -> IO UnitDiff
-computeUnitDiff outputDir rebuild forceAll unit = do
+-- @processScope@ (from @--process@, see 'ProcessScope') is recorded for resolution once this unit's modules are
+-- known.
+computeUnitDiff :: OsPath -> Bool -> Bool -> ProcessScope -> Unit -> IO UnitDiff
+computeUnitDiff outputDir rebuild forceAll processScope unit = do
   when rebuild do
     exists <- doesFileExist unit.cache.sourceDigestsPath
     when exists (removeFile unit.cache.sourceDigestsPath)
@@ -160,7 +191,8 @@ computeUnitDiff outputDir rebuild forceAll unit = do
     oldModules,
     oldDigests = old,
     runMeta = rebuild || not cached || not (Set.null changed),
-    forceAll
+    forceAll,
+    processScope
   }
 
 -- | Phase 2, first half: modules whose dependency edges differ between the old and refreshed

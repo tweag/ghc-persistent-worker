@@ -60,6 +60,7 @@ import Types.Api (TaskTrigger (..), UnitName (..))
 import Types.Args (emptyArgs)
 import Types.State (WorkerState (..))
 import Types.State.Make (MakeState (..))
+import Types.Settings (defaultSettings)
 
 -- ---------------------------------------------------------------------------
 -- Low-level helpers
@@ -118,7 +119,6 @@ newBuildEnv tp stateVar = do
   extDepsDb <- newMVar Nothing
   diffVar <- newMVar Map.empty
   requestIdCounter <- newIORef 0
-  processUnits <- newMVar Set.empty
   pure (BuildEnv {
     baseArgs = emptyArgs Map.empty,
     projectRoot = tp.rootOs,
@@ -131,8 +131,7 @@ newBuildEnv tp stateVar = do
     instrChan = Nothing,
     extDepsDb,
     diff = diffVar,
-    requestIdCounter,
-    processUnits
+    requestIdCounter
   }, events)
 
 -- ---------------------------------------------------------------------------
@@ -161,7 +160,7 @@ timedBuild action =
 -- | Run a fresh build with the given steps and explicit @recompile@\/@rebuild@ flags.
 runFreshWith :: MonadIO m => Bool -> Bool -> TestProject -> Steps -> m (BuildResult, [BuildEvent])
 runFreshWith recompile rebuild tp steps = liftIO $ timedBuild do
-  stateVar <- newBuildState
+  stateVar <- newBuildState defaultSettings
   (env, events) <- newBuildEnv tp stateVar
   result <- runBuild 4 testTaskTimeout env ScheduleRequest {steps, recompile, rebuild, process = False}
   evs <- readEvents events
@@ -191,7 +190,7 @@ timedStop cb = timedBuild (stopBuild cb)
 -- compilation events that resulted from them.
 newTestBuild :: MonadIO m => TestProject -> m (Build, BuildEvents, IORef [SchedulerDecision TaskKey])
 newTestBuild tp = liftIO do
-  stateVar <- newBuildState
+  stateVar <- newBuildState defaultSettings
   (env, events) <- newBuildEnv tp stateVar
   decisionsRef <- newIORef []
   cb <- newBuild (\ decision -> atomicModifyIORef' decisionsRef \ ds -> (decision : ds, ())) 4 testTaskTimeout env
@@ -208,7 +207,7 @@ runFreshWithEvents = runFreshWithEvents' False False
 -- | 'runFreshWithEvents' with explicit @recompile@\/@rebuild@ flags.
 runFreshWithEvents' :: MonadIO m => Bool -> Bool -> TestProject -> Steps -> m (BuildResult, [BuildEvent])
 runFreshWithEvents' recompile rebuild tp steps = liftIO $ timedBuild do
-  stateVar <- newBuildState
+  stateVar <- newBuildState defaultSettings
   (env, events) <- newBuildEnv tp stateVar
   result <- runBuild 1 testTaskTimeout env ScheduleRequest {steps, recompile, rebuild, process = False}
   evs <- readEvents events
@@ -222,7 +221,7 @@ runFreshWithState = runFreshWithState' False False
 -- | 'runFreshWithState' with explicit @recompile@\/@rebuild@ flags.
 runFreshWithState' :: MonadIO m => Bool -> Bool -> TestProject -> Steps -> m (BuildResult, [BuildEvent], MVar WorkerState)
 runFreshWithState' recompile rebuild tp steps = liftIO $ timedBuild do
-  stateVar <- newBuildState
+  stateVar <- newBuildState defaultSettings
   (env, events) <- newBuildEnv tp stateVar
   result <- runBuild 1 testTaskTimeout env ScheduleRequest {steps, recompile, rebuild, process = False}
   evs <- readEvents events
@@ -1579,7 +1578,7 @@ test_executeAfterCompile =
   execProjectTest "execute module after plain compile succeeds" \ tp -> do
     (result, _) <- runFreshAll tp
     assertSuccess "compile" result
-    stateVar <- liftIO newBuildState
+    stateVar <- liftIO (newBuildState defaultSettings)
     (buildEnv, _) <- liftIO (newBuildEnv tp stateVar)
     let name = UnitName "unit0"
     unit <- buildEnvUnit buildEnv name
@@ -1616,7 +1615,7 @@ test_executeStringMain =
   execStringProjectTest "execute module with main :: IO String succeeds" \ tp -> do
     (result, _) <- runFreshAll tp
     assertSuccess "compile" result
-    stateVar <- liftIO newBuildState
+    stateVar <- liftIO (newBuildState defaultSettings)
     (buildEnv, _) <- liftIO (newBuildEnv tp stateVar)
     let name = UnitName "unit0"
     unit <- buildEnvUnit buildEnv name
@@ -1642,7 +1641,7 @@ test_executeNonexistentModuleFails =
   execProjectTest "execute nonexistent module surfaces a failure, not a silent skip" \ tp -> do
     (result, _) <- runFreshAll tp
     assertSuccess "compile" result
-    stateVar <- liftIO newBuildState
+    stateVar <- liftIO (newBuildState defaultSettings)
     (buildEnv, _) <- liftIO (newBuildEnv tp stateVar)
     let name = UnitName "unit0"
     unit <- buildEnvUnit buildEnv name

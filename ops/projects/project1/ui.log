@@ -1,0 +1,105 @@
+00:06:32.049018972 [debug] unit1:diff: classify: runMeta=True forceAll=False changed=["/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit1/D/M4.hs","/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit1/M3.hs"] oldModules=[]
+00:06:32.049107387 [debug] unit2:diff: classify: runMeta=True forceAll=False changed=["/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit2/M1.hs","/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit2/M2.hs"] oldModules=[]
+00:06:32.049224632 [debug] scheduler: DecisionGeneration (Generation 1)
+00:06:32.049224852 [debug] scheduler: DecisionActivated (MetaTask (UnitName {text = "unit2"})) (Generation 1)
+00:06:32.049224902 [debug] scheduler: DecisionActivated (MetaTask (UnitName {text = "unit1"})) (Generation 1)
+00:06:32.049242013 [info] unit1:metadata: Building external dependencies in-process via cabal-install for /data/code/ai/haskell/persistent-worker/ops/projects/project1
+00:06:32.110743157 [info] unit1:metadata: Executing install plan in parallel using Just 24 threads.
+creating
+/data/code/ai/haskell/persistent-worker/ops/projects/project1/dist-newstyle/build
+creating
+/data/code/ai/haskell/persistent-worker/ops/projects/project1/dist-newstyle/tmp
+
+00:06:32.112438021 [debug] unit1:metadata: Loading cached dep units | 0.000
+00:06:32.118925025 [debug] unit1:metadata: Downsweep | 0.002
+00:06:32.119155516 [debug] unit1:metadata: Build plan modules | 0.000
+00:06:32.119599338 [debug] unit1:metadata: Creating stubdir: /data/code/ai/haskell/persistent-worker/ops/projects/project1/output/unit1
+00:06:32.119647361 [debug] unit1:metadata: Computing module graph | 0.007
+00:06:32.119661962 [debug] unit1:metadata: -------------- after metadata
+00:06:32.119662252 [debug] unit1:metadata: Mem in use: 0.00 MB
+00:06:32.119663652 [debug] unit1:metadata: Max mem in use: 0.00 MB
+00:06:32.119663782 [debug] unit1:metadata: Max live bytes: 0.00 MB
+00:06:32.120060111 [debug] unit1:propagate: gen=Generation 1 seeds=[ModuleKey {unit = UnitName {text = "unit1"}, name = ModuleName "D.M4"},ModuleKey {unit = UnitName {text = "unit1"}, name = ModuleName "M3"}] priorStale=[] stale=[ModuleKey {unit = UnitName {text = "unit1"}, name = ModuleName "D.M4"},ModuleKey {unit = UnitName {text = "unit1"}, name = ModuleName "M3"}] newResolutions=[PendingSource (UnitName {text = "unit1"}) "/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit1/D/M4.hs",PendingSource (UnitName {text = "unit1"}) "/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit1/M3.hs",PendingExecute (UnitName {text = "unit1"}) "/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit1/D/M4.hs",PendingExecute (UnitName {text = "unit1"}) "/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit1/M3.hs"]
+00:06:32.120117544 [debug] scheduler: DecisionResolution (PendingExecute (UnitName {text = "unit1"}) "/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit1/M3.hs") (Generation 1) Nothing
+00:06:32.120117804 [debug] scheduler: DecisionResolution (PendingExecute (UnitName {text = "unit1"}) "/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit1/D/M4.hs") (Generation 1) Nothing
+00:06:32.120117884 [debug] scheduler: DecisionResolution (PendingSource (UnitName {text = "unit1"}) "/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit1/M3.hs") (Generation 1) Nothing
+00:06:32.120117944 [debug] scheduler: DecisionResolution (PendingSource (UnitName {text = "unit1"}) "/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit1/D/M4.hs") (Generation 1) Nothing
+00:06:32.120119864 [debug] scheduler: DecisionCompleted (MetaTask (UnitName {text = "unit1"})) (Generation 1)
+00:06:32.120335175 [debug] unit2:metadata: Loading cached dep units | 0.000
+00:06:32.123437249 [debug] unit2:metadata: Downsweep | 0.001
+00:06:32.123889832 [debug] unit2:metadata: Build plan modules | 0.000
+00:06:32.124259741 [debug] unit2:metadata: Creating stubdir: /data/code/ai/haskell/persistent-worker/ops/projects/project1/output/unit2
+00:06:32.124309323 [debug] unit2:metadata: Computing module graph | 0.003
+00:06:32.124322214 [debug] unit2:metadata: -------------- after metadata
+00:06:32.124322444 [debug] unit2:metadata: Mem in use: 0.00 MB
+00:06:32.124322554 [debug] unit2:metadata: Max mem in use: 0.00 MB
+00:06:32.124322624 [debug] unit2:metadata: Max live bytes: 0.00 MB
+00:06:32.124721483 [debug] unit2:propagate: gen=Generation 1 seeds=[ModuleKey {unit = UnitName {text = "unit2"}, name = ModuleName "M1"},ModuleKey {unit = UnitName {text = "unit2"}, name = ModuleName "M2"}] priorStale=[ModuleKey {unit = UnitName {text = "unit1"}, name = ModuleName "D.M4"},ModuleKey {unit = UnitName {text = "unit1"}, name = ModuleName "M3"}] stale=[ModuleKey {unit = UnitName {text = "unit1"}, name = ModuleName "D.M4"},ModuleKey {unit = UnitName {text = "unit1"}, name = ModuleName "M3"},ModuleKey {unit = UnitName {text = "unit2"}, name = ModuleName "M1"},ModuleKey {unit = UnitName {text = "unit2"}, name = ModuleName "M2"}] newResolutions=[PendingSource (UnitName {text = "unit2"}) "/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit2/M1.hs",PendingSource (UnitName {text = "unit2"}) "/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit2/M2.hs",PendingExecute (UnitName {text = "unit2"}) "/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit2/M1.hs",PendingExecute (UnitName {text = "unit2"}) "/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit2/M2.hs"]
+00:06:32.124795237 [debug] scheduler: DecisionResolution (PendingExecute (UnitName {text = "unit2"}) "/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit2/M2.hs") (Generation 1) Nothing
+00:06:32.124795417 [debug] scheduler: DecisionResolution (PendingExecute (UnitName {text = "unit2"}) "/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit2/M1.hs") (Generation 1) Nothing
+00:06:32.124795477 [debug] scheduler: DecisionResolution (PendingSource (UnitName {text = "unit2"}) "/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit2/M2.hs") (Generation 1) Nothing
+00:06:32.124795517 [debug] scheduler: DecisionResolution (PendingSource (UnitName {text = "unit2"}) "/data/code/ai/haskell/persistent-worker/ops/projects/project1/unit2/M1.hs") (Generation 1) Nothing
+00:06:32.124795547 [debug] scheduler: DecisionActivated (ResolvedModule (UnitName {text = "unit1"}) (ModuleName "D.M4")) (Generation 1)
+00:06:32.124795587 [debug] scheduler: DecisionActivated (ResolvedModule (UnitName {text = "unit1"}) (ModuleName "M3")) (Generation 1)
+00:06:32.124795757 [debug] scheduler: DecisionActivated (ResolvedModule (UnitName {text = "unit2"}) (ModuleName "M1")) (Generation 1)
+00:06:32.124795817 [debug] scheduler: DecisionActivated (ResolvedModule (UnitName {text = "unit2"}) (ModuleName "M2")) (Generation 1)
+00:06:32.124795887 [debug] scheduler: DecisionActivated (ExecuteModule (UnitName {text = "unit2"}) (ModuleName "M1")) (Generation 1)
+00:06:32.124797547 [debug] scheduler: DecisionActivated (ExecuteModule (UnitName {text = "unit2"}) (ModuleName "M2")) (Generation 1)
+00:06:32.124797627 [debug] scheduler: DecisionCompleted (MetaTask (UnitName {text = "unit2"})) (Generation 1)
+00:06:32.127976536 [debug] unit1:D.M4: Compiling module target D.M4
+00:06:32.127986536 [debug] unit1:D.M4: Loading cached deps | 0.000
+00:06:32.128004387 [debug] unit1:D.M4: Fetching ModSummary for D.M4 from module graph | 0.000
+00:06:32.312300809 [debug] unit1:D.M4: Compiling | 0.184
+00:06:32.31232133 [debug] unit1:D.M4: -------------- store make state
+00:06:32.31232162 [debug] unit1:D.M4: Mem in use: 0.00 MB
+00:06:32.31232172 [debug] unit1:D.M4: Max mem in use: 0.00 MB
+00:06:32.31232182 [debug] unit1:D.M4: Max live bytes: 0.00 MB
+00:06:32.312399164 [debug] scheduler: DecisionCompleted (ResolvedModule (UnitName {text = "unit1"}) (ModuleName "D.M4")) (Generation 1)
+00:06:32.316670636 [debug] unit1:M3: Compiling module target M3
+00:06:32.316694357 [debug] unit1:M3: Loading cached deps | 0.000
+00:06:32.316709418 [debug] unit1:M3: Fetching ModSummary for M3 from module graph | 0.000
+00:06:32.40123789 [debug] unit1:M3: Compiling | 0.084
+00:06:32.401260691 [debug] unit1:M3: -------------- store make state
+00:06:32.401263491 [debug] unit1:M3: Mem in use: 0.00 MB
+00:06:32.401263591 [debug] unit1:M3: Max mem in use: 0.00 MB
+00:06:32.401263691 [debug] unit1:M3: Max live bytes: 0.00 MB
+00:06:32.401360446 [debug] scheduler: DecisionCompleted (ResolvedModule (UnitName {text = "unit1"}) (ModuleName "M3")) (Generation 1)
+00:06:32.405826978 [debug] unit2:M2: Compiling module target M2
+00:06:32.40585225 [debug] unit2:M2: Loading cached deps | 0.000
+00:06:32.40586502 [debug] unit2:M2: Fetching ModSummary for M2 from module graph | 0.000
+00:06:32.41950655 [debug] unit2:M2: Compiling | 0.013
+00:06:32.419527561 [debug] unit2:M2: -------------- store make state
+00:06:32.419527781 [debug] unit2:M2: Mem in use: 0.00 MB
+00:06:32.419527901 [debug] unit2:M2: Max mem in use: 0.00 MB
+00:06:32.419528001 [debug] unit2:M2: Max live bytes: 0.00 MB
+00:06:32.419604175 [debug] scheduler: DecisionCompleted (ResolvedModule (UnitName {text = "unit2"}) (ModuleName "M2")) (Generation 1)
+00:06:32.423797233 [debug] unit2:M2:execute: Compiling module target M2
+00:06:32.423830515 [debug] unit2:M2:execute: Loading cached deps | 0.000
+00:06:32.423844326 [debug] unit2:M2:execute: Fetching ModSummary for M2 from module graph | 0.000
+00:06:32.424021515 [debug] unit2:M1: Compiling module target M1
+00:06:32.424035975 [debug] unit2:M1: Loading cached deps | 0.000
+00:06:32.424043966 [debug] unit2:M1: Fetching ModSummary for M1 from module graph | 0.000
+00:06:32.425894888 [debug] unit2:M2:execute: executeMain is called | 0.000
+00:06:32.425920799 [debug] unit2:M2:execute: -------------- store make state
+00:06:32.425921059 [debug] unit2:M2:execute: Mem in use: 0.00 MB
+00:06:32.425921209 [debug] unit2:M2:execute: Max mem in use: 0.00 MB
+00:06:32.425921329 [debug] unit2:M2:execute: Max live bytes: 0.00 MB
+00:06:32.425954551 [debug] scheduler: DecisionCompleted (ExecuteModule (UnitName {text = "unit2"}) (ModuleName "M2")) (Generation 1)
+00:06:34.931442712 [debug] unit2:M1: Compiling | 2.507
+00:06:34.931470833 [debug] unit2:M1: -------------- store make state
+00:06:34.931471483 [debug] unit2:M1: Mem in use: 0.00 MB
+00:06:34.931471583 [debug] unit2:M1: Max mem in use: 0.00 MB
+00:06:34.931474284 [debug] unit2:M1: Max live bytes: 0.00 MB
+00:06:34.93161013 [debug] scheduler: DecisionCompleted (ResolvedModule (UnitName {text = "unit2"}) (ModuleName "M1")) (Generation 1)
+00:06:34.935912835 [debug] unit2:M1:execute: Compiling module target M1
+00:06:34.936394129 [debug] unit2:M1:execute: Loading HPT module from cache (interface): /data/code/ai/haskell/persistent-worker/ops/projects/project1/output/unit1/D/M4.dyn_hi | 0.000
+00:06:34.936402549 [debug] unit2:M1:execute: Loading HPT module from cache (BCO): /data/code/ai/haskell/persistent-worker/ops/projects/project1/output/unit1/D/M4.dyn_hi | 0.000
+00:06:34.936406449 [debug] unit2:M1:execute: Loading cached deps | 0.000
+00:06:34.93641792 [debug] unit2:M1:execute: Fetching ModSummary for M1 from module graph | 0.000
+00:06:34.941008749 [debug] unit1:metadata: Loading lazy bytecode for  D.M4
+00:06:34.951255809 [debug] unit2:M1:execute: executeMain is called | 0.003
+00:06:34.95128188 [debug] unit2:M1:execute: -------------- store make state
+00:06:34.95128215 [debug] unit2:M1:execute: Mem in use: 0.00 MB
+00:06:34.95128225 [debug] unit2:M1:execute: Max mem in use: 0.00 MB
+00:06:34.95128234 [debug] unit2:M1:execute: Max live bytes: 0.00 MB
+00:06:34.951408087 [debug] scheduler: DecisionCompleted (ExecuteModule (UnitName {text = "unit2"}) (ModuleName "M1")) (Generation 1)
