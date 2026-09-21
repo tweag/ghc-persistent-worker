@@ -79,6 +79,11 @@ taskTime = attrName "taskTime"
 taskResult :: AttrName
 taskResult = attrName "taskResult"
 
+-- | Applied to an active-task row's subprocess indicator (see 'UI.ActiveTasks.draw'), shown for execute tasks
+-- that ran (or are running) in a self-relaunched subprocess (see 'GhcServer.Build.Process').
+taskProcess :: AttrName
+taskProcess = attrName "taskProcess"
+
 -- | Foreground accent for the "Active Tasks" panel header. Panel headers replace the borders that used to
 -- delimit the main view's panels (active tasks\/project) -- see 'UI.ActiveTasks.draw', 'UI.Project.draw' --
 -- with distinct color accents instead, so the panels remain visually distinguishable without drawing a border

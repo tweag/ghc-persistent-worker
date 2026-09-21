@@ -48,6 +48,7 @@ attrMapMain _ =
     (Attr.taskName, bold' defAttr),
     (Attr.taskTime, style dim),
     (Attr.taskResult, fg brightYellow),
+    (Attr.taskProcess, italic' (fg cyan)),
     (Attr.sectionActiveTasks, bold' (fg yellow)),
     (Attr.sectionProject, bold' (fg cyan)),
     (Attr.sectionSettings, bold' (fg magenta)),

@@ -17,17 +17,17 @@ import Types.Args (Args (..), buildPlanNoLegacy, emptyArgs)
 -- Create an empty worker state, shared only across tasks within one build.
 -- This is discarded and recreated when the second build is started, in 'newResumeSessionEnv'.
 newSessionEnv :: TestEnv -> IO SessionEnv
-newSessionEnv shared@TestEnv {rootDir} = do
+newSessionEnv shared@TestEnv {rootDir, baseArgs} = do
   sourceDir <- toOsPath <$> createTempDirectory (fromOsPath rootDir) "src"
   tempDir <- toOsPath <$> createTempDirectory (fromOsPath rootDir) "tmp"
-  (env, _) <- mkEnv
+  (env, _) <- mkEnv baseArgs.settings
   pure SessionEnv {shared, sourceDir, tempDir, env, extDepDbs = [], extDeps = mempty}
 
 -- | Reuses the previous session's @srcDir@ and @tmpDir@ (preserving written sources and artifacts) but creates a fresh
 -- 'Env' with an empty 'WorkerState', simulating a worker restart.
 newResumeSessionEnv :: SessionEnv -> IO SessionEnv
 newResumeSessionEnv prev = do
-  (env, _) <- mkEnv
+  (env, _) <- mkEnv prev.shared.baseArgs.settings
   pure prev {env, extDepDbs = [], extDeps = mempty}
 
 -- | Create a temporary directory and store it in a 'TestEnv'.

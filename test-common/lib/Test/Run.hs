@@ -29,7 +29,7 @@ import Test.Tasty (TestName, TestTree, withResource)
 import Test.Tasty.Hedgehog (testProperty)
 import Types.Args (Args (..), emptyArgs)
 import Types.Env (Env (..))
-import Types.Settings (defaultSettings)
+import Types.Settings (Settings, defaultSettings)
 import Types.State (WorkerState)
 
 unitTest ::
@@ -77,9 +77,9 @@ transientSession ghcOptions ma = do
   state <- liftIO (newState defaultSettings)
   persistentSession state ghcOptions ma
 
-mkEnv :: IO (Env, IORef TestLog)
-mkEnv = do
-  state <- newState defaultSettings
+mkEnv :: Settings -> IO (Env, IORef TestLog)
+mkEnv settings = do
+  state <- newState settings
   (log, logVar) <- newTestLog
   pure (Env {
     log,

@@ -1,6 +1,6 @@
 module Test.Bytecode where
 
-import Control.Concurrent.MVar (readMVar)
+import Control.Concurrent.MVar (modifyMVar_, readMVar)
 import Control.Monad.IO.Class (liftIO)
 import Data.Functor ((<&>))
 import Data.List (isPrefixOf)
@@ -22,6 +22,7 @@ import Types.Args (Args (..))
 import Types.Env (Env (..))
 import Types.FeatureFlags (Feature (..))
 import Types.Settings (Settings (..), setFeature)
+import qualified Types.State as WorkerState
 import Types.State (WorkerState (..))
 import Types.State.Make (MakeState (..))
 
@@ -40,6 +41,16 @@ enableByteCodeCacheLimit limit testEnv =
       Args.settings = testEnv.baseArgs.settings {lazyByteCodeCacheLimit = Just limit}
     }
   }
+
+-- | Update the bytecode cache size limit on an already-running session's persistent 'WorkerState.settings'.
+-- Unlike 'enableByteCodeCacheLimit' (which only affects a 'TestEnv' consulted at session creation, via
+-- 'Test.Env.newSessionEnv'), this mutates the live 'MVar WorkerState', mirroring how
+-- 'GhcWorker.Grpc' handles the @ToggleFeatureFlag@ RPC. This is required when the desired limit is only known once
+-- the session is already running (e.g. derived from a module's tracked cache size).
+setByteCodeCacheLimit :: Int -> Env -> IO ()
+setByteCodeCacheLimit limit env =
+  modifyMVar_ env.state \ (state :: WorkerState) ->
+    pure state {WorkerState.settings = state.settings {lazyByteCodeCacheLimit = Just limit}}
 
 envLoader :: Env -> IO (Maybe Loader)
 envLoader env = do

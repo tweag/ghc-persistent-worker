@@ -35,6 +35,7 @@ import GhcServer.Data.UnitConfig (UnitConfig (..))
 import Hedgehog (annotate, property, test, withTests, (===))
 import System.Directory (createDirectoryIfMissing)
 import System.Environment (getExecutablePath)
+import System.FilePath (takeBaseName)
 import System.OsPath.Extra (toOsPath)
 import Test.BuildTest (
   TestProject (..),
@@ -77,34 +78,41 @@ createSubprocessProject root = do
     , "main = pure m1"
     ]
 
+-- | This test self-relaunches the compiled @ghc-server-test@ binary with an @eval@ argv (see
+-- 'GhcServer.Build.Process.spawnProcessEval'/'GhcServer.Build.Process.evalProcessFlag'). Under @ghcid@/@ghci@,
+-- 'getExecutablePath' resolves to the ghci wrapper process rather than the compiled test binary, so relaunching
+-- it with @eval@ is meaningless (ghci interprets it as a module/file argument) -- see @kb-process-isolation@.
+-- Skip in that environment rather than failing on an environmental limitation.
 test_subprocessExecute :: TestTree
 test_subprocessExecute =
   testProperty testName $ withTests 1 $ property $ test do
-    tp <- liftIO do
-      root <- acquireTemp "ghc-server-subprocess"
-      createSubprocessProject root
-      acquireProject (pure root)
-    stateVar <- liftIO (newBuildState defaultSettings)
-    (buildEnv, _events) <- liftIO (newBuildEnv tp stateVar)
-    let name = UnitName subprocessUnitName
-    unit <- maybe (fail "unit not found") pure (Map.lookup name tp.project.units)
-    (metaErrs, _) <- liftIO (runMetadata buildEnv unit)
-    annotate ("metadata errors: " ++ show metaErrs)
-    unless (null metaErrs) (fail "metadata failed")
-    (m1Errs, _) <- liftIO (compileSingleModule buildEnv unit (mkModuleName "M1") (CachedDeps []) 0)
-    unless (null m1Errs) (fail ("M1 compile failed: " ++ show m1Errs))
-    (mainErrs, _) <- liftIO (compileSingleModule buildEnv unit (mkModuleName "Main") (CachedDeps []) 0)
-    unless (null mainErrs) (fail ("Main compile failed: " ++ show mainErrs))
-    let cfg = ProcessEvalConfig {projectRoot = toOsPath tp.root, unit, moduleName = "Main", sharedBytecodePath = Nothing}
-    self <- liftIO (toOsPath <$> getExecutablePath)
-    output <- liftIO (spawnProcessEval self cfg)
-    annotate ("subprocess stderr: " ++ Text.unpack output.processStderr)
-    output.processStderr === ""
-    result <- either (fail . Text.unpack) pure output.result
-    annotate ("subprocess log: " ++ show result.logMessages)
-    annotate ("eval stdout: " ++ Text.unpack result.evalStdout)
-    annotate ("eval stderr: " ++ Text.unpack result.evalStderr)
-    result.outcome === EvalSuccess (Just "hello from subprocess")
+    selfPath <- liftIO getExecutablePath
+    if takeBaseName selfPath /= "ghc-server-test"
+      then annotate ("skipping: running under ghcid/ghci (executable is " ++ selfPath ++ ", not ghc-server-test)")
+      else do
+        tp <- liftIO do
+          root <- acquireTemp "ghc-server-subprocess"
+          createSubprocessProject root
+          acquireProject (pure root)
+        stateVar <- liftIO (newBuildState defaultSettings)
+        (buildEnv, _events) <- liftIO (newBuildEnv tp stateVar)
+        let name = UnitName subprocessUnitName
+        unit <- maybe (fail "unit not found") pure (Map.lookup name tp.project.units)
+        (metaErrs, _) <- liftIO (runMetadata buildEnv unit)
+        annotate ("metadata errors: " ++ show metaErrs)
+        unless (null metaErrs) (fail "metadata failed")
+        (m1Errs, _) <- liftIO (compileSingleModule buildEnv unit (mkModuleName "M1") (CachedDeps []) 0)
+        unless (null m1Errs) (fail ("M1 compile failed: " ++ show m1Errs))
+        (mainErrs, _) <- liftIO (compileSingleModule buildEnv unit (mkModuleName "Main") (CachedDeps []) 0)
+        unless (null mainErrs) (fail ("Main compile failed: " ++ show mainErrs))
+        let cfg = ProcessEvalConfig {projectRoot = toOsPath tp.root, unit, moduleName = "Main", sharedBytecodePath = Nothing}
+        output <- liftIO (spawnProcessEval (toOsPath selfPath) cfg)
+        annotate ("subprocess stderr: " ++ Text.unpack output.processStderr)
+        output.processStderr === ""
+        result <- either (fail . Text.unpack) pure output.result
+        annotate ("subprocess log: " ++ show result.logMessages)
+        annotate ("eval stdout: " ++ Text.unpack result.evalStdout)
+        annotate ("eval stderr: " ++ Text.unpack result.evalStderr)
+        result.outcome === EvalSuccess (Just "hello from subprocess")
   where
     testName = "execute module in a fresh subprocess restoring cached state" :: TestName
-

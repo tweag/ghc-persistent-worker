@@ -8,7 +8,7 @@ import Data.Text (Text)
 import Data.Time (UTCTime, getCurrentTime)
 import Ghc.Ui.Data.Name (Name (Tasks))
 import Ghc.Ui.Data.WorkerId (WorkerId)
-import Types.Api (Target)
+import Types.Api (ProcessStats, Target)
 
 -- | The outcome of a task, once it has finished. A task with no outcome yet is still running. A successful
 -- execute task (see 'Types.Api.Event'\'s @CompileEnd@ @result@ field) carries the exfiltrated @main@
@@ -35,6 +35,13 @@ data Task =
     outcome :: Maybe Outcome,
     worker :: WorkerId,
     debuggable :: Bool,
+    -- | Whether this task instance ran (or is running) in a self-relaunched subprocess (see
+    -- 'GhcServer.Build.Process'). Always 'False' except for execute tasks dispatched with @--process@.
+    process :: Bool,
+    -- | RTS memory stats reported by a subprocess execute task's child process (see 'Types.Api.ProcessStats'),
+    -- populated once the task's 'CompileEnd' event arrives. 'Nothing' before then, and always 'Nothing' for
+    -- tasks that didn't run in a subprocess.
+    stats :: Maybe ProcessStats,
     phase :: Maybe String,
     phases :: Map String PhaseInfo,
     -- | The id allocated by the @instrument@ UI for the request that spawned this task (see
@@ -50,9 +57,10 @@ newTask ::
   Target ->
   WorkerId ->
   Bool ->
+  Bool ->
   Int ->
   m Task
-newTask target worker debuggable requestId = do
+newTask target worker debuggable process requestId = do
   startTime <- liftIO getCurrentTime
   pure Task {
     target,
@@ -61,6 +69,8 @@ newTask target worker debuggable requestId = do
     outcome = Nothing,
     worker,
     debuggable,
+    process,
+    stats = Nothing,
     phase = Nothing,
     phases = [],
     requestId

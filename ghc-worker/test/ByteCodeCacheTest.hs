@@ -8,7 +8,7 @@ import GHC.Unit.Types (Module)
 import GHC.Utils.Outputable (showPprUnsafe)
 import Hedgehog (TestT, annotate, assert, failure, (===))
 import Test.Build (compileTarget, metadataArgs, runCompile, runMetadata)
-import Test.Bytecode (enableByteCodeCacheLimit, enableLazyByteCode, loadedBcos)
+import Test.Bytecode (enableLazyByteCode, loadedBcos, setByteCodeCacheLimit)
 import Test.Data.Env (SessionEnv (..), TestEnv (..))
 import Test.Data.Project (BuildModule (..), GenUnit (..), ModuleKey (..), ModuleSource (..))
 import Test.Env (newSessionEnv, withTestEnv)
@@ -85,8 +85,8 @@ test_evictBySize =
       _ <- liftIO (runCompile sessionEnv (const (sessionEnv.shared.baseArgs, mempty)) keyC)
 
       limit <- sizeOfA sessionEnv.env
-      let args = (enableByteCodeCacheLimit limit sessionEnv.shared).baseArgs
-      _ <- liftIO $ runCompile sessionEnv (\ _ -> (args, mempty)) keyD
+      liftIO (setByteCodeCacheLimit limit sessionEnv.env)
+      _ <- liftIO $ runCompile sessionEnv (\ _ -> (sessionEnv.shared.baseArgs, mempty)) keyD
 
       WorkerState {make} <- liftIO $ readMVar sessionEnv.env.state
       [showPprUnsafe (moduleFor keyB)] === (showPprUnsafe <$> Map.keys make.bcoCache)
@@ -112,8 +112,8 @@ test_touchNoEviction =
       sessionEnv <- liftIO (newSessionEnv (enableLazyByteCode testEnv))
 
       liftIO $ buildUpToB sessionEnv
-      let args = (enableByteCodeCacheLimit 1000000 sessionEnv.shared).baseArgs
-      _ <- liftIO $ runCompile sessionEnv (\ _ -> (args, mempty)) keyC
+      liftIO (setByteCodeCacheLimit 1000000 sessionEnv.env)
+      _ <- liftIO $ runCompile sessionEnv (\ _ -> (sessionEnv.shared.baseArgs, mempty)) keyC
 
       WorkerState {make} <- liftIO $ readMVar sessionEnv.env.state
 

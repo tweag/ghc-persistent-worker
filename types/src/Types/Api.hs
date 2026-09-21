@@ -9,6 +9,7 @@ import Data.Map (Map)
 import Data.String (IsString)
 import qualified Data.Text as Text
 import Data.Text (Text, unpack)
+import Data.Word (Word64)
 import qualified GHC
 import GHC.Generics (Generic)
 import GHC.Unit (Module, UnitId, mkModuleName, moduleName, moduleNameString, moduleUnitId, stringToUnitId, unitIdString)
@@ -115,6 +116,17 @@ targetFromWorkerSpec = \case
   Worker.TargetUnit UnitTarget {unit} -> Just TargetUnit {name = UnitName (Text.pack (unitIdString unit))}
   _ -> Nothing
 
+-- | RTS memory-usage stats reported by a subprocess execute task's child process (see
+-- 'GhcServer.Data.ProcessEval.ProcessEvalResult'), taken from 'GHC.Stats.RTSStats' right before the child
+-- exits.
+data ProcessStats =
+  ProcessStats {
+    maxMemInUseBytes :: Word64,
+    maxLiveBytes :: Word64
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (Binary, FromJSON, ToJSON)
+
 data TaskKind =
   Metadata
   |
@@ -193,6 +205,10 @@ data Event =
   CompileStart {
     target :: Target,
     debuggable :: Bool,
+    -- | Whether this task is running (or about to run) in a self-relaunched subprocess (see
+    -- 'GhcServer.Build.Process') rather than in-process. Always 'False' for tasks other than @ghc-server@'s
+    -- execute tasks, which are the only kind that ever runs out of process.
+    process :: Bool,
     requestId :: Int
   }
   |
@@ -201,6 +217,9 @@ data Event =
     exitCode :: Int,
     stderr :: String,
     result :: Maybe String,
+    -- | RTS memory stats reported by a subprocess execute task (see 'GhcServer.Build.Process'), 'Nothing' for
+    -- every other task kind (in-process tasks have no isolated RTS to measure against).
+    processStats :: Maybe ProcessStats,
     requestId :: Int
   }
   |
