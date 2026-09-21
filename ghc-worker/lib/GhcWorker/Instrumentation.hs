@@ -96,6 +96,7 @@ messageCompileEnd target exitCode output requestId =
     stderr = unlines output,
     result = Nothing,
     processStats = Nothing,
+    noMain = False,
     requestId
   }
 

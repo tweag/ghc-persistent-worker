@@ -73,6 +73,18 @@ completeTask requestId outcome stats = do
       TaskRow task {outcome = Just outcome, endTime = Just time, stats}
     row -> row
 
+-- | Drop the task row with the given request id from the list entirely, rather than marking it completed.
+-- Used for an execute task whose module has no @main@ (see 'Types.Api.Event'\'s @CompileEnd@ @noMain@ field):
+-- no execution ever took place, so the row added on 'CompileStart' shouldn't linger as if it had.
+removeTask ::
+  MonadState TasksState m =>
+  Int ->
+  m ()
+removeTask requestId =
+  listElementsL %= Seq.filter \case
+    TaskRow task -> task.requestId /= requestId
+    Separator _ -> True
+
 getSelectedTarget ::
   MonadState TasksState m =>
   m (Maybe (WorkerId, Target))
