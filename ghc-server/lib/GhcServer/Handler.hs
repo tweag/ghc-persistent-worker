@@ -19,7 +19,7 @@ import Data.Text (Text)
 import Data.Text.Encoding (decodeUtf8Lenient)
 import GHC (ModuleName, mkModuleName, moduleNameString)
 import GhcServer.Build (Build (..), BuildResult (..), awaitBuild, newBuild, newBuildState, scheduleBatch)
-import GhcServer.Build.Schedule (BuildExt (..), BuildStatus, ModuleKey (..), TaskKey (..), emptyBuildExt, taskUnit)
+import GhcServer.Build.Schedule (BuildExt (..), ModuleKey (..), TaskKey (..), emptyBuildExt, taskUnit)
 import GhcServer.Cabal (discoverCabalProject, findCabalFile)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (newBuildEvents)
@@ -375,7 +375,7 @@ notModuleTask key = \case
 -- | Run a transformation on the scheduler's bookkeeping state.
 modifySchedulerState ::
   Build ->
-  (SchedulerState TaskKey BuildStatus String BuildExt -> SchedulerState TaskKey BuildStatus String BuildExt) ->
+  (SchedulerState TaskKey Bool String BuildExt -> SchedulerState TaskKey Bool String BuildExt) ->
   IO ()
 modifySchedulerState build f =
   atomically (modifyTVar' schedulerVar f)
@@ -388,8 +388,8 @@ modifySchedulerState build f =
 retainTasks ::
   (forall p. TaskKey p -> Bool) ->
   (ModuleKey -> Bool) ->
-  SchedulerState TaskKey BuildStatus String BuildExt ->
-  SchedulerState TaskKey BuildStatus String BuildExt
+  SchedulerState TaskKey Bool String BuildExt ->
+  SchedulerState TaskKey Bool String BuildExt
 retainTasks keepTask keepModule state =
   state
     { completed = filterTasks state.completed

@@ -23,13 +23,12 @@ import GHC (ModuleName)
 import qualified GHC.Utils.Outputable as O
 import GHC.Utils.Outputable (ppr, (<+>))
 import GhcServer.Build.Compile (compileSingleModule)
-import GhcServer.Build.Diff (UnitDiff (..), changedModuleKeys, moduleGraphDelta, processScopeModules, staleClosure)
+import GhcServer.Build.Diff (UnitDiff (..), changedModuleKeys, moduleGraphDelta, staleClosure)
 import GhcServer.Build.Execute (executeModuleTask)
 import GhcServer.Build.Metadata (runMetadata)
 import GhcServer.Build.Process (executeModuleTaskProcess)
 import GhcServer.Build.Schedule (
   BuildExt (..),
-  BuildStatus (..),
   ModuleInfo (..),
   ModuleKey (..),
   TaskKey (..),
@@ -136,7 +135,7 @@ compile ext env unit modName requestId = do
 -- The task's unit is resolved once here, so that the individual operations receive a 'Unit' rather
 -- than repeating the lookup.  Unit names that reach the scheduler without a matching project entry
 -- (they can be typed by the UI) fail their task with a diagnostic naming the unit.
-dispatchTask :: BuildEnv -> BuildExt -> Task TaskKey 'Resolved BuildStatus -> IO (TaskResult String)
+dispatchTask :: BuildEnv -> BuildExt -> Task TaskKey 'Resolved Bool -> IO (TaskResult String)
 dispatchTask env ext task =
   case Map.lookup unitName env.project.units of
     Nothing -> pure (TaskFailed ("Unit not found in project: " ++ Text.unpack unitName.text))
@@ -146,7 +145,7 @@ dispatchTask env ext task =
 
     dispatch unit = case task.key of
       MetaTask name
-        | task.value.runMeta -> do
+        | task.value -> do
           requestId <- nextRequestId env
           withTaskEvents env requestId TargetUnit {name} (taskResultFromErrors . fst <$> runMetadata env unit)
         | otherwise -> skipMetadata env name
@@ -156,9 +155,8 @@ dispatchTask env ext task =
       ExecuteModule _ name -> do
         requestId <- nextRequestId env
         let
-          moduleKey = ModuleKey {unit = unitName, name}
           runExecute
-            | Set.member moduleKey ext.process = executeModuleTaskProcess env unit name
+            | task.value = executeModuleTaskProcess env unit name
             | otherwise = executeModuleTask env ext unit name requestId Nothing
         runExecute >>= \case
           Nothing -> pure (TaskSuccess Nothing)
@@ -179,7 +177,7 @@ computeResolutions ::
   BuildCache ->
   BuildEnv ->
   UnitName ->
-  SchedulerState TaskKey BuildStatus String BuildExt ->
+  SchedulerState TaskKey Bool String BuildExt ->
   ExceptT Text IO (Map ModuleKey ModuleInfo)
 computeResolutions cache env name _state =
   cache.loadUnit name >>= \case
@@ -200,8 +198,8 @@ propagateCompletion ::
   BuildEnv ->
   TaskKey 'Resolved ->
   TaskResult String ->
-  SchedulerState TaskKey BuildStatus String BuildExt ->
-  IO (SchedulerState TaskKey BuildStatus String BuildExt)
+  SchedulerState TaskKey Bool String BuildExt ->
+  IO (SchedulerState TaskKey Bool String BuildExt)
 propagateCompletion cache env (MetaTask name) (TaskSuccess _) state =
   runExceptT (computeResolutions cache env name state) >>= \case
     Left err -> do
@@ -228,14 +226,12 @@ propagateCompletion cache env (MetaTask name) (TaskSuccess _) state =
           | state.ext.staleGen == state.generation = state.ext.stale
           | otherwise = Set.empty
         stale = staleClosure (seeds <> priorStale) merged
+        -- 'resolutionsFromModuleMap' recovers each execute task's @process@ flag from the
+        -- scheduler's own pending pool ('state.pending'), where 'GhcServer.Build.Classify.classifyBuildRequest'
+        -- stashed it (via 'GhcServer.Build.Schedule.executeTasksFromSources') at classification time -- it is
+        -- not re-derived here.
         newResolutions = resolutionsFromModuleMap stale state.ext.moduleMap newModules
-        -- Like 'stale', a unit's process-enabled modules must not survive into a later
-        -- generation whose request never asked for @--process@ -- see 'BuildExt.process'.
-        priorProcess
-          | state.ext.staleGen == state.generation = state.ext.process
-          | otherwise = Set.empty
-        process = priorProcess <> maybe Set.empty ((`processScopeModules` newModules) . (.processScope)) unitDiff
-        ext' = BuildExt {moduleMap = merged, stale, staleGen = state.generation, process}
+        ext' = BuildExt {moduleMap = merged, stale, staleGen = state.generation}
       emitLog env.instrChan (Text.unpack name.text ++ ":propagate") "debug" $
         "gen=" ++ show state.generation
         ++ " seeds=" ++ show (Set.toList seeds)
