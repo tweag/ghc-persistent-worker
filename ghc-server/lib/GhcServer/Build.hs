@@ -30,7 +30,6 @@ import GhcServer.Build.Diff (commitDigests)
 import GhcServer.Build.Propagate (dispatchTask, propagateCompletion)
 import GhcServer.Build.Schedule (
   BuildExt (..),
-  BuildStatus,
   ModuleKey (..),
   TaskKey (..),
   emptyBuildExt,
@@ -60,7 +59,7 @@ import Types.State (WorkerState)
 -- Created once, supports multiple 'scheduleBatch' calls.
 data Build =
   Build {
-    scheduler :: SchedulerResources ScheduleRequest TaskKey BuildStatus String BuildExt,
+    scheduler :: SchedulerResources ScheduleRequest TaskKey Bool String BuildExt,
     thread :: Async Void,
     -- | The environment, retained for digest commits at batch completion.
     env :: BuildEnv,

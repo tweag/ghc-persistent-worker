@@ -11,7 +11,6 @@ import GHC (ModuleName, mkModuleName, moduleNameString)
 import GHC.Unit.Module.Graph (ModNodeKeyWithUid (..), ModuleGraphNode (..), NodeKey (..))
 import GHC.Unit.Types (GenWithIsBoot (..), IsBootInterface (..), UnitId, stringToUnitId)
 import GhcServer.Build.Schedule (
-  BuildStatus (..),
   ModuleInfo (..),
   ModuleKey (..),
   Resolutions,
@@ -231,7 +230,7 @@ mkPriorModule unitName modName src =
   )
 
 -- | Look up a resolved task in the resolutions map by pending key.
-lookupResolution :: String -> String -> Resolutions -> Maybe (TaskKey 'Resolved, BuildStatus, Set (TaskKey 'Pending))
+lookupResolution :: String -> String -> Resolutions -> Maybe (TaskKey 'Resolved, Set (TaskKey 'Pending))
 lookupResolution unit src =
   Map.lookup (PendingSource (UnitName (Text.pack unit)) (toOsPath src))
 
@@ -252,7 +251,7 @@ test_resolveCachedNoDeps =
     -- twice as many entries as there are modules.
     Map.size result === 2
     case lookupResolution "u0" "u0/A.hs" result of
-      Just (ResolvedModule name modName, BuildStatus {}, deps) -> do
+      Just (ResolvedModule name modName, deps) -> do
         name === UnitName "u0"
         moduleNameString modName === "A"
         deps === Set.empty
@@ -272,7 +271,7 @@ test_resolveCachedIntraDep =
     -- 2 modules x (compile + execute) entries each = 4.
     Map.size result === 4
     case lookupResolution "u0" "u0/B.hs" result of
-      Just (_, _, deps) -> deps === Set.singleton (pk "u0" "u0/A.hs")
+      Just (_, deps) -> deps === Set.singleton (pk "u0" "u0/A.hs")
       _ -> fail "expected resolution for B"
 
 test_resolveCachedCrossUnitDep :: TestTree
@@ -287,7 +286,7 @@ test_resolveCachedCrossUnitDep =
       }
       result = runResolve spec
     case lookupResolution "u1" "u1/B.hs" result of
-      Just (_, _, deps) -> deps === Set.singleton (pk "u0" "u0/A.hs")
+      Just (_, deps) -> deps === Set.singleton (pk "u0" "u0/A.hs")
       _ -> fail "expected resolution for B"
 
 test_resolveCachedExternalPkgIgnored :: TestTree
@@ -300,7 +299,7 @@ test_resolveCachedExternalPkgIgnored =
       }
       result = runResolve spec
     case lookupResolution "u0" "u0/A.hs" result of
-      Just (_, _, deps) -> deps === Set.empty
+      Just (_, deps) -> deps === Set.empty
       _ -> fail "expected resolution for A"
 
 test_resolveCachedMixedDeps :: TestTree
@@ -317,7 +316,7 @@ test_resolveCachedMixedDeps =
       }
       result = runResolve spec
     case lookupResolution "u1" "u1/B.hs" result of
-      Just (_, _, deps) -> deps === Set.fromList [pk "u1" "u1/A.hs", pk "u0" "u0/X.hs"]
+      Just (_, deps) -> deps === Set.fromList [pk "u1" "u1/A.hs", pk "u0" "u0/X.hs"]
       _ -> fail "expected resolution for B"
 
 test_resolveCachedFromBuildPlan :: TestTree
@@ -366,7 +365,7 @@ test_resolveCachedCrossUnitMissing =
       }
       result = runResolve spec
     case lookupResolution "u1" "u1/B.hs" result of
-      Just (_, _, deps) -> deps === Set.empty
+      Just (_, deps) -> deps === Set.empty
       _ -> fail "expected resolution for B"
 
 -- ---------------------------------------------------------------------------
