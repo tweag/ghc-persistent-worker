@@ -136,7 +136,6 @@ deriving stock instance (Eq (key p), Eq (key 'Resolved), Eq a) => Eq (Task key p
 data Resolution (key :: Phase -> Type) task =
   Resolution {
     key :: key 'Resolved,
-    value :: task,
     -- | Module-level dependencies, still in pending form.
     deps :: Set (key 'Pending),
     -- | The generation in which this entry was computed.
@@ -546,7 +545,7 @@ resolveTask batch k s = do
       [r.key | pk <- Set.toList resolution.deps, Just r <- [Map.lookup pk s.resolutions]]
     allDeps = Set.union task.deps resolvedDeps
     resolvedTask =
-      Task {key = resolution.key, deps = allDeps, enabled = task.enabled, value = resolution.value}
+      Task {key = resolution.key, deps = allDeps, enabled = task.enabled, value = task.value}
     withoutPending = s {pending = Map.delete k s.pending}
     unmet = Set.difference allDeps (Set.difference (satisfiedKeys s) batch)
     activated =
@@ -591,7 +590,7 @@ promoteEnabled state =
 -- (transitively through deps).
 addResolutions ::
   OrdKey key =>
-  Map (key 'Pending) (key 'Resolved, task, Set (key 'Pending)) ->
+  Map (key 'Pending) (key 'Resolved, Set (key 'Pending)) ->
   SchedulerState key task f ext ->
   SchedulerState key task f ext
 addResolutions newResolutions state =
@@ -599,7 +598,7 @@ addResolutions newResolutions state =
   where
     -- 'Map.union' is left-biased, so the freshly stamped entries replace older ones.
     stamped = Map.map stamp newResolutions
-    stamp (key, value, deps) = Resolution {key, value, deps, computedAt = state.generation}
+    stamp (key, deps) = Resolution {key, deps, computedAt = state.generation}
     traced = foldr' recordDecision state (Map.keys newResolutions)
     recordDecision k =
       traceDecision (DecisionResolution k state.generation ((.computedAt) <$> Map.lookup k state.resolutions))

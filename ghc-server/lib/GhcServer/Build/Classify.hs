@@ -17,14 +17,8 @@ import qualified Data.Set as Set
 import Data.Set (Set)
 import qualified Data.Text as Text
 import GHC (ModuleName)
-import GhcServer.Build.Diff (ProcessScope (..), UnitDiff (..), computeUnitDiff)
-import GhcServer.Build.Schedule (
-  BuildStatus,
-  TaskKey (..),
-  compileTasksFromSources,
-  executeTasksFromSources,
-  metadataTasks,
-  )
+import GhcServer.Build.Diff (UnitDiff (..), computeUnitDiff)
+import GhcServer.Build.Schedule (TaskKey (..), compileTasksFromSources, executeTasksFromSources, metadataTasks)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.Request (
   EffectiveUnit (..),
@@ -93,7 +87,7 @@ effectiveRequests project request
 classifyBuildRequest ::
   BuildEnv ->
   ScheduleRequest ->
-  IO ([Task TaskKey 'Resolved BuildStatus], [Task TaskKey 'Pending BuildStatus])
+  IO ([Task TaskKey 'Resolved Bool], [Task TaskKey 'Pending Bool])
 classifyBuildRequest env request = do
   diffs <- Map.fromList <$> traverse unitDiff reqs.resolved
   modifyMVar_ env.diff (pure . Map.union diffs)
@@ -104,17 +98,6 @@ classifyBuildRequest env request = do
   where
     reqs = effectiveRequests env.project request
 
-    -- This unit's @--process@ scope for the current batch (see 'ProcessScope'), recorded in its 'UnitDiff' and
-    -- resolved into 'ModuleKey's once its modules are known (see 'GhcServer.Build.Propagate.propagateCompletion').
-    -- Only meaningful together with an execute request -- @--process@ on a plain compile/metadata request has
-    -- nothing to apply to.
-    processScope eu
-      | not request.process = ProcessNone
-      | otherwise = case eu.scope of
-        Explicit UnitExecute -> ProcessAll
-        Explicit (UnitExecuteModules mods) -> ProcessModules (Set.fromList mods)
-        _ -> ProcessNone
-
     -- Unknown unit names still get a metadata task, which fails at dispatch with a diagnostic
     -- naming the unit; they have no dependencies to order against.
     metaSpecs =
@@ -122,7 +105,7 @@ classifyBuildRequest env request = do
       ++ [(name, []) | name <- reqs.unknown]
 
     unitDiff eu = do
-      d <- computeUnitDiff env.outputDir request.rebuild (forceAll eu.scope) (processScope eu) eu.unit
+      d <- computeUnitDiff env.outputDir request.rebuild (forceAll eu.scope) eu.unit
       emitLog env.instrChan (Text.unpack eu.unit.name.text ++ ":diff") "debug" $
         "classify: runMeta=" ++ show d.runMeta
           ++ " forceAll=" ++ show d.forceAll
@@ -165,9 +148,12 @@ classifyBuildRequest env request = do
 
     -- | Execute tasks are only produced for units explicitly requested with 'UnitExecute'\/
     -- 'UnitExecuteModules' -- implicit transitive deps and other request kinds never trigger execution.
+    -- @request.process@ is passed straight to 'executeTasksFromSources', which stores it as the pending
+    -- execute task's own value -- these branches are the only place execute tasks are created, so no
+    -- scope-based gating of the flag is needed here (unlike compile-task enabling above).
     unitExecuteTasks eu = case eu.scope of
-      Explicit UnitExecute -> executeTasksFromSources eu.unit.name (unitSources eu.unit)
-      Explicit (UnitExecuteModules mods) -> executeTasksFromSources eu.unit.name (selectedSources eu.unit mods)
+      Explicit UnitExecute -> executeTasksFromSources eu.unit.name request.process (unitSources eu.unit)
+      Explicit (UnitExecuteModules mods) -> executeTasksFromSources eu.unit.name request.process (selectedSources eu.unit mods)
       _ -> []
 
 -- | The source files of the unit's modules whose names the client selected.

@@ -104,26 +104,6 @@ taskModuleKey = \case
   ResolvedModule unit name -> Just ModuleKey {unit, name}
   ExecuteModule unit name -> Just ModuleKey {unit, name}
 
--- | Per-request flags carried by every build task.
---
--- Identity data (unit name, source path, module name) lives in 'TaskKey'.
--- The 'Task' record pairs the key with this status.
---
--- * @runMeta@: whether the metadata step must actually run (decided by the Phase 0 analysis).
---   Only meaningful for metadata tasks — compile tasks ignore it.
---
--- The request-level @rebuild@ flag deliberately does /not/ appear here.  It is consumed
--- entirely by the Phase 0 analysis ('GhcServer.Build.Diff.computeUnitDiff', which drops the
--- stored digest record so every source counts as changed); by the time tasks exist, its effect
--- is already encoded in @runMeta@ and in the stale closure that produces compile resolutions.
--- Carrying it into dispatch would be a second, redundant notion of \"must run\" competing with
--- the generation comparison in 'Test.Scheduler.Concurrent.activation'.
-data BuildStatus =
-  BuildStatus {
-    runMeta :: Bool
-  }
-  deriving stock (Eq, Show)
-
 -- | Reverse mapping from GHC 'UnitId' to 'UnitName', precomputed from a 'Project'.
 unitIdToName :: Project -> Map UnitId UnitName
 unitIdToName project =
@@ -140,8 +120,9 @@ lookupUnitName nameMap uid =
 -- second component of each entry.
 -- Metadata tasks are created as active (resolved), not pending.
 -- The @runMeta@ predicate carries the Phase 0 analysis decision of whether the unit's
--- metadata step must actually run; dispatch executes it blindly.
-metadataTasks :: (UnitName -> Bool) -> [(UnitName, [UnitName])] -> [Task TaskKey 'Resolved BuildStatus]
+-- metadata step must actually run, carried as the task's own 'Task.value' (read directly by
+-- dispatch) rather than baked into the key, since it is only meaningful for this task kind.
+metadataTasks :: (UnitName -> Bool) -> [(UnitName, [UnitName])] -> [Task TaskKey 'Resolved Bool]
 metadataTasks runMeta =
   map metaTask
   where
@@ -150,7 +131,7 @@ metadataTasks runMeta =
         key = MetaTask name,
         deps = Set.fromList [MetaTask dep | dep <- depUnits],
         enabled = True,
-        value = BuildStatus {runMeta = runMeta name}
+        value = runMeta name
       }
 
 -- | Create pending compile tasks from a unit's source files.
@@ -165,14 +146,17 @@ metadataTasks runMeta =
 -- requested modules -- e.g. 'GhcServer.Build.Classify.compileEnabledSources' -- so that other
 -- modules in the same unit are still tracked (for dependency propagation) without being
 -- independently promoted.
-compileTasksFromSources :: UnitName -> (OsPath -> Bool) -> [OsPath] -> [Task TaskKey 'Pending BuildStatus]
+-- The task's own 'Task.value' is unused ('resolveTask' promotes a pending task by carrying its
+-- own 'Task.value' forward, so nothing ever reads this one); it is set to @False@ as a dead
+-- placeholder purely to satisfy the uniform value type.
+compileTasksFromSources :: UnitName -> (OsPath -> Bool) -> [OsPath] -> [Task TaskKey 'Pending Bool]
 compileTasksFromSources name isEnabled =
   fmap \ src ->
     Task {
       key = PendingSource name src,
       deps = Set.singleton (MetaTask name),
       enabled = isEnabled src,
-      value = BuildStatus {runMeta = False}
+      value = False
     }
 
 -- | Create pending execute tasks from a unit's source files.
@@ -182,8 +166,13 @@ compileTasksFromSources name isEnabled =
 -- set produced by 'resolutionsFromModuleMap', mirroring 'compileTasksFromSources'\/'PendingSource'.
 --
 -- Always enabled: an execute request implies both compiling and running the selected module(s).
-executeTasksFromSources :: UnitName -> [OsPath] -> [Task TaskKey 'Pending BuildStatus]
-executeTasksFromSources name =
+-- The @process@ flag (whether this unit's execute tasks should run in a subprocess, see
+-- 'GhcServer.Build.Process') is decided once at classification time
+-- ('GhcServer.Build.Classify.classifyBuildRequest') and stored directly as the pending task's own
+-- 'Task.value', so that 'resolutionsFromModuleMap' can recover it later from the scheduler's pending
+-- pool when constructing the corresponding 'ExecuteModule' resolution.
+executeTasksFromSources :: UnitName -> Bool -> [OsPath] -> [Task TaskKey 'Pending Bool]
+executeTasksFromSources name process =
   map mkTask
   where
     mkTask src =
@@ -191,9 +180,8 @@ executeTasksFromSources name =
         key = PendingExecute name src,
         deps = Set.singleton (MetaTask name),
         enabled = True,
-        value = BuildStatus {runMeta = False}
+        value = process
       }
-
 
 -- | Resolve dependencies of a module graph node to pending 'TaskKey's.
 --
@@ -221,10 +209,13 @@ nodeDepsToTaskKeys nameMap srcMap node =
 
 -- | Resolution map type.
 --
--- Maps a pending 'TaskKey' to its resolved key, resolved 'BuildTask' value,
--- and pending module-level dependencies.  The pending deps are converted to
--- resolved keys during promotion by the scheduler.
-type Resolutions = Map (TaskKey 'Pending) (TaskKey 'Resolved, BuildStatus, Set (TaskKey 'Pending))
+-- Maps a pending 'TaskKey' to its resolved key and pending module-level dependencies.  The
+-- pending deps are converted to resolved keys during promotion by the scheduler.  There is no
+-- value component here: 'resolveTask' promotes a pending task by carrying forward its own
+-- 'Task.value' (a 'Bool' whose meaning is contextual on the resolved key's constructor:
+-- @process@ for 'ExecuteModule', unused (always 'False') for 'ResolvedModule'), so the resolution
+-- entry itself never needs to carry one.
+type Resolutions = Map (TaskKey 'Pending) (TaskKey 'Resolved, Set (TaskKey 'Pending))
 
 -- | Key for a module in the build system's module map.
 data ModuleKey =
@@ -326,20 +317,13 @@ data BuildExt =
     stale :: Set ModuleKey,
     -- | The generation 'stale' was accumulated for.  When it differs from the scheduler's
     -- current generation, 'stale' is stale in the other sense and must be discarded.
-    staleGen :: Generation,
-    -- | Modules whose @execute@ task should run in a subprocess for the current generation (see
-    -- 'GhcServer.Build.Diff.ProcessScope', resolved per-unit by 'GhcServer.Build.Diff.processScopeModules' and
-    -- accumulated here by 'GhcServer.Build.Propagate.propagateCompletion' the same way 'moduleMap' is).
-    -- Reset at generation boundaries alongside 'stale', for the same reason: a module left over from a
-    -- previous request's @--process@ selection must not silently keep running in a subprocess for a later
-    -- request that never asked for it.
-    process :: Set ModuleKey
+    staleGen :: Generation
   }
 
 -- | Initial (empty) 'BuildExt'.
 emptyBuildExt :: BuildExt
 emptyBuildExt =
-  BuildExt {moduleMap = Map.empty, stale = Set.empty, staleGen = initialGeneration, process = Set.empty}
+  BuildExt {moduleMap = Map.empty, stale = Set.empty, staleGen = initialGeneration}
 
 -- | Assemble deduplicated, topologically sorted 'CachedDeps' for a module
 -- from the full module map.
@@ -399,7 +383,14 @@ buildModuleCachedDepsWithSelf allModules target =
 --
 -- Execute resolutions are created for every module; the dependency on the module's own compile
 -- task is only included when that module is stale (otherwise its artifacts are current and the
--- execute task can run immediately).
+-- execute task can run immediately). Every execute resolution's value is the corresponding
+-- 'PendingExecute' task's own @process@ flag, recovered from the scheduler's pending pool
+-- (@pending@) rather than recomputed here -- it was decided once at classification time
+-- ('GhcServer.Build.Classify.classifyBuildRequest') and stashed on the pending task by
+-- 'executeTasksFromSources'; promotion itself would otherwise discard it (a promoted task's
+-- value always comes from its 'Resolution', never from the pending task it replaces), so this
+-- is the only place it can be carried forward. A module with no matching 'PendingExecute' entry
+-- (never requested for execution) simply gets 'False', which is never consulted anyway.
 resolutionsFromModuleMap ::
   Set ModuleKey ->
   Map ModuleKey ModuleInfo ->
@@ -411,13 +402,13 @@ resolutionsFromModuleMap stale priorModules newModules =
     allModules = Map.union newModules priorModules
 
     compileEntries =
-      [ (moduleTaskKey key info, (ResolvedModule key.unit key.name, BuildStatus {runMeta = False}, depTasks info))
+      [ (moduleTaskKey key info, (ResolvedModule key.unit key.name, depTasks info))
       | (key, info) <- Map.toList newModules
       , Set.member key stale
       ]
 
     executeEntries =
-      [ (moduleExecuteKey key info, (ExecuteModule key.unit key.name, BuildStatus {runMeta = False}, execDeps key info))
+      [ (moduleExecuteKey key info, (ExecuteModule key.unit key.name, execDeps key info))
       | (key, info) <- Map.toList newModules
       ]
 

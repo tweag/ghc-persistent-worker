@@ -96,18 +96,22 @@ readyKeys = Set.fromList . map (\(TK k) -> k) . map (.key) . (.ready)
 
 -- | Build resolution map from raw (key, (resolvedValue, pendingDeps)) entries, stamped with
 -- 'testGeneration'.
+--
+-- The 'TestTask' component of each input entry is unused: since 'resolveTask' now reuses the
+-- pending task's own 'Task.value' when promoting (rather than reading it from 'Resolution'),
+-- these helpers only need it to keep call sites symmetric with the pending task's value.
 mkResolutions :: [(Key, (TestTask, Set Key))] -> Map.Map (TestKey 'Pending) (Resolution TestKey TestTask)
 mkResolutions =
-  Map.fromList . map \(k, (v, deps)) ->
-    (TK k, Resolution {key = TK k, value = v, deps = Set.map TK deps, computedAt = testGeneration})
+  Map.fromList . map \(k, (_v, deps)) ->
+    (TK k, Resolution {key = TK k, deps = Set.map TK deps, computedAt = testGeneration})
 
 -- | Raw resolution input in the shape 'addResolutions' accepts (it stamps the generation
 -- itself).
 rawResolutions ::
   [(Key, (TestTask, Set Key))] ->
-  Map.Map (TestKey 'Pending) (TestKey 'Resolved, TestTask, Set (TestKey 'Pending))
+  Map.Map (TestKey 'Pending) (TestKey 'Resolved, Set (TestKey 'Pending))
 rawResolutions =
-  Map.fromList . map \(k, (v, deps)) -> (TK k, (TK k, v, Set.map TK deps))
+  Map.fromList . map \(k, (_v, deps)) -> (TK k, (TK k, Set.map TK deps))
 
 
 -- ---------------------------------------------------------------------------
