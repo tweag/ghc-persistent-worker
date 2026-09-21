@@ -85,7 +85,7 @@ requestLogError request desc =
 
 triggerTask :: Target -> TaskKind -> RequestM ()
 triggerTask target task =
-  requestLogError (TriggerTask (TaskTrigger {..})) ("Build for " <> renderTarget target)
+  requestLogError (TriggerTask TaskTrigger {..}) ("Build for " <> renderTarget target)
 
 -- | Request eviction of the modules covered by the given 'Target' from the loader state.
 evictBytecode :: Target -> RequestM ()

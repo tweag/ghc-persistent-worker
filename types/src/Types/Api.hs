@@ -12,10 +12,10 @@ import Data.Text (Text, unpack)
 import qualified GHC
 import GHC.Generics (Generic)
 import GHC.Unit (Module, UnitId, mkModuleName, moduleName, moduleNameString, moduleUnitId, stringToUnitId, unitIdString)
+import Types.FeatureFlags (Feature)
 import Types.Settings (Settings)
 import qualified Types.Target as Worker
 import Types.Target (ModuleTarget (..), TargetSpec, UnitTarget (..))
-import Types.FeatureFlags (Feature)
 
 newtype UnitName =
   UnitName { text :: Text }
@@ -122,7 +122,9 @@ data TaskKind =
   -- We probably want something like "rebuild only target" vs "rebuild all deps".
   Build { rebuild :: Bool }
   |
-  Execute
+  -- | @process@ mirrors the client's @--process@ flag: whether this target's execute tasks should run their
+  -- subprocess evaluation (see 'GhcServer.Build.Process') instead of in-process.
+  Execute { process :: Bool }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary, FromJSON, ToJSON)
 

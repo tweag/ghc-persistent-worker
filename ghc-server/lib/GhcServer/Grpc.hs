@@ -96,12 +96,12 @@ targetToUnitRequest project = \cases
     unitRequest = \case
       Metadata -> UnitMetadata
       TaskKind.Build {} -> UnitAll
-      Execute -> UnitExecute
+      Execute {} -> UnitExecute
 
     moduleRequest name = \case
       Metadata -> UnitMetadata
       TaskKind.Build {} -> UnitModules [ClientModule (coerce name)]
-      Execute -> UnitExecute
+      Execute {} -> UnitExecute
 
 triggerTask ::
   Maybe (Chan Event) ->
@@ -125,7 +125,7 @@ triggerTask mchan build project TaskTrigger {target, task} = do
     request = case task of
       TaskKind.Metadata -> ScheduleRequest {steps, recompile = False, rebuild = False, process = False}
       TaskKind.Build rebuild -> ScheduleRequest {steps, recompile = rebuild, rebuild, process = False}
-      Execute -> ScheduleRequest {steps = map toExecuteStep steps, recompile = False, rebuild = False, process = False}
+      Execute {process} -> ScheduleRequest {steps = map toExecuteStep steps, recompile = False, rebuild = False, process}
 
     toExecuteStep (name, unitReq) = (name, executeVariant unitReq)
 

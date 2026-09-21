@@ -17,7 +17,7 @@ module GhcServer.Build.Execute where
 import Control.Exception (Handler (..), catches)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Text as Text
-import GHC (GhcException, ModuleName, getSession)
+import GHC (GhcException, ModuleName, getSession, moduleNameString)
 import GHC.Driver.Env (HscEnv)
 import GHC.Types.SourceError (SourceError)
 import GhcServer.Build.Compile (withModuleSession)
@@ -33,6 +33,7 @@ import Test.Scheduler (TaskResult (..))
 import Types.Args (Args (..))
 import Types.BuckArgs (IsInterpreted (..))
 import Types.Env (Env (..))
+import Types.Log (Logger (..))
 import Types.Target (TargetSpec (..))
 
 -- | Outcome of attempting to run a module's @main@, collapsing the layered result that
@@ -60,7 +61,8 @@ data ExecOutcome =
 -- caller ('GhcServer.Build.Propagate.dispatchTask') can distinguish "skip" from "ran/failed".
 executeModuleTask :: BuildEnv -> BuildExt -> Unit -> ModuleName -> Int -> Maybe (HscEnv -> IO ()) -> IO (Maybe (TaskResult String))
 executeModuleTask buildEnv ext unit modName _requestId sharedBytecodeHook = do
-  (outcome, captured) <- withModuleSession buildEnv unit modName (Just "execute") cachedDeps \ logger env target ->
+  (outcome, captured) <- withModuleSession buildEnv unit modName (Just "execute") cachedDeps \ logger env target -> do
+    logger.debug ("Executing " ++ moduleNameString modName ++ " in-place")
     runGhcCatchingExceptions do
       withGhcMakeModule Interpreted target env sharedBytecodeHook \ _targetSpec -> do
         hsc_env <- getSession
