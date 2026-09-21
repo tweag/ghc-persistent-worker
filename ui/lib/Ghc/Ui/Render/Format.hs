@@ -14,7 +14,7 @@ format (unit :| units) n
   = showText n <> unit
 
 formatBytes :: (Integral a, Show a) => a -> Text
-formatBytes = format ["b", "Kb", "Mb", "Gb", "Tb", "Pb"]
+formatBytes = format ["B", "kB", "MB", "GB", "TB", "PB"]
 
 formatPs :: (Integral a, Show a) => a -> Text
 formatPs = format ["ps", "ns", "µs", "ms", "s"]
