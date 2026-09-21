@@ -33,13 +33,17 @@ compileEnd ::
   String ->
   (Maybe String) ->
   Maybe Api.ProcessStats ->
+  Bool ->
   Int ->
   EventM Name SessionState ()
-compileEnd target exitCode stderr result stats requestId = do
-  zoom #tasks do
-    Tasks.completeTask requestId outcome stats
-  zoom #project do
-    mark target
+compileEnd target exitCode stderr result stats noMain requestId =
+  if noMain
+    then zoom #tasks (Tasks.removeTask requestId)
+    else do
+      zoom #tasks do
+        Tasks.completeTask requestId outcome stats
+      zoom #project do
+        mark target
   where
     content = stripEscSeqs stderr
 
@@ -55,7 +59,7 @@ handleApiEvent worker = \case
       Tasks.addTask target worker debuggable process requestId
 
   CompileEnd {..} ->
-    compileEnd target exitCode stderr result processStats requestId
+    compileEnd target exitCode stderr result processStats noMain requestId
 
   Stats {..} -> do
     #workers . each . filtered (\ w -> w.workerId == worker) . #stats %= \ Session.Stats {} ->

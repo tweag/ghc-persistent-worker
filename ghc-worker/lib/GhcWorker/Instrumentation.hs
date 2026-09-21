@@ -98,7 +98,8 @@ messageCompileStart _args target requestId =
 
 -- | Construct a grapesy message for a "compilation finished" event. @ghc-worker@ has no execute-task result
 -- exfiltration story (see @GhcServer.Build.Execute@), so @result@ is always 'Nothing' here, and it never runs
--- tasks in a subprocess, so @processStats@ is always 'Nothing' too.
+-- tasks in a subprocess, so @processStats@ is always 'Nothing' too. @ghc-worker@ also has no execute-as-
+-- scheduler-task no-@main@ skip (that's a @ghc-server@-only concept), so @noMain@ is always 'False'.
 messageCompileEnd :: Target -> Int32 -> [String] -> Int -> Event
 messageCompileEnd target exitCode output requestId =
   CompileEnd {
@@ -107,6 +108,7 @@ messageCompileEnd target exitCode output requestId =
     stderr = unlines output,
     result = Nothing,
     processStats = Nothing,
+    noMain = False,
     requestId
   }
 

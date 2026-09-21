@@ -83,8 +83,10 @@ emitTaskStart env requestId target process = emitEvent env CompileStart {target,
 -- stderr content, and any exfiltrated result payload from the task's 'TaskResult' (see
 -- 'GhcServer.Build.Execute.executeModuleTask' for the only task kind that ever produces a payload). @stats@
 -- carries the RTS memory stats a subprocess execute task's child reported, 'Nothing' for every other task kind.
-emitTaskEnd :: BuildEnv -> Int -> Target -> TaskResult String -> Maybe ProcessStats -> IO ()
-emitTaskEnd env requestId target result stats = do
+-- @noMain@ is 'True' only for an execute task whose module has no @main@ (see 'dispatchTask''s 'ExecuteModule'
+-- case), 'False' for every other call site.
+emitTaskEnd :: BuildEnv -> Int -> Target -> TaskResult String -> Maybe ProcessStats -> Bool -> IO ()
+emitTaskEnd env requestId target result stats noMain = do
   emitEvent env CompileEnd {
     target,
     exitCode = case result of
@@ -97,6 +99,7 @@ emitTaskEnd env requestId target result stats = do
       TaskSuccess mResultStr -> Text.unpack <$> mResultStr
       TaskFailed _ -> Nothing,
     processStats = stats,
+    noMain,
     requestId
   }
   emitBytecodeState env
@@ -108,7 +111,7 @@ withTaskEvents :: BuildEnv -> Int -> Target -> IO (TaskResult String) -> IO (Tas
 withTaskEvents env requestId target action = do
   emitTaskStart env requestId target False
   result <- action
-  emitTaskEnd env requestId target result Nothing
+  emitTaskEnd env requestId target result Nothing False
   pure result
 
 -- | Skip metadata for a unit whose Phase 0 analysis found no changes.
@@ -160,15 +163,21 @@ dispatchTask env ext task =
       ExecuteModule _ name -> do
         requestId <- nextRequestId env
         let
+          target = moduleEventTarget name
           runExecute
             | task.value = executeModuleTaskProcess env unit name
             | otherwise = (, Nothing) <$> executeModuleTask env ext unit name requestId Nothing
+        emitTaskStart env requestId target task.value
         (mResult, stats) <- runExecute
         case mResult of
-          Nothing -> pure (TaskSuccess Nothing)
+          -- The module has no 'main': no execution ever took place, so the scheduler task still completes
+          -- successfully (see 'GhcServer.Build.Execute.executeModuleTask'), but the end event is tagged
+          -- 'noMain' so the UI can drop the row instead of showing it as a completed run.
+          Nothing -> do
+            emitTaskEnd env requestId target (TaskSuccess Nothing) stats True
+            pure (TaskSuccess Nothing)
           Just result -> do
-            emitTaskStart env requestId (moduleEventTarget name) task.value
-            emitTaskEnd env requestId (moduleEventTarget name) result stats
+            emitTaskEnd env requestId target result stats False
             pure result
 
     moduleEventTarget name = TargetModule {key = HomeModule {unit = unitName, name = fromGhcModuleName name}}
