@@ -32,11 +32,12 @@ compileEnd ::
   Int ->
   String ->
   (Maybe String) ->
+  Maybe Api.ProcessStats ->
   Int ->
   EventM Name SessionState ()
-compileEnd target exitCode stderr result requestId = do
+compileEnd target exitCode stderr result stats requestId = do
   zoom #tasks do
-    Tasks.completeTask requestId outcome
+    Tasks.completeTask requestId outcome stats
   zoom #project do
     mark target
   where
@@ -51,10 +52,10 @@ handleApiEvent :: WorkerId -> Api.Event -> EventM Name SessionState ()
 handleApiEvent worker = \case
   CompileStart {..} ->
     zoom #tasks do
-      Tasks.addTask target worker debuggable requestId
+      Tasks.addTask target worker debuggable process requestId
 
   CompileEnd {..} ->
-    compileEnd target exitCode stderr result requestId
+    compileEnd target exitCode stderr result processStats requestId
 
   Stats {..} -> do
     #workers . each . filtered (\ w -> w.workerId == worker) . #stats %= \ Session.Stats {} ->

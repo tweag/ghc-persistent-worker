@@ -1,6 +1,6 @@
 module Ghc.Ui.Render.Tasks where
 
-import Brick (AttrName, Padding (..), Widget, padLeft, str, strWrap, txt, vBox, vLimit, withAttr, (<+>))
+import Brick (AttrName, Padding (..), Widget, emptyWidget, padLeft, str, strWrap, txt, vBox, vLimit, withAttr, (<+>))
 import Brick.Widgets.List (renderList)
 import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
@@ -9,12 +9,12 @@ import Data.Time (UTCTime, defaultTimeLocale, diffUTCTime, formatTime, nominalDi
 import Ghc.Ui.Attr qualified as Attr
 import Ghc.Ui.Data.Name (Name (Tasks))
 import Ghc.Ui.Data.Tasks (Outcome (..), PhaseInfo (..), Task (..), TasksRow (..), TasksState)
-import Ghc.Ui.Render.Format (formatPico)
+import Ghc.Ui.Render.Format (formatBytes, formatPico)
 import qualified Ghc.Ui.Render.OpLog as OpLog
 import Ghc.Ui.Render.Popup (popup)
 import Ghc.Ui.Render.Section (drawSection)
 import Ghc.Ui.Render.Target (styledTarget)
-import Types.Api (renderTarget)
+import Types.Api (ProcessStats (..), renderTarget)
 
 -- | The marker string and attribute used to indicate a task's current state.
 stateMarker :: Task -> (String, AttrName)
@@ -25,8 +25,14 @@ stateMarker Task {outcome, phase} =
     (Just (Succeeded _), _) -> ("\10004", Attr.taskSucceeded) -- \x2714 heavy check mark
     (Just (Failed _), _) -> ("\10008", Attr.taskFailed) -- \x2718 heavy ballot X
 
+-- | A subprocess execute task's reported RTS memory stats, rendered as a single indented line: peak
+-- memory-in-use and peak live-data size, both human-readable (see 'Ghc.Ui.Render.Format.formatBytes').
+drawStats :: ProcessStats -> Widget Name
+drawStats ProcessStats {maxMemInUseBytes, maxLiveBytes} =
+  padLeft (Pad 2) (withAttr Attr.taskTime (txt ("mem " <> formatBytes maxMemInUseBytes <> ", live " <> formatBytes maxLiveBytes)))
+
 renderTaskDetails :: Task -> Widget Name
-renderTaskDetails Task {target, phases, outcome} =
+renderTaskDetails Task {target, phases, outcome, stats} =
   popup 30 (renderTarget target) $
     vBox $
       withAttr Attr.taskName (styledTarget (renderTarget target))
@@ -35,8 +41,8 @@ renderTaskDetails Task {target, phases, outcome} =
  where
   outcomeLines = case outcome of
     Just (Failed content) -> [strWrap content]
-    Just (Succeeded (Just result)) -> [strWrap ("Result: " ++ result)]
-    _ -> []
+    Just (Succeeded (Just result)) -> maybe [] (pure . drawStats) stats ++ [strWrap ("Result: " ++ result)]
+    _ -> maybe [] (pure . drawStats) stats
   phaseLines
     | null phases = []
     | otherwise = str " " : (drawPhase <$> (sortOn ((.order) . snd) (Map.toList phases)))
@@ -65,11 +71,13 @@ renderTasks current now state =
             -- ('stateMarker') is a plain single-width character, moved to the end of the row instead of
             -- leading it. The target name itself is rendered via 'UI.Utils.styledTarget' for the
             -- module\/metadata syntax highlighting, with 'Attr.taskName' as its default for the unrecognized
-            -- (unit-name) part.
+            -- (unit-name) part. A subprocess indicator ('Attr.taskProcess') is appended after the marker for
+            -- execute tasks that ran (or are running) in a self-relaunched subprocess.
             timestamp
               <+> withAttr Attr.taskName (styledTarget (renderTarget target))
               <+> str " "
               <+> withAttr attr (str status)
+              <+> (if process then withAttr Attr.taskProcess (str " (subprocess)") else emptyWidget)
         -- Status (elapsed time or "Failure") is rendered on its own indented line below the target name,
         -- rather than right-aligned on the same line: right-aligning it made it hard to visually associate
         -- with the target it belongs to, especially once lines wrap or targets vary in length, and there is
@@ -79,7 +87,7 @@ renderTasks current now state =
         result = case outcome of
           Just (Succeeded (Just r)) -> Just r
           _ -> Nothing
-     in vBox ([header, progressLine] ++ maybe [] (pure . drawResult) result)
+     in vBox ([header, progressLine] ++ maybe [] (pure . drawStats) stats ++ maybe [] (pure . drawResult) result)
 
   -- A successful execute task's exfiltrated result, rendered on the lines following its row: wrapped to the
   -- available width, truncated to 4 lines, indented by two cells, and left uncolored (unlike the marker/status

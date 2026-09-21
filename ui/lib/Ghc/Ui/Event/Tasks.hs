@@ -15,7 +15,7 @@ import Data.Time (getCurrentTime)
 import Ghc.Ui.Data.Name (Name (Tasks))
 import Ghc.Ui.Data.Tasks (Outcome (..), PhaseInfo (..), Task (..), TasksRow (..), TasksState, newTask)
 import Ghc.Ui.Data.WorkerId (WorkerId)
-import Types.Api (Target)
+import Types.Api (ProcessStats, Target)
 
 -- | Insert a row at index @i@ of the given (pre-fetched) element sequence, preserving the logical selection
 -- (mirroring the previous element it pointed to) the same way 'addTask' always did, and -- new -- keeping the
@@ -38,9 +38,9 @@ insertRow i row rows = do
     else
       modifying listSelectedL (Just . maybe i (\i' -> if i' >= i then i' + 1 else i'))
 
-addTask :: Target -> WorkerId -> Bool -> Int -> EventM Name TasksState ()
-addTask name wid debuggable requestId = do
-  task <- liftIO $ newTask name wid debuggable requestId
+addTask :: Target -> WorkerId -> Bool -> Bool -> Int -> EventM Name TasksState ()
+addTask name wid debuggable process requestId = do
+  task <- liftIO $ newTask name wid debuggable process requestId
   rows <- use listElementsL
   let i = if debuggable then 0 else fromMaybe 0 (Seq.findIndexL (not . debuggableRow) rows)
   insertRow i (TaskRow task) rows
@@ -64,11 +64,13 @@ completeTask ::
   MonadState TasksState m =>
   Int ->
   Outcome ->
+  Maybe ProcessStats ->
   m ()
-completeTask requestId outcome = do
+completeTask requestId outcome stats = do
   time <- liftIO getCurrentTime
   listElementsL %= fmap \case
-    TaskRow task | task.requestId == requestId -> TaskRow task {outcome = Just outcome, endTime = Just time}
+    TaskRow task | task.requestId == requestId ->
+      TaskRow task {outcome = Just outcome, endTime = Just time, stats}
     row -> row
 
 getSelectedTarget ::

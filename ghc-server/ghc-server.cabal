@@ -51,7 +51,8 @@ library
     GhcServer.Build.Diff
     GhcServer.Build.Execute
     GhcServer.Build.Metadata
-    GhcServer.Build.Process
+                    GhcServer.Build.Process
+                    GhcServer.Build.ProcessChild
     GhcServer.Build.Propagate
     GhcServer.Build.Schedule
     GhcServer.Build.BytecodeMirror

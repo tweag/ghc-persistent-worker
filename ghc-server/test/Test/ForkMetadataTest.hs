@@ -60,6 +60,7 @@ import Test.Tasty (TestName, TestTree)
 import Types.Args (Args (..), buildPlanAll, emptyArgs)
 import Types.BuildPlan (BuildPlan (..), BuildPlanJson (..), BuildPlanSchema (..))
 import Types.Log (newLog)
+import Types.Settings (defaultSettings)
 
 -- ---------------------------------------------------------------------------
 -- Raw @mmap@ FFI (byte-oriented; see 'Test.ForkTest' for the @Int64@-slot variant)
@@ -141,7 +142,7 @@ runBuildPlan targets = do
 -- instead of an in-memory HUG) and write the JSON-encoded result into its shared-memory slot.
 runUnitChild :: Ptr () -> Int -> [String] -> [Target] -> IO ()
 runUnitChild shm slot options targets = do
-  state <- newState
+  state <- newState defaultSettings
   result <- simpleSessionWithDebugLog state (emptyArgs []) {ghcOptions = options} (runBuildPlan targets)
   case result of
     Nothing -> error "metadata step failed in forked child (see stderr for diagnostics)"

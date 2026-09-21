@@ -12,7 +12,7 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 import GhcServer.Data.Unit (Unit)
 import System.OsPath.Extra (OsPath)
-import Types.Api (ModuleName)
+import Types.Api (ModuleName, ProcessStats)
 
 data ProcessEvalOptions =
   ProcessEvalOptions {
@@ -71,7 +71,10 @@ data ProcessEvalResult =
     evalStderr :: Text,
     -- | The messages the child's in-memory logger accumulated.
     logMessages :: [Text],
-    outcome :: EvalOutcome
+    outcome :: EvalOutcome,
+    -- | RTS memory-usage stats collected via 'GHC.Stats.getRTSStats' right before the child exits, forwarded to
+    -- the UI as part of 'Types.Api.Event's @CompileEnd@ ('GhcServer.Build.Process.executeModuleTaskProcess').
+    stats :: ProcessStats
   }
   deriving stock (Show, Generic)
   deriving anyclass (ToJSON, FromJSON)

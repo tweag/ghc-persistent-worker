@@ -45,7 +45,7 @@ import GhcServer.Log qualified as Log
 import GhcServer.Log (emitLog)
 import GhcWorker.Grpc (pushBytecodeState)
 import Test.Scheduler (Phase (..), SchedulerState (..), Task (..), TaskResult (..), addResolutions)
-import Types.Api (Event (..), HomeModule (..), Target (..), UnitName (..), fromGhcModuleName)
+import Types.Api (Event (..), HomeModule (..), ProcessStats, Target (..), UnitName (..), fromGhcModuleName)
 import Types.Log (Logger (..))
 
 
@@ -73,15 +73,18 @@ emitBytecodeState env = for_ env.instrChan (pushBytecodeState env.stateVar)
 nextRequestId :: BuildEnv -> IO Int
 nextRequestId env = atomicModifyIORef' env.requestIdCounter \ n -> (n + 1, n)
 
--- | Send a 'CompileStart' event for a metadata or compile task about to run.
-emitTaskStart :: BuildEnv -> Int -> Target -> IO ()
-emitTaskStart env requestId target = emitEvent env CompileStart {target, debuggable = False, requestId}
+-- | Send a 'CompileStart' event for a metadata or compile task about to run. @process@ marks whether this
+-- task instance runs (or, for execute tasks, is about to run) in a subprocess -- always 'False' except for
+-- execute tasks dispatched with @--process@ (see 'dispatchTask').
+emitTaskStart :: BuildEnv -> Int -> Target -> Bool -> IO ()
+emitTaskStart env requestId target process = emitEvent env CompileStart {target, debuggable = False, process, requestId}
 
 -- | Send a 'CompileEnd' event for a metadata or compile task that just finished, deriving the exit code,
 -- stderr content, and any exfiltrated result payload from the task's 'TaskResult' (see
--- 'GhcServer.Build.Execute.executeModuleTask' for the only task kind that ever produces a payload).
-emitTaskEnd :: BuildEnv -> Int -> Target -> TaskResult String -> IO ()
-emitTaskEnd env requestId target result = do
+-- 'GhcServer.Build.Execute.executeModuleTask' for the only task kind that ever produces a payload). @stats@
+-- carries the RTS memory stats a subprocess execute task's child reported, 'Nothing' for every other task kind.
+emitTaskEnd :: BuildEnv -> Int -> Target -> TaskResult String -> Maybe ProcessStats -> IO ()
+emitTaskEnd env requestId target result stats = do
   emitEvent env CompileEnd {
     target,
     exitCode = case result of
@@ -93,17 +96,19 @@ emitTaskEnd env requestId target result = do
     result = case result of
       TaskSuccess mResultStr -> Text.unpack <$> mResultStr
       TaskFailed _ -> Nothing,
+    processStats = stats,
     requestId
   }
   emitBytecodeState env
 
 -- | Run an instrumented task: emits 'CompileStart' before and 'CompileEnd' after, deriving the target's
--- display text from the given unit\/module description.
+-- display text from the given unit\/module description. Always an in-process task (metadata\/compile never run
+-- in a subprocess), so @process@ is always 'False' and @stats@ always 'Nothing'.
 withTaskEvents :: BuildEnv -> Int -> Target -> IO (TaskResult String) -> IO (TaskResult String)
 withTaskEvents env requestId target action = do
-  emitTaskStart env requestId target
+  emitTaskStart env requestId target False
   result <- action
-  emitTaskEnd env requestId target result
+  emitTaskEnd env requestId target result Nothing
   pure result
 
 -- | Skip metadata for a unit whose Phase 0 analysis found no changes.
@@ -157,12 +162,13 @@ dispatchTask env ext task =
         let
           runExecute
             | task.value = executeModuleTaskProcess env unit name
-            | otherwise = executeModuleTask env ext unit name requestId Nothing
-        runExecute >>= \case
+            | otherwise = (, Nothing) <$> executeModuleTask env ext unit name requestId Nothing
+        (mResult, stats) <- runExecute
+        case mResult of
           Nothing -> pure (TaskSuccess Nothing)
           Just result -> do
-            emitTaskStart env requestId (moduleEventTarget name)
-            emitTaskEnd env requestId (moduleEventTarget name) result
+            emitTaskStart env requestId (moduleEventTarget name) task.value
+            emitTaskEnd env requestId (moduleEventTarget name) result stats
             pure result
 
     moduleEventTarget name = TargetModule {key = HomeModule {unit = unitName, name = fromGhcModuleName name}}
