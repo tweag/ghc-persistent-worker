@@ -326,13 +326,20 @@ data BuildExt =
     stale :: Set ModuleKey,
     -- | The generation 'stale' was accumulated for.  When it differs from the scheduler's
     -- current generation, 'stale' is stale in the other sense and must be discarded.
-    staleGen :: Generation
+    staleGen :: Generation,
+    -- | Modules whose @execute@ task should run in a subprocess for the current generation (see
+    -- 'GhcServer.Build.Diff.ProcessScope', resolved per-unit by 'GhcServer.Build.Diff.processScopeModules' and
+    -- accumulated here by 'GhcServer.Build.Propagate.propagateCompletion' the same way 'moduleMap' is).
+    -- Reset at generation boundaries alongside 'stale', for the same reason: a module left over from a
+    -- previous request's @--process@ selection must not silently keep running in a subprocess for a later
+    -- request that never asked for it.
+    process :: Set ModuleKey
   }
 
 -- | Initial (empty) 'BuildExt'.
 emptyBuildExt :: BuildExt
 emptyBuildExt =
-  BuildExt {moduleMap = Map.empty, stale = Set.empty, staleGen = initialGeneration}
+  BuildExt {moduleMap = Map.empty, stale = Set.empty, staleGen = initialGeneration, process = Set.empty}
 
 -- | Assemble deduplicated, topologically sorted 'CachedDeps' for a module
 -- from the full module map.

@@ -49,6 +49,7 @@ import Test.Tasty (TestName, TestTree)
 import Test.Tasty.Hedgehog (testProperty)
 import Types.Api (UnitName (..))
 import Types.CachedDeps (CachedDeps (..))
+import Types.Settings (defaultSettings)
 
 -- ---------------------------------------------------------------------------
 -- Fixture: one unit, two modules -- M1 (leaf) and Main (imports M1, has 'main')
@@ -83,7 +84,7 @@ test_subprocessExecute =
       root <- acquireTemp "ghc-server-subprocess"
       createSubprocessProject root
       acquireProject (pure root)
-    stateVar <- liftIO newBuildState
+    stateVar <- liftIO (newBuildState defaultSettings)
     (buildEnv, _events) <- liftIO (newBuildEnv tp stateVar)
     let name = UnitName subprocessUnitName
     unit <- maybe (fail "unit not found") pure (Map.lookup name tp.project.units)

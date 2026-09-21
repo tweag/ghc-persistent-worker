@@ -58,6 +58,7 @@ import GhcServer.Data.ProcessEval (
   ProcessEvalResult (..),
   )
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitCache)
+import GhcServer.Log (instrumentLogger)
 import GhcServer.Path (outputDirName, tmpDirName)
 import Internal.State (newState, updateMakeStateVar)
 import Prelude hiding (log)
@@ -170,7 +171,6 @@ runEval logger ProcessEvalConfig {projectRoot, unit, moduleName, sharedBytecodeP
       extDepsDb <- newMVar Nothing
       diff <- newMVar Map.empty
       requestIdCounter <- newIORef 0
-      processUnits <- newMVar mempty
       pure BuildEnv {
         baseArgs = (emptyArgs Map.empty) {Args.settings = defaultSettings},
         projectRoot,
@@ -183,8 +183,7 @@ runEval logger ProcessEvalConfig {projectRoot, unit, moduleName, sharedBytecodeP
         instrChan = Nothing,
         extDepsDb,
         diff,
-        requestIdCounter,
-        processUnits
+        requestIdCounter
       }
 
 -- | Spawn a fresh child process (a relaunch of @selfPath@, typically the current @ghc-server@ executable's own
@@ -210,12 +209,19 @@ spawnProcessEval selfPath config = do
 -- parent's logger, and converts the child's 'EvalOutcome' back into a 'TaskResult'.
 executeModuleTaskProcess :: BuildEnv -> Unit -> GHC.ModuleName -> IO (Maybe (TaskResult String))
 executeModuleTaskProcess buildEnv unit modName = do
-  buildEnv.log.debug ("Executing " ++ moduleNameString modName ++ " in a subprocess")
+  logger.debug ("Executing " ++ moduleNameString modName ++ " in a subprocess")
   bracket acquireSharedBytecode (traverse_ cleanupSharedBytecode) \ sharedBytecodePath -> do
     try (spawnProcessEval' sharedBytecodePath) >>= \case
       Left err -> pure (Just (TaskFailed (subprocessCrashMessage err)))
       Right result -> pure result
   where
+    -- Forward every message logged in this function to the instrument channel, tagged the same way
+    -- 'GhcServer.Build.Compile.withModuleSession' tags its own per-task logger, so that messages logged here
+    -- (which run on the parent side, outside any GHC session and thus outside 'withModuleSession') are actually
+    -- visible to the UI instead of only accumulating in the un-flushed, non-instrumented 'BuildEnv.log'.
+    logger = instrumentLogger buildEnv.instrChan logCategory buildEnv.log
+
+    logCategory = Text.unpack unit.name.text ++ ":" ++ moduleNameString modName ++ ":process"
     -- Mirror and export the parent's currently compiled bytecode into shared memory for the child to restore,
     -- unless the @sharedMemory@ feature is disabled, in which case the child falls back to its usual approach
     -- of restoring cached interfaces\/objects and compiling Core bindings to bytecode itself.
@@ -226,25 +232,25 @@ executeModuleTaskProcess buildEnv unit modName = do
           path <- exportSharedBytecode bytecodeMap
           case path of
             Just p ->
-              buildEnv.log.debug (
+              logger.debug (
                 "Stored bytecode for " ++ show (Map.size bytecodeMap) ++ " module(s) in shared memory at " ++ p
                 )
-            Nothing -> buildEnv.log.debug "No mirrorable bytecode to store in shared memory"
+            Nothing -> logger.debug "No mirrorable bytecode to store in shared memory"
           pure path
       | otherwise = do
-          buildEnv.log.debug "sharedMemory feature disabled; subprocess will restore bytecode from cached interfaces"
+          logger.debug "sharedMemory feature disabled; subprocess will restore bytecode from cached interfaces"
           pure Nothing
 
     spawnProcessEval' sharedBytecodePath = do
       self <- toOsPath <$> getExecutablePath
       output <- spawnProcessEval self (cfg sharedBytecodePath)
       unless (Text.null output.processStderr) do
-        buildEnv.log.info ("Unexpected subprocess stderr: " ++ Text.unpack output.processStderr)
+        logger.info ("Unexpected subprocess stderr: " ++ Text.unpack output.processStderr)
       case output.result of
         Left err -> pure (Just (TaskFailed (Text.unpack err)))
         Right result -> do
-          traverse_ (debugT buildEnv.log) result.logMessages
-          traverse_ (debugT buildEnv.log) (captured result)
+          traverse_ (debugT logger) result.logMessages
+          traverse_ (debugT logger) (captured result)
           pure (taskResult result)
 
     -- A crash here (process spawn failure, the child being killed, or any other exception thrown by

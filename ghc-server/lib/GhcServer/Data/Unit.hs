@@ -116,7 +116,7 @@ data Project =
 newtype ClientModule =
   ClientModule { text :: Text.Text }
   deriving stock (Show)
-  deriving newtype (Eq, IsString)
+  deriving newtype (Eq, Ord, IsString)
 
 -- | Convert a 'ClientModule' to a GHC 'ModuleName'.
 clientModuleName :: ClientModule -> ModuleName

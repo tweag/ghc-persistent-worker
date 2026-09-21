@@ -161,7 +161,7 @@ data Flags =
     wait :: Bool,
     recompile :: Bool,
     rebuild :: Bool,
-    process :: Bool
+    processFlag :: Bool
   }
 
 -- | Parse schedule arguments from the client's command line.
@@ -189,19 +189,20 @@ parseScheduleArgs project = \case
       recompile = flags.recompile || flags.rebuild
       rebuild = flags.rebuild
     Right ScheduleCommand {
-      request = ScheduleRequest {steps, recompile, rebuild, process = flags.process},
+      request = ScheduleRequest {steps, recompile, rebuild, process = flags.processFlag},
       scheduleWait = flags.wait
     }
   other ->
     Left ("Unknown command: " ++ unwords other)
   where
-    extractFlags = go Flags {wait = False, recompile = False, rebuild = False, process = False}
+    extractFlags = go Flags {wait = False, recompile = False, rebuild = False, processFlag = False}
 
+    go :: Flags -> [String] -> (Flags, [String])
     go acc = \case
-      "--wait" : ts -> go (acc {wait = True} :: Flags) ts
-      "--recompile" : ts -> go (acc {recompile = True} :: Flags) ts
-      "--rebuild" : ts -> go (acc {rebuild = True} :: Flags) ts
-      "--process" : ts -> go (acc {process = True} :: Flags) ts
+      "--wait" : ts -> go acc {wait = True} ts
+      "--recompile" : ts -> go acc {recompile = True} ts
+      "--rebuild" : ts -> go acc {rebuild = True} ts
+      "--process" : ts -> go acc {processFlag = True} ts
       ts -> (acc, ts)
 
 -- | Format a build result as a human-readable report.
@@ -235,7 +236,6 @@ buildEnv config outputDir tmpDir project log = do
     else pure Nothing
   diff <- newMVar Map.empty
   requestIdCounter <- newIORef 0
-  processUnits <- newMVar Set.empty
   pure BuildEnv {
     baseArgs = (emptyArgs Map.empty) {Args.settings = config.settings},
     projectRoot = config.projectRoot,
@@ -248,8 +248,7 @@ buildEnv config outputDir tmpDir project log = do
     instrChan,
     extDepsDb,
     diff,
-    requestIdCounter,
-    processUnits
+    requestIdCounter
   }
 
 -- | Everything created at server boot that is needed to serve both the GhcServer protocol and (optionally) the

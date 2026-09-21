@@ -35,6 +35,7 @@ import Test.Tasty (DependencyType (..), TestName, TestTree, dependentTestGroup, 
 import Test.Tasty.Hedgehog (testProperty)
 import Types.Api (UnitName (..))
 import Types.Args (emptyArgs)
+import Types.Settings (defaultSettings)
 
 -- ---------------------------------------------------------------------------
 -- Cabal project helpers
@@ -67,13 +68,12 @@ cabalProjectTest dirName create name body =
 -- | Run a fresh build with the given schedule steps.
 runCabalFresh :: TestProject -> [(UnitName, UnitRequest)] -> IO ([BuildEvent], BuildResult)
 runCabalFresh tp steps = timedBuild do
-  stateVar <- newBuildState
+  stateVar <- newBuildState defaultSettings
   log <- newLogger False
   events <- newBuildEvents
   diffMVar <- newMVar Map.empty
   extDepsDb <- newMVar Nothing
   requestIdCounter <- newIORef 0
-  processUnits <- newMVar Set.empty
   let env = BuildEnv {
         baseArgs = emptyArgs Map.empty,
         projectRoot = tp.rootOs,
@@ -86,8 +86,7 @@ runCabalFresh tp steps = timedBuild do
         instrChan = Nothing,
         diff = diffMVar,
         extDepsDb,
-        requestIdCounter,
-        processUnits
+        requestIdCounter
       }
   result <- runBuild 4 testTaskTimeout env ScheduleRequest {steps, recompile = False, rebuild = False, process = False}
   evs <- readEvents events

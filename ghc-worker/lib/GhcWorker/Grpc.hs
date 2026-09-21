@@ -81,7 +81,7 @@ triggerTask _stateVar _recompile = \case
     pure (ApiFailure "Cannot trigger metadata")
   TaskTrigger {task = Build _rebuild} ->
     pure (ApiFailure "Cannot trigger build")
-  TaskTrigger {task = Execute} ->
+  TaskTrigger {task = Execute {}} ->
     pure (ApiFailure "Cannot trigger execute")
 
 -- | Compute cache-tracking info for every module ever tracked in 'MakeState.bcoHistory' (current residents and

@@ -17,7 +17,7 @@ import qualified Data.Set as Set
 import Data.Set (Set)
 import qualified Data.Text as Text
 import GHC (ModuleName)
-import GhcServer.Build.Diff (UnitDiff (..), computeUnitDiff)
+import GhcServer.Build.Diff (ProcessScope (..), UnitDiff (..), computeUnitDiff)
 import GhcServer.Build.Schedule (
   BuildStatus,
   TaskKey (..),
@@ -97,7 +97,6 @@ classifyBuildRequest ::
 classifyBuildRequest env request = do
   diffs <- Map.fromList <$> traverse unitDiff reqs.resolved
   modifyMVar_ env.diff (pure . Map.union diffs)
-  modifyMVar_ env.processUnits (const (pure processRequestUnits))
   let
     runMeta name = maybe True (.runMeta) (Map.lookup name diffs)
     metaTasks = metadataTasks runMeta metaSpecs
@@ -105,17 +104,16 @@ classifyBuildRequest env request = do
   where
     reqs = effectiveRequests env.project request
 
-    -- Units whose execute tasks should run in a subprocess for this batch (see
-    -- 'GhcServer.Data.BuildEnv.BuildEnv.processUnits'). Only meaningful together with an execute request --
-    -- @--process@ on a plain compile/metadata request has nothing to apply to.
-    processRequestUnits
-      | request.process = Set.fromList [eu.unit.name | eu <- reqs.resolved, isExecuteScope eu.scope]
-      | otherwise = Set.empty
-
-    isExecuteScope = \case
-      Explicit UnitExecute -> True
-      Explicit (UnitExecuteModules _) -> True
-      _ -> False
+    -- This unit's @--process@ scope for the current batch (see 'ProcessScope'), recorded in its 'UnitDiff' and
+    -- resolved into 'ModuleKey's once its modules are known (see 'GhcServer.Build.Propagate.propagateCompletion').
+    -- Only meaningful together with an execute request -- @--process@ on a plain compile/metadata request has
+    -- nothing to apply to.
+    processScope eu
+      | not request.process = ProcessNone
+      | otherwise = case eu.scope of
+        Explicit UnitExecute -> ProcessAll
+        Explicit (UnitExecuteModules mods) -> ProcessModules (Set.fromList mods)
+        _ -> ProcessNone
 
     -- Unknown unit names still get a metadata task, which fails at dispatch with a diagnostic
     -- naming the unit; they have no dependencies to order against.
@@ -124,7 +122,7 @@ classifyBuildRequest env request = do
       ++ [(name, []) | name <- reqs.unknown]
 
     unitDiff eu = do
-      d <- computeUnitDiff env.outputDir request.rebuild (forceAll eu.scope) eu.unit
+      d <- computeUnitDiff env.outputDir request.rebuild (forceAll eu.scope) (processScope eu) eu.unit
       emitLog env.instrChan (Text.unpack eu.unit.name.text ++ ":diff") "debug" $
         "classify: runMeta=" ++ show d.runMeta
           ++ " forceAll=" ++ show d.forceAll

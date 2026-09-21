@@ -3,7 +3,7 @@ module Ghc.Ui.Event.Main where
 import Brick (BrickEvent (..), EventM, halt, suspendAndResume', zoom)
 import Brick.Forms (formState)
 import Control.Lens (Lens', preuse, use, (.=))
-import Control.Monad (when)
+import Control.Monad (unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (get, gets)
 import Control.Monad.Trans (lift)
@@ -23,6 +23,7 @@ import Ghc.Ui.Data.ServerHandlers (ServerHandlers (..))
 import Ghc.Ui.Data.ServerProcess (ServerConfig, describeServerRoot)
 import Ghc.Ui.Data.Session (SessionState (..))
 import qualified Ghc.Ui.Data.Sessions as Sessions
+import Ghc.Ui.Data.Settings (LocalFlag (ProcessExecute), SettingKind (..), localFlagEnabled)
 import Ghc.Ui.Data.WorkerId (WorkerId (..))
 import Ghc.Ui.Event.Log (handleLogEvent)
 import Ghc.Ui.Event.OpLog (handleOpLogEvent, logMainEvent)
@@ -138,8 +139,12 @@ toggleFeature =
   inSession #settings Settings.toggleSelected \case
     Nothing ->
       logOp "No setting selected"
-    Just flag ->
+    Just (SettingFeature flag) ->
       withApi \ api -> api.toggleFeature flag
+    Just (SettingLocal _) ->
+      -- Local settings are not synchronized with the server; 'Ghc.Ui.Event.Settings.toggleSelected' already
+      -- flipped the in-memory flag, nothing else to do.
+      pure ()
 
 handleMainEvent ::
   MainEvent ->
@@ -249,7 +254,8 @@ projectKey event = \case
     triggerTask Project.selectedCompileTargets (TaskKind.Build False)
 
   KChar 'x' ->
-    triggerTask (fmap Just . Project.selectedExecuteTarget) TaskKind.Execute
+    inSession #settings (gets (localFlagEnabled ProcessExecute)) \ process ->
+      triggerTask (fmap Just . Project.selectedExecuteTarget) TaskKind.Execute {process}
 
   KChar 'e' ->
     withProjectTargets Project.selectedEvictTarget \ target ->
@@ -327,7 +333,8 @@ handleUiEvent = \case
     handleMainEvent event
   VtyEvent event -> do
     current <- use #currentFocus
-    logOpDebug ("vty event in " <> showText current <> ": " <> showText event)
+    unless (current == OpLogDebug) do
+      logOpDebug ("vty event in " <> showText current <> ": " <> showText event)
     vtyEvent current event
   MouseDown {} -> pure ()
   MouseUp {} -> pure ()
