@@ -144,7 +144,7 @@ linkablesResolve ::
   [Module] ->
   IO ([Linkable], [LinkModule], UniqDSet UnitId, [UnitId])
 linkablesResolve logger stateVar hsc_env opts pls srcSpan mods = do
-  (loaded, needed, allUnits, neededUnits) <- resolveLinkDeps opts pls srcSpan mods
+  (loaded, needed, allUnits, neededUnits) <- resolveLinkDeps hsc_env opts pls srcSpan mods
   neededWithLazy <-
     if ldUseByteCode opts
     then traverse (addLazyByteCode logger stateVar hsc_env) needed
