@@ -41,7 +41,7 @@ import Internal.Debug (debugSocketPathTarget)
 import System.OsPath (OsPath)
 import System.OsPath.Extra (toOsPath)
 import qualified Types.Api as TaskKind
-import Types.Api (Target (..), TaskKind, renderTarget)
+import Types.Api (ExecutorId (..), HomeModule (..), Target (..), TaskKind, UnitName (..), renderTarget)
 import Types.Text (showText)
 
 inSession ::
@@ -111,6 +111,18 @@ nonEmptyPath :: Text -> Maybe OsPath
 nonEmptyPath = \case
   "" -> Nothing
   path -> Just (toOsPath (Text.unpack path))
+
+-- | Derive the executor id for a triggered execute task from the @x@ key's process-execute setting and the
+-- selected target: 'Nothing' runs in-process (the setting is off), otherwise the target's unit name is used
+-- as the 'ExecutorId', so that repeated triggers against the same unit reuse the same persistent executor.
+executorFor :: Bool -> Target -> Maybe ExecutorId
+executorFor False _ = Nothing
+executorFor True target = Just (ExecutorId (targetUnitName target).text)
+  where
+    targetUnitName = \case
+      TargetProject -> UnitName "project"
+      TargetUnit {name} -> name
+      TargetModule {key = HomeModule {unit}} -> unit
 
 triggerTask ::
   Foldable t =>
@@ -254,8 +266,11 @@ projectKey event = \case
     triggerTask Project.selectedCompileTargets (TaskKind.Build False)
 
   KChar 'x' ->
-    inSession #settings (gets (localFlagEnabled ProcessExecute)) \ process ->
-      triggerTask (fmap Just . Project.selectedExecuteTarget) TaskKind.Execute {process}
+    inSession #settings (gets (localFlagEnabled ProcessExecute)) \ useExecutor ->
+      withProjectTargets Project.selectedExecuteTarget \ target -> do
+        let kind = TaskKind.Execute {executor = executorFor useExecutor target}
+        logOpDebug ("Trigger " <> showText kind <> ": " <> showText target)
+        withApi \ api -> api.triggerTask target kind
 
   KChar 'e' ->
     withProjectTargets Project.selectedEvictTarget \ target ->
