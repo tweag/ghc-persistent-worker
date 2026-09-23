@@ -3,13 +3,16 @@
 -- process, and 'GhcServer.Build.Executor' for the parent-side spawn\/dispatch\/terminate logic.
 module Types.State.Executor where
 
+import System.IO (Handle)
 import System.OsPath (OsPath)
 import System.Process (ProcessHandle)
 
--- | A running persistent executor child process: its OS process handle (for termination) and the Unix socket
--- path on which it serves the @Executor@ gRPC service.
+-- | A running persistent executor child process: its OS process handle (for termination), the Unix socket
+-- path on which it serves the @Executor@ gRPC service, and the write end of its stdin pipe. The child exits when
+-- its stdin reaches EOF, so the handle must be kept alive (and is closed on termination).
 data ExecutorHandle =
   ExecutorHandle {
     process :: ProcessHandle,
-    socket :: OsPath
+    socket :: OsPath,
+    stdin :: Handle
   }

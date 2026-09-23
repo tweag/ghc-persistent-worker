@@ -389,6 +389,7 @@
           "ghc-server"
           "ghc-worker-test-common"
           "hedgehog"
+          "process"
           "tasty"
           "tasty-hedgehog"
           "temporary"

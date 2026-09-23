@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package executor;
+
+message Encoded {
+  bytes payload = 1;
+}
+
+// A persistent execute-task subprocess spawned by ghc-server (see GhcServer.Build.Executor).
+// The payload of a request is a JSON-encoded ProcessEvalConfig, the response a JSON-encoded ProcessEvalResult.
+service Executor {
+  rpc Execute(Encoded) returns (Encoded) {};
+}
