@@ -33,7 +33,7 @@ import Internal.DynFlags (updateActiveUnitFlags)
 import Internal.Log (logTimed)
 import Internal.Metadata.Static (prepareStaticSession)
 import Internal.Session (runSession, withDynFlags, withGhcInSession)
-import Internal.State (updateMakeStateVar)
+import Internal.State (dynamicSettings, updateMakeStateVar)
 import Internal.State.Make (insertUnitEnv, loadState, storeModuleGraph)
 import Internal.State.Stats (logMemStats)
 import Internal.State.UnitIndex (restoreUnitIndex)
@@ -45,8 +45,8 @@ import Types.BuildPlan (BuildPlan (..))
 import Types.BuildPlan.Incremental (BuildPlanPath (..))
 import Types.CachedDeps (CachedBuildPlans)
 import Types.Env (Env (..))
-import Types.Settings (Settings (..))
 import Types.Log (Logger (..))
+import Types.Settings (Settings (..))
 import Types.State (WorkerState (..))
 import Types.Target (TargetSpec (..), UnitTarget (..))
 
@@ -187,7 +187,7 @@ computeMetadata env = do
         let target = TargetUnit (UnitTarget unit)
         liftIO $ env.log.setTarget target
         module_graph <- do
-          settings <- liftIO ((.settings) <$> readMVar env.state)
+          settings <- dynamicSettings env.state
           writeMetadata settings env.args env.log staticUnits (fst <$> srcs)
         liftIO do
           unless (transientUnit env) do
