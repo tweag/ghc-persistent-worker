@@ -2,8 +2,8 @@
 
 module Internal.State where
 
-import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, withMVar)
-import Control.Monad.IO.Class (liftIO)
+import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, readMVar, withMVar)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Foldable (traverse_)
 import Data.Map.Strict qualified as M
 import GHC (Ghc, HscEnv)
@@ -15,16 +15,13 @@ import qualified Internal.State.Make as Make
 import Internal.State.UnitIndex (newUnitIndex)
 import System.Environment (lookupEnv)
 import System.OsPath.Extra (toOsPath)
-import Types.Settings (Settings (..))
+import Types.FeatureFlags (Feature)
 import Types.Log (Logger (..))
+import qualified Types.Settings as Settings
+import Types.Settings (Settings (..))
 import qualified Types.State
 import Types.State (BinPath (..), WorkerState (..))
-import Types.State.Make (
-  EModuleGraph (..),
-  MakeState (..),
-  emptyEModuleGraph,
-  emptyLibLoadState,
-  )
+import Types.State.Make (EModuleGraph (..), MakeState (..), emptyEModuleGraph, emptyLibLoadState)
 
 newState :: Settings -> IO (MVar WorkerState)
 newState settings = do
@@ -113,3 +110,19 @@ dumpState logger state exception =
   where
     write = logger.debug
     writeD = logger.debugD
+
+dynamicSettings ::
+  MonadIO m =>
+  MVar WorkerState ->
+  m Settings
+dynamicSettings state =
+  liftIO ((.settings) <$> readMVar state)
+
+dynamicFeatureOn ::
+  MonadIO m =>
+  Feature ->
+  MVar WorkerState ->
+  m Bool
+dynamicFeatureOn target var =
+  liftIO (readMVar var) >>= \ WorkerState {settings} ->
+    pure (Settings.featureOn target settings)
