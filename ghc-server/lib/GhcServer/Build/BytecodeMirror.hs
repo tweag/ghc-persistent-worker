@@ -33,9 +33,11 @@
 --   resolves a module-local 'BCONPtrAddr'\/'BCONPtrItbl' only through these tables and otherwise falls back to a
 --   symbol lookup that panics (@nameModule@) for internal names, and FFI descriptors are baked into instructions
 --   as raw words. Verified against a real execute-subprocess run (a module's @$trModule@ string literals).
---   Hence any 'CompiledByteCode' with a non-empty table is treated as unmirrorable, like breakpoints below, and
---   the child reconstructs that module itself. This excludes most modules defining data types or containing
---   string literals; recreating these allocations in the child (e.g. from the interface's 'TyCon's) is open work.
+--   String literals and info tables are therefore described in a process-independent form and allocated anew by
+--   the importing process (see "GhcServer.Build.InterpAllocations" and 'serializeItbls'); a module whose
+--   literal contents or constructors can't be described is unmirrorable. 'bc_ffis' can't be recreated (the
+--   'PrepFFI' arguments are not retained), so any 'CompiledByteCode' with FFI calls is unmirrorable, like
+--   breakpoints below, and the child reconstructs that module itself.
 -- * Static pointer table entries ('GHC.ByteCode.Types.bc_spt_entries', @['GHC.Types.SptEntry.SptEntry']@) embed a
 --   full typed 'GHC.Types.Var.Id' binder, not just a 'Name', and are dropped entirely (rehydrated as @[]@). Any
 --   module using the @StaticPointers@ extension will silently lose its static pointer table across the shared
@@ -59,6 +61,10 @@ module GhcServer.Build.BytecodeMirror (
   MirrorBCOPtr (..),
   MirrorUnlinkedBCO (..),
   MirrorCompiledByteCode (..),
+  MirrorItbls (..),
+  MirrorSource (..),
+  mirrorSourceFor,
+  serializeItbls,
   MirrorLinkablePart (..),
   MirrorLinkable (..),
   mirrorName,
@@ -71,14 +77,33 @@ module GhcServer.Build.BytecodeMirror (
 ) where
 
 import qualified Data.ByteString
+import qualified Data.ByteString.Short as ShortByteString
+import Data.ByteString.Short (ShortByteString, fromShort)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.Traversable (for)
 import Data.List.NonEmpty (NonEmpty)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Time (UTCTime)
 import Data.Word (Word16, Word64, Word8)
 import GHC.Builtin.PrimOps (PrimOp)
-import GHC.ByteCode.Types (BCOByteArray, BCONPtr (..), BCOPtr (..), CompiledByteCode (..), UnlinkedBCO (..))
+import GHC.ByteCode.Types (AddrEnv, BCOByteArray, BCONPtr (..), BCOPtr (..), CompiledByteCode (..), ItblEnv, UnlinkedBCO (..))
+import GHC.Core.ConLike (ConLike (RealDataCon))
+import GHC.Platform.Profile (Profile)
+import GHC.Types.TyThing (TyThing (AConLike))
+import GHC.Types.TypeEnv (TypeEnv, lookupTypeEnv)
+import GHC.Unit.Home.ModInfo (HomeModInfo (..))
+import GHC.Unit.Module.ModDetails (ModDetails (..))
+import GhcServer.Build.InterpAllocations (
+  ConInfoTable,
+  allocConInfoTable,
+  allocString,
+  allocStrings,
+  conInfoTable,
+  readLocalStrings,
+  readStrings,
+  rebuildItbls,
+  )
 import qualified GHC.Data.FastString as FastString
 import GHC.Data.FlatBag (elemsFlatBag, fromList)
 import GHC.Driver.Env (HscEnv, hsc_NC)
@@ -87,7 +112,9 @@ import GHC.Linker.Types (Linkable (..), LinkablePart (..))
 import qualified GHC.Types.Name as Name
 import GHC.Types.Name (Name)
 import qualified GHC.Types.Name.Cache as Name.Cache
-import GHC.Types.Name.Env (emptyNameEnv, isEmptyNameEnv)
+import GHC.Types.Name.Env (NameEnv, lookupNameEnv, mkNameEnv, nonDetNameEnvElts)
+import GHC.Unit.Home.ModInfo (HomeModLinkable (..))
+import Data.Foldable (toList)
 import qualified GHC.Types.Name.Occurrence as Occ
 import GHC.Types.Name.Occurrence (NameSpace, OccName)
 import GHC.Types.Unique (getKey)
@@ -159,11 +186,12 @@ data MirrorName
 -- fresh 'Name's minted for them, so that references to a local binder stay consistent with its definition.
 data Rehydrate = Rehydrate {
   hscEnv :: HscEnv,
+  target :: Module,
   locals :: IORef (Map Word64 Name)
 }
 
-newRehydrate :: HscEnv -> IO Rehydrate
-newRehydrate hscEnv = Rehydrate hscEnv <$> newIORef Map.empty
+newRehydrate :: HscEnv -> Module -> IO Rehydrate
+newRehydrate hscEnv target = Rehydrate hscEnv target <$> newIORef Map.empty
 
 mirrorName :: Name -> MirrorName
 mirrorName n =
@@ -201,9 +229,11 @@ data MirrorBCONPtr
   | MirrorBCONStr [Word8]
   deriving stock (Show)
 
-mirrorBCONPtr :: BCONPtr -> MirrorBCONPtr
-mirrorBCONPtr = \case
-  BCONPtrWord w -> MirrorBCONWord w
+mirrorBCONPtr :: Map Word ShortByteString -> BCONPtr -> MirrorBCONPtr
+mirrorBCONPtr localStrs = \case
+  BCONPtrWord w
+    | Just s <- Map.lookup w localStrs -> MirrorBCONStr (ShortByteString.unpack s)
+    | otherwise -> MirrorBCONWord w
   BCONPtrLbl fs -> MirrorBCONLbl (FastString.unpackFS fs)
   BCONPtrItbl n -> MirrorBCONItbl (mirrorName n)
   BCONPtrAddr n -> MirrorBCONAddr (mirrorName n)
@@ -215,7 +245,7 @@ rehydrateBCONPtr env = \case
   MirrorBCONLbl s -> pure (BCONPtrLbl (FastString.mkFastString s))
   MirrorBCONItbl mn -> BCONPtrItbl <$> rehydrateName env mn
   MirrorBCONAddr mn -> BCONPtrAddr <$> rehydrateName env mn
-  MirrorBCONStr ws -> pure (BCONPtrStr (Data.ByteString.pack ws))
+  MirrorBCONStr ws -> BCONPtrWord <$> allocString env.hscEnv (Data.ByteString.pack ws)
 
 -- | Mirror of 'GHC.ByteCode.Types.BCOPtr'. 'BCOPtrPrimOp' is kept verbatim (a plain enum, no pinned data, no
 -- 'Name'). 'BCOPtrBreakArray' has no mirror -- its presence makes the enclosing 'UnlinkedBCO' (and hence the
@@ -227,11 +257,11 @@ data MirrorBCOPtr
 
 -- | 'BCOPtrBreakArray' has no representation here: encountering one during mirroring aborts the whole
 -- enclosing 'UnlinkedBCO' (returned as 'Nothing' from 'mirrorBCOPtr').
-mirrorBCOPtr :: BCOPtr -> Maybe MirrorBCOPtr
-mirrorBCOPtr = \case
+mirrorBCOPtr :: Map Word ShortByteString -> BCOPtr -> Maybe MirrorBCOPtr
+mirrorBCOPtr localStrs = \case
   BCOPtrName n -> Just (MirrorBCOName (mirrorName n))
   BCOPtrPrimOp op -> Just (MirrorBCOPrimOp op)
-  BCOPtrBCO bco -> MirrorBCOBCO <$> mirrorUnlinkedBCO bco
+  BCOPtrBCO bco -> MirrorBCOBCO <$> mirrorUnlinkedBCO localStrs bco
   BCOPtrBreakArray _ -> Nothing
 
 rehydrateBCOPtr :: Rehydrate -> MirrorBCOPtr -> IO BCOPtr
@@ -250,16 +280,17 @@ data MirrorUnlinkedBCO = MirrorUnlinkedBCO {
 }
 
 -- | 'Nothing' if 'unlinkedBCOPtrs' contains an unmirrorable 'GHC.ByteCode.Types.BCOPtrBreakArray' anywhere
--- (including transitively, through nested 'BCOPtrBCO's).
-mirrorUnlinkedBCO :: UnlinkedBCO -> Maybe MirrorUnlinkedBCO
-mirrorUnlinkedBCO u = do
-  ptrs <- traverse mirrorBCOPtr (elemsFlatBag u.unlinkedBCOPtrs)
+-- (including transitively, through nested 'BCOPtrBCO's). Words found in @localStrs@ are local string literals,
+-- see 'bcoLitWords'.
+mirrorUnlinkedBCO :: Map Word ShortByteString -> UnlinkedBCO -> Maybe MirrorUnlinkedBCO
+mirrorUnlinkedBCO localStrs u = do
+  ptrs <- traverse (mirrorBCOPtr localStrs) (elemsFlatBag u.unlinkedBCOPtrs)
   pure MirrorUnlinkedBCO {
     mirrorBCOName = mirrorName u.unlinkedBCOName,
     mirrorBCOArity = u.unlinkedBCOArity,
     mirrorBCOInstrs = u.unlinkedBCOInstrs,
     mirrorBCOBitmap = u.unlinkedBCOBitmap,
-    mirrorBCOLits = mirrorBCONPtr <$> elemsFlatBag u.unlinkedBCOLits,
+    mirrorBCOLits = mirrorBCONPtr localStrs <$> elemsFlatBag u.unlinkedBCOLits,
     mirrorBCOPtrs = ptrs
   }
 
@@ -277,36 +308,106 @@ rehydrateUnlinkedBCO env m = do
     unlinkedBCOPtrs = fromList (fromIntegral (length ptrs)) ptrs
   }
 
--- | Mirror of 'GHC.ByteCode.Types.CompiledByteCode'. Only carries the top-level 'UnlinkedBCO's; see the
--- 'rehydrateCompiledByteCode' docs for what is dropped.
+-- | Mirror of 'GHC.ByteCode.Types.CompiledByteCode'. Carries the top-level 'UnlinkedBCO's plus descriptions of
+-- the interpreter allocations referenced by them (see "GhcServer.Build.InterpAllocations").
 data MirrorCompiledByteCode = MirrorCompiledByteCode {
-  mirrorBCOs :: [MirrorUnlinkedBCO]
+  mirrorBCOs :: [MirrorUnlinkedBCO],
+  mirrorStrs :: [(MirrorName, ShortByteString)],
+  mirrorItbls :: MirrorItbls
 }
 
+-- | Info tables, either serialized as 'MkConInfoTable' arguments or rebuilt by the importing process from its own
+-- 'TyCon's for the module. See 'serializeItbls'.
+data MirrorItbls
+  = MirrorItblsSerialized [(MirrorName, ConInfoTable)]
+  | MirrorItblsRebuild
+
+-- | Manual toggle: 'True' serializes info table descriptions computed in the exporting process, 'False' makes
+-- the importing process rebuild them from the module's 'TyCon's in its home unit graph (which requires the
+-- interface to be loaded there).
+serializeItbls :: Bool
+serializeItbls = True
+
+-- | Data from the exporting process needed to describe a module's interpreter allocations.
+data MirrorSource = MirrorSource {
+  profile :: Profile,
+  typeEnv :: TypeEnv,
+  topStrings :: NameEnv ShortByteString,
+  -- | Local string literals, keyed by the address baked into the instruction stream. See 'readLocalStrings'.
+  localStrings :: Map Word ShortByteString
+}
+
+-- | Reads the string literals of the module's bytecode from memory, see 'readStrings' and 'readLocalStrings'.
+mirrorSourceFor :: Profile -> HomeModInfo -> IO MirrorSource
+mirrorSourceFor profile hmi = do
+  topStrings <- foldMap readStrings (bc_strs <$> cbcs)
+  localStrings <- readLocalStrings (foldMap bcoLitWords (foldMap (elemsFlatBag . bc_bcos) cbcs))
+  pure MirrorSource {profile, typeEnv = hmi.hm_details.md_types, topStrings, localStrings}
+  where
+    cbcs = [cbc | l <- toList hmi.hm_linkable.homeMod_bytecode, BCOs cbc <- toList l.linkableParts]
+
+-- | All 'BCONPtrWord' literals of a BCO, including nested ones. After assembly, local string literals are
+-- indistinguishable from numeric ones at this level (see Note [Allocating string literals] in
+-- "GHC.ByteCode.Asm"), so 'readLocalStrings' classifies them by address.
+bcoLitWords :: UnlinkedBCO -> [Word]
+bcoLitWords u =
+  [w | BCONPtrWord w <- elemsFlatBag u.unlinkedBCOLits]
+  ++ [w | BCOPtrBCO b <- elemsFlatBag u.unlinkedBCOPtrs, w <- bcoLitWords b]
+
+mirrorStr :: MirrorSource -> Name -> Maybe (MirrorName, ShortByteString)
+mirrorStr src n = (mirrorName n,) <$> lookupNameEnv src.topStrings n
+
+mirrorItbl :: MirrorSource -> Name -> Maybe (MirrorName, ConInfoTable)
+mirrorItbl src n =
+  lookupTypeEnv src.typeEnv n >>= \case
+    AConLike (RealDataCon dc) -> Just (mirrorName n, conInfoTable src.profile dc)
+    _ -> Nothing
+
+mirrorItbls :: MirrorSource -> ItblEnv -> Maybe MirrorItbls
+mirrorItbls src itbls
+  | serializeItbls = MirrorItblsSerialized <$> traverse (mirrorItbl src . fst) (nonDetNameEnvElts itbls)
+  | otherwise = Just MirrorItblsRebuild
+
 -- | Mirror of 'GHC.ByteCode.Types.CompiledByteCode'. Drops 'bc_spt_entries' (see module docs). 'Nothing' if
--- 'bc_breaks' is set, if any of 'bc_itbls'\/'bc_strs'\/'bc_ffis' is non-empty (process-local interpreter
--- allocations, see module docs), or if any contained 'UnlinkedBCO' is unmirrorable.
-mirrorCompiledByteCode :: CompiledByteCode -> Maybe MirrorCompiledByteCode
-mirrorCompiledByteCode cbc
+-- 'bc_breaks' is set, if 'bc_ffis' is non-empty, if a string literal or info table can't be described (see
+-- "GhcServer.Build.InterpAllocations"), or if any contained 'UnlinkedBCO' is unmirrorable.
+mirrorCompiledByteCode :: MirrorSource -> CompiledByteCode -> Maybe MirrorCompiledByteCode
+mirrorCompiledByteCode src cbc
   | Just _ <- cbc.bc_breaks = Nothing
-  | not (isEmptyNameEnv cbc.bc_strs) = Nothing
-  | not (isEmptyNameEnv cbc.bc_itbls) = Nothing
   | not (null cbc.bc_ffis) = Nothing
   | otherwise = do
-      bcos <- traverse mirrorUnlinkedBCO (elemsFlatBag cbc.bc_bcos)
-      pure MirrorCompiledByteCode { mirrorBCOs = bcos }
+      bcos <- traverse (mirrorUnlinkedBCO src.localStrings) (elemsFlatBag cbc.bc_bcos)
+      strs <- traverse (mirrorStr src . fst) (nonDetNameEnvElts cbc.bc_strs)
+      itbls <- mirrorItbls src cbc.bc_itbls
+      pure MirrorCompiledByteCode {mirrorBCOs = bcos, mirrorStrs = strs, mirrorItbls = itbls}
 
--- | Reconstructs a 'CompiledByteCode' with empty 'bc_itbls'\/'bc_strs'\/'bc_ffis'\/'bc_spt_entries' and no
--- breakpoints ('bc_breaks' = 'Nothing'). See module docs for why this is expected to be safe: those tables are
--- re-populated by GHC's own bytecode linker from 'Name's on demand, not baked into the instruction encoding.
+rehydrateStrs :: Rehydrate -> [(MirrorName, ShortByteString)] -> IO AddrEnv
+rehydrateStrs ctx strs = do
+  names <- traverse (rehydrateName ctx . fst) strs
+  ptrs <- allocStrings ctx.hscEnv (fromShort . snd <$> strs)
+  pure (mkNameEnv [(n, (n, p)) | (n, p) <- zip names ptrs])
+
+rehydrateItbls :: Rehydrate -> MirrorItbls -> IO ItblEnv
+rehydrateItbls ctx = \case
+  MirrorItblsSerialized itbls ->
+    mkNameEnv <$> for itbls \ (mn, t) -> do
+      n <- rehydrateName ctx mn
+      p <- allocConInfoTable ctx.hscEnv t
+      pure (n, (n, p))
+  MirrorItblsRebuild -> rebuildItbls ctx.hscEnv ctx.target
+
+-- | Reconstructs a 'CompiledByteCode', allocating string literals and info tables in the importing process's
+-- interpreter. 'bc_ffis'\/'bc_spt_entries' are empty and 'bc_breaks' is 'Nothing' (see module docs).
 rehydrateCompiledByteCode :: Rehydrate -> MirrorCompiledByteCode -> IO CompiledByteCode
 rehydrateCompiledByteCode env m = do
   bcos <- traverse (rehydrateUnlinkedBCO env) m.mirrorBCOs
+  strs <- rehydrateStrs env m.mirrorStrs
+  itbls <- rehydrateItbls env m.mirrorItbls
   pure CompiledByteCode {
     bc_bcos = fromList (fromIntegral (length bcos)) bcos,
-    bc_itbls = emptyNameEnv,
+    bc_itbls = itbls,
     bc_ffis = [],
-    bc_strs = emptyNameEnv,
+    bc_strs = strs,
     bc_breaks = Nothing,
     bc_spt_entries = []
   }
@@ -317,9 +418,9 @@ data MirrorLinkablePart
 
 -- | 'Nothing' if any part is a 'BCOs' with an unmirrorable 'CompiledByteCode', or a 'CoreBindings'\/'LazyBCOs'
 -- part (see module docs) -- either aborts sharing for the *entire* enclosing 'Linkable'.
-mirrorLinkablePart :: LinkablePart -> Maybe MirrorLinkablePart
-mirrorLinkablePart = \case
-  BCOs cbc -> MirrorBCOsPart <$> mirrorCompiledByteCode cbc
+mirrorLinkablePart :: MirrorSource -> LinkablePart -> Maybe MirrorLinkablePart
+mirrorLinkablePart src = \case
+  BCOs cbc -> MirrorBCOsPart <$> mirrorCompiledByteCode src cbc
   part@(DotO _ _) -> Just (MirrorRawPart part)
   part@(DotA _) -> Just (MirrorRawPart part)
   part@(DotDLL _) -> Just (MirrorRawPart part)
@@ -337,9 +438,9 @@ data MirrorLinkable = MirrorLinkable {
 }
 
 -- | 'Nothing' if any part of the 'Linkable' is unmirrorable (see 'mirrorLinkablePart').
-mirrorLinkable :: Linkable -> Maybe MirrorLinkable
-mirrorLinkable l = do
-  parts <- traverse mirrorLinkablePart l.linkableParts
+mirrorLinkable :: MirrorSource -> Linkable -> Maybe MirrorLinkable
+mirrorLinkable src l = do
+  parts <- traverse (mirrorLinkablePart src) l.linkableParts
   pure MirrorLinkable { mirrorLinkableTime = l.linkableTime, mirrorLinkableParts = parts }
 
 -- | Reconstructs a 'Linkable' for the given (already-resolved, real) target 'Module' -- callers already know
@@ -347,6 +448,6 @@ mirrorLinkable l = do
 -- so there is no need to round-trip 'Module' identity through a 'MirrorModule'.
 rehydrateLinkable :: HscEnv -> Module -> MirrorLinkable -> IO Linkable
 rehydrateLinkable env target m = do
-  ctx <- newRehydrate env
+  ctx <- newRehydrate env target
   parts <- traverse (rehydrateLinkablePart ctx) m.mirrorLinkableParts
   pure Linkable { linkableTime = m.mirrorLinkableTime, linkableModule = target, linkableParts = parts }

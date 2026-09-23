@@ -54,10 +54,12 @@ import GHC.Driver.Env (HscEnv)
 import GHC.Linker.Types (Linkable)
 import GHC.Unit.Home.Graph (HomeUnitEnv (..), HomeUnitGraph, UnitEnvGraph (..), homeUnitEnv_hpt)
 import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..))
+import Data.Maybe (catMaybes)
 import GHC.Unit.Home.PackageTable (concatHpt)
 import GHC.Unit.Module.ModIface (mi_module)
 import GHC.Unit.Types (UnitId, moduleName, stringToUnitId, unitIdString)
-import GhcServer.Build.BytecodeMirror (MirrorLinkable, mirrorLinkable, rehydrateLinkable)
+import GhcServer.Build.BytecodeMirror (MirrorLinkable, mirrorLinkable, mirrorSourceFor, rehydrateLinkable)
+import GHC.Driver.DynFlags (targetProfile)
 import Prelude hiding (log)
 import System.Directory (getFileSize, removeFile)
 import System.IO (IOMode (ReadMode, ReadWriteMode), hSetFileSize, openBinaryFile)
@@ -160,14 +162,15 @@ readHeader base = do
 collectBytecode :: HomeUnitGraph -> IO BytecodeMap
 collectBytecode hug = do
   perUnit <- forM (Map.toList (unitEnv_graph hug)) \ (uid, hue) -> do
-    entries <- concatHpt (bytecodeEntry uid) (homeUnitEnv_hpt hue)
-    pure entries
+    hmis <- concatHpt pure (homeUnitEnv_hpt hue)
+    catMaybes <$> traverse (bytecodeEntry uid (targetProfile (homeUnitEnv_dflags hue))) hmis
   pure (Map.fromList (concat perUnit))
   where
-    bytecodeEntry uid hmi =
-      case hmi.hm_linkable.homeMod_bytecode >>= mirrorLinkable of
-        Just mirrored -> [((unitIdString uid, moduleNameString (moduleName (mi_module hmi.hm_iface))), mirrored)]
-        Nothing -> []
+    bytecodeEntry uid profile hmi = do
+      src <- mirrorSourceFor profile hmi
+      pure do
+        mirrored <- hmi.hm_linkable.homeMod_bytecode >>= mirrorLinkable src
+        pure ((unitIdString uid, moduleNameString (moduleName (mi_module hmi.hm_iface))), mirrored)
 
 -- | Compact 'collectBytecode''s result and write it into a fresh @\/dev\/shm@ file, returning its path. Returns
 -- 'Nothing' (and creates no file) if there is nothing to share, which the caller should treat as "the child

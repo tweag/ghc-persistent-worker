@@ -58,6 +58,7 @@ library
     GhcServer.Build.Propagate
     GhcServer.Build.Schedule
     GhcServer.Build.BytecodeMirror
+    GhcServer.Build.InterpAllocations
     GhcServer.Build.SharedBytecode
     GhcServer.Cabal
     GhcServer.Cabal.ExtDeps
@@ -101,6 +102,7 @@ library
     ghc-paths,
     ghc-worker,
     ghc-worker-test-common,
+    ghci,
     grapesy ^>=1.1,
     optparse-applicative,
     parsec,

@@ -353,6 +353,7 @@
           "ghc-paths"
           "ghc-worker"
           "ghc-worker-test-common"
+          "ghci"
           "grapesy"
           "optparse-applicative"
           "parsec"
