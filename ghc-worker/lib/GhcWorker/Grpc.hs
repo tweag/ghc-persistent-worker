@@ -156,6 +156,8 @@ apiRequest chan stateVar recompile = \case
     pure (ApiFailure "Cleaning not supported")
   ToggleFeature {feature} ->
     ApiSuccess () <$ toggleFeature stateVar feature
+  TerminateExecutor {} ->
+    pure (ApiFailure "Executor subprocesses not supported by this worker")
 
 -- | Implementation of the unified @Send@ RPC: decodes the JSON 'Instr.Command' payload, runs it via the supplied
 -- dispatcher, and JSON-encodes the resulting 'Response' back into an 'Instr.CommandResponse'. Exported

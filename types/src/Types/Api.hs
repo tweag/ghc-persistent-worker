@@ -36,6 +36,15 @@ newtype ModuleName =
   deriving stock (Eq, Show)
   deriving newtype (IsString, Ord, Binary, FromJSON, ToJSON)
 
+-- | Identifier for a persistent execute-task subprocess (see 'Types.State.WorkerState.executors' and
+-- 'GhcServer.Build.Executor'), specified by the client/UI when triggering an execute task. The @ghc-ui@ default
+-- is the target unit's name (see 'Ghc.Ui.Event.Main'), but any text is accepted, allowing multiple executors per
+-- unit or one executor shared across units.
+newtype ExecutorId =
+  ExecutorId { text :: Text }
+  deriving stock (Eq, Ord, Show)
+  deriving newtype (IsString, Binary, FromJSON, ToJSON)
+
 fromGhcModuleName :: GHC.ModuleName -> ModuleName
 fromGhcModuleName name =
   ModuleName (Text.pack (moduleNameString name))
@@ -134,9 +143,10 @@ data TaskKind =
   -- We probably want something like "rebuild only target" vs "rebuild all deps".
   Build { rebuild :: Bool }
   |
-  -- | @process@ mirrors the client's @--process@ flag: whether this target's execute tasks should run their
-  -- subprocess evaluation (see 'GhcServer.Build.Process') instead of in-process.
-  Execute { process :: Bool }
+  -- | Run this target's execute tasks via a persistent, gRPC-addressable subprocess (see
+  -- 'GhcServer.Build.Executor') identified by 'ExecutorId', instead of in-process. 'Nothing' runs in-process, as
+  -- before the executor subsystem was introduced.
+  Execute { executor :: Maybe ExecutorId }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary, FromJSON, ToJSON)
 
@@ -154,6 +164,9 @@ data ApiRequest a where
   Clean :: { target :: Target } -> ApiRequest ()
   -- | Toggle a single 'Feature', sent by the @ghc-ui@ feature-flags panel when a checkbox is toggled.
   ToggleFeature :: { feature :: Feature } -> ApiRequest ()
+  -- | Terminate a persistent executor subprocess (see 'GhcServer.Build.Executor.terminateExecutor'), sent by the
+  -- @ghc-ui@ executors panel. A no-op (successful) if no executor with the given id is currently running.
+  TerminateExecutor :: { executor :: ExecutorId } -> ApiRequest ()
 
 deriving stock instance Eq (ApiRequest a)
 deriving stock instance Show (ApiRequest a)
@@ -171,6 +184,8 @@ instance ToJSON SomeApiRequest where
       tagged "Clean" ["target" .= toJSON target]
     ToggleFeature {feature} ->
       tagged "ToggleFeatureFlag" ["feature" .= toJSON feature]
+    TerminateExecutor {executor} ->
+      tagged "TerminateExecutor" ["executor" .= toJSON executor]
     where
       tagged (tag :: Text) fields = object $ ("tag" .= tag) : fields
 
@@ -190,6 +205,9 @@ instance FromJSON SomeApiRequest where
         "ToggleFeatureFlag" -> do
           feature <- o .: "feature"
           pure (SomeApiRequest ToggleFeature {feature})
+        "TerminateExecutor" -> do
+          executor <- o .: "executor"
+          pure (SomeApiRequest TerminateExecutor {executor})
         tag ->
           fail (unpack ("Invalid tag: " <> tag))
 

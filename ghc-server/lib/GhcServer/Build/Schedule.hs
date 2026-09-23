@@ -24,7 +24,7 @@ import GHC.Unit.Types (UnitId, unitIdString)
 import GhcServer.Data.Unit (Project (..), moduleHiPath, unitId)
 import System.OsPath (OsPath)
 import Test.Scheduler (Generation, Phase (..), Task (..), initialGeneration)
-import Types.Api (UnitName (..))
+import Types.Api (ExecutorId, UnitName (..))
 import Types.CachedDeps (
   CachedDep (..),
   CachedDeps (..),
@@ -122,7 +122,24 @@ lookupUnitName nameMap uid =
 -- The @runMeta@ predicate carries the Phase 0 analysis decision of whether the unit's
 -- metadata step must actually run, carried as the task's own 'Task.value' (read directly by
 -- dispatch) rather than baked into the key, since it is only meaningful for this task kind.
-metadataTasks :: (UnitName -> Bool) -> [(UnitName, [UnitName])] -> [Task TaskKey 'Resolved Bool]
+-- | The scheduler's uniform per-task value type (see 'Test.Scheduler.Task.value'), whose two fields are each
+-- meaningful for exactly one 'TaskKey' constructor and a dead placeholder for every other: 'runMeta' for
+-- 'MetaTask' (the Phase 0 decision of whether the unit's metadata step must actually run), 'executor' for
+-- 'ExecuteModule'\/'PendingExecute' (which persistent executor subprocess, if any, should run this unit's
+-- execute tasks -- see 'GhcServer.Build.Executor'). Bundled into one record, rather than a sum type, because the
+-- scheduler's generic machinery requires a single uniform value type across every task key.
+data TaskValue =
+  TaskValue {
+    runMeta :: Bool,
+    executor :: Maybe ExecutorId
+  }
+  deriving stock (Eq, Show)
+
+-- | Dead placeholder value for task kinds that don't use either field of 'TaskValue'.
+noTaskValue :: TaskValue
+noTaskValue = TaskValue {runMeta = False, executor = Nothing}
+
+metadataTasks :: (UnitName -> Bool) -> [(UnitName, [UnitName])] -> [Task TaskKey 'Resolved TaskValue]
 metadataTasks runMeta =
   map metaTask
   where
@@ -131,7 +148,7 @@ metadataTasks runMeta =
         key = MetaTask name,
         deps = Set.fromList [MetaTask dep | dep <- depUnits],
         enabled = True,
-        value = runMeta name
+        value = noTaskValue {runMeta = runMeta name}
       }
 
 -- | Create pending compile tasks from a unit's source files.
@@ -149,14 +166,14 @@ metadataTasks runMeta =
 -- The task's own 'Task.value' is unused ('resolveTask' promotes a pending task by carrying its
 -- own 'Task.value' forward, so nothing ever reads this one); it is set to @False@ as a dead
 -- placeholder purely to satisfy the uniform value type.
-compileTasksFromSources :: UnitName -> (OsPath -> Bool) -> [OsPath] -> [Task TaskKey 'Pending Bool]
+compileTasksFromSources :: UnitName -> (OsPath -> Bool) -> [OsPath] -> [Task TaskKey 'Pending TaskValue]
 compileTasksFromSources name isEnabled =
   fmap \ src ->
     Task {
       key = PendingSource name src,
       deps = Set.singleton (MetaTask name),
       enabled = isEnabled src,
-      value = False
+      value = noTaskValue
     }
 
 -- | Create pending execute tasks from a unit's source files.
@@ -171,8 +188,8 @@ compileTasksFromSources name isEnabled =
 -- ('GhcServer.Build.Classify.classifyBuildRequest') and stored directly as the pending task's own
 -- 'Task.value', so that 'resolutionsFromModuleMap' can recover it later from the scheduler's pending
 -- pool when constructing the corresponding 'ExecuteModule' resolution.
-executeTasksFromSources :: UnitName -> Bool -> [OsPath] -> [Task TaskKey 'Pending Bool]
-executeTasksFromSources name process =
+executeTasksFromSources :: UnitName -> Maybe ExecutorId -> [OsPath] -> [Task TaskKey 'Pending TaskValue]
+executeTasksFromSources name executor =
   map mkTask
   where
     mkTask src =
@@ -180,7 +197,7 @@ executeTasksFromSources name process =
         key = PendingExecute name src,
         deps = Set.singleton (MetaTask name),
         enabled = True,
-        value = process
+        value = noTaskValue {executor}
       }
 
 -- | Resolve dependencies of a module graph node to pending 'TaskKey's.

@@ -19,7 +19,7 @@ import Data.Text (Text)
 import Data.Text.Encoding (decodeUtf8Lenient)
 import GHC (ModuleName, mkModuleName, moduleNameString)
 import GhcServer.Build (Build (..), BuildResult (..), awaitBuild, newBuild, newBuildState, scheduleBatch)
-import GhcServer.Build.Schedule (BuildExt (..), ModuleKey (..), TaskKey (..), emptyBuildExt, taskUnit)
+import GhcServer.Build.Schedule (BuildExt (..), ModuleKey (..), TaskKey (..), TaskValue, emptyBuildExt, taskUnit)
 import GhcServer.Cabal (discoverCabalProject, findCabalFile)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (newBuildEvents)
@@ -41,14 +41,14 @@ import System.OsPath (OsPath, (</>))
 import System.OsPath.Extra (toOsPath)
 import Test.Scheduler (SchedulerResources (..), SchedulerState (..))
 import qualified Text.Parsec as Parsec
-import Types.Api (ApiResponse (..), HomeModule (..), Target (..), UnitName (..), toGhcModuleName)
+import Types.Api (ApiResponse (..), ExecutorId (..), HomeModule (..), Target (..), UnitName (..), toGhcModuleName)
 import qualified Types.Args as Args
 import Types.Args (emptyArgs)
 import Types.FeatureFlags (Feature (..))
 import Types.Grpc (CommandEnv (..), RequestArgs (..))
 import Types.Log (Logger)
 import Types.Settings (featureOn)
-import Types.State (WorkerState (settings))
+import Types.State (WorkerState (executors, settings))
 
 -- | Parsed schedule command with optional flags.
 data ScheduleCommand =
@@ -161,7 +161,7 @@ data Flags =
     wait :: Bool,
     recompile :: Bool,
     rebuild :: Bool,
-    processFlag :: Bool
+    executorId :: Maybe ExecutorId
   }
 
 -- | Parse schedule arguments from the client's command line.
@@ -189,20 +189,20 @@ parseScheduleArgs project = \case
       recompile = flags.recompile || flags.rebuild
       rebuild = flags.rebuild
     Right ScheduleCommand {
-      request = ScheduleRequest {steps, recompile, rebuild, process = flags.processFlag},
+      request = ScheduleRequest {steps, recompile, rebuild, executor = flags.executorId},
       scheduleWait = flags.wait
     }
   other ->
     Left ("Unknown command: " ++ unwords other)
   where
-    extractFlags = go Flags {wait = False, recompile = False, rebuild = False, processFlag = False}
+    extractFlags = go Flags {wait = False, recompile = False, rebuild = False, executorId = Nothing}
 
     go :: Flags -> [String] -> (Flags, [String])
     go acc = \case
       "--wait" : ts -> go acc {wait = True} ts
       "--recompile" : ts -> go acc {recompile = True} ts
       "--rebuild" : ts -> go acc {rebuild = True} ts
-      "--process" : ts -> go acc {processFlag = True} ts
+      "--executor" : eid : ts -> go acc {executorId = Just (ExecutorId (Text.pack eid))} ts
       ts -> (acc, ts)
 
 -- | Format a build result as a human-readable report.
@@ -375,7 +375,7 @@ notModuleTask key = \case
 -- | Run a transformation on the scheduler's bookkeeping state.
 modifySchedulerState ::
   Build ->
-  (SchedulerState TaskKey Bool String BuildExt -> SchedulerState TaskKey Bool String BuildExt) ->
+  (SchedulerState TaskKey TaskValue String BuildExt -> SchedulerState TaskKey TaskValue String BuildExt) ->
   IO ()
 modifySchedulerState build f =
   atomically (modifyTVar' schedulerVar f)
@@ -388,8 +388,8 @@ modifySchedulerState build f =
 retainTasks ::
   (forall p. TaskKey p -> Bool) ->
   (ModuleKey -> Bool) ->
-  SchedulerState TaskKey Bool String BuildExt ->
-  SchedulerState TaskKey Bool String BuildExt
+  SchedulerState TaskKey TaskValue String BuildExt ->
+  SchedulerState TaskKey TaskValue String BuildExt
 retainTasks keepTask keepModule state =
   state
     { completed = filterTasks state.completed
@@ -448,10 +448,14 @@ invalidateModuleState build unit modName =
 -- KB entry).
 resetWorkerState :: BuildEnv -> IO ()
 resetWorkerState env = do
-  currentFeatures <- (.settings) <$> readMVar env.stateVar
-  freshVar <- newState currentFeatures
+  current <- readMVar env.stateVar
+  freshVar <- newState current.settings
   fresh <- readMVar freshVar
-  modifyMVar_ env.stateVar (const (pure fresh))
+  -- Preserve running executor subprocesses across the reset: a whole-project clean only invalidates the
+  -- in-memory module graph/HPT/HUG, not persistent executor children, which are keyed by 'ExecutorId' and
+  -- explicitly terminated via 'GhcServer.Build.Executor.terminateExecutor' (or the @TerminateExecutor@ API
+  -- request), not implicitly by state resets.
+  modifyMVar_ env.stateVar (const (pure fresh {executors = current.executors}))
 
 -- | Handle a 'Clean' command: remove cache\/output directories for the requested scope and invalidate the
 -- corresponding scheduler\/in-memory build state so a subsequent build doesn't skip work it can no longer

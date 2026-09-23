@@ -50,6 +50,7 @@ library
     Types.Orchestration
     Types.Settings
     Types.State
+    Types.State.Executor
     Types.State.Make
     Types.Target
     Types.Text
@@ -66,6 +67,7 @@ library
     ghc,
     ghc-paths,
     os-string,
+    process,
     split,
     text,
     time

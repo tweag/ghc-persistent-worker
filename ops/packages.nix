@@ -356,6 +356,7 @@
           "grapesy"
           "optparse-applicative"
           "parsec"
+          "process"
           "silently"
           "stm"
           "text"

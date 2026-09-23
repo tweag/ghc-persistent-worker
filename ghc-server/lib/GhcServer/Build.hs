@@ -32,6 +32,7 @@ import GhcServer.Build.Schedule (
   BuildExt (..),
   ModuleKey (..),
   TaskKey (..),
+  TaskValue,
   emptyBuildExt,
   )
 import GhcServer.Cache (mkBuildCache)
@@ -59,7 +60,7 @@ import Types.State (WorkerState)
 -- Created once, supports multiple 'scheduleBatch' calls.
 data Build =
   Build {
-    scheduler :: SchedulerResources ScheduleRequest TaskKey Bool String BuildExt,
+    scheduler :: SchedulerResources ScheduleRequest TaskKey TaskValue String BuildExt,
     thread :: Async Void,
     -- | The environment, retained for digest commits at batch completion.
     env :: BuildEnv,

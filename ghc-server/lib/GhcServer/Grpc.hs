@@ -17,6 +17,7 @@ import qualified Data.Text as Text
 import Data.Text (pack)
 import GHC (moduleNameString)
 import GhcServer.Build (Build (..), awaitBuild, scheduleBatch)
+import GhcServer.Build.Executor (terminateExecutor)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.Request (ScheduleRequest (..), UnitRequest (..))
 import GhcServer.Data.Unit (ClientModule (..), Project (..), Unit (..))
@@ -123,9 +124,9 @@ triggerTask mchan build project TaskTrigger {target, task} = do
     steps = targetToUnitRequest project target task
 
     request = case task of
-      TaskKind.Metadata -> ScheduleRequest {steps, recompile = False, rebuild = False, process = False}
-      TaskKind.Build rebuild -> ScheduleRequest {steps, recompile = rebuild, rebuild, process = False}
-      Execute {process} -> ScheduleRequest {steps = map toExecuteStep steps, recompile = False, rebuild = False, process}
+      TaskKind.Metadata -> ScheduleRequest {steps, recompile = False, rebuild = False, executor = Nothing}
+      TaskKind.Build rebuild -> ScheduleRequest {steps, recompile = rebuild, rebuild, executor = Nothing}
+      Execute {executor} -> ScheduleRequest {steps = map toExecuteStep steps, recompile = False, rebuild = False, executor}
 
     toExecuteStep (name, unitReq) = (name, executeVariant unitReq)
 
@@ -154,6 +155,7 @@ runCommand mchan build env project = \case
     pure (ApiSuccess ())
   Clean target -> runClean build env target
   ToggleFeature {feature} -> ApiSuccess () <$ Worker.toggleFeature env.stateVar feature
+  TerminateExecutor {executor} -> ApiSuccess () <$ terminateExecutor env executor
 
 -- | Implementation of the unified 'Api' RPC: JSON-decodes the 'Command' from the request 'GS.Json'\'s
 -- @payload@ field, runs it via the supplied dispatcher, and JSON-encodes the resulting 'Response'

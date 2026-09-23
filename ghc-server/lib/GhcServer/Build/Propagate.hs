@@ -16,6 +16,7 @@ import Data.Foldable (for_)
 import Data.IORef (atomicModifyIORef')
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
+import Data.Maybe (isJust)
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import Data.Text (Text)
@@ -25,13 +26,14 @@ import GHC.Utils.Outputable (ppr, (<+>))
 import GhcServer.Build.Compile (compileSingleModule)
 import GhcServer.Build.Diff (UnitDiff (..), changedModuleKeys, moduleGraphDelta, staleClosure)
 import GhcServer.Build.Execute (executeModuleTask)
+import GhcServer.Build.Executor (executeModuleTaskExecutor)
 import GhcServer.Build.Metadata (runMetadata)
-import GhcServer.Build.Process (executeModuleTaskProcess)
 import GhcServer.Build.Schedule (
   BuildExt (..),
   ModuleInfo (..),
   ModuleKey (..),
   TaskKey (..),
+  TaskValue (..),
   buildModuleCachedDeps,
   resolutionsFromModuleMap,
   resolveFromCachedUnit,
@@ -143,7 +145,7 @@ compile ext env unit modName requestId = do
 -- The task's unit is resolved once here, so that the individual operations receive a 'Unit' rather
 -- than repeating the lookup.  Unit names that reach the scheduler without a matching project entry
 -- (they can be typed by the UI) fail their task with a diagnostic naming the unit.
-dispatchTask :: BuildEnv -> BuildExt -> Task TaskKey 'Resolved Bool -> IO (TaskResult String)
+dispatchTask :: BuildEnv -> BuildExt -> Task TaskKey 'Resolved TaskValue -> IO (TaskResult String)
 dispatchTask env ext task =
   case Map.lookup unitName env.project.units of
     Nothing -> pure (TaskFailed ("Unit not found in project: " ++ Text.unpack unitName.text))
@@ -153,7 +155,7 @@ dispatchTask env ext task =
 
     dispatch unit = case task.key of
       MetaTask name
-        | task.value -> do
+        | task.value.runMeta -> do
           requestId <- nextRequestId env
           withTaskEvents env requestId TargetUnit {name} (taskResultFromErrors . fst <$> runMetadata env unit)
         | otherwise -> skipMetadata env name
@@ -164,10 +166,10 @@ dispatchTask env ext task =
         requestId <- nextRequestId env
         let
           target = moduleEventTarget name
-          runExecute
-            | task.value = executeModuleTaskProcess env unit name
-            | otherwise = (, Nothing) <$> executeModuleTask env ext unit name requestId Nothing
-        emitTaskStart env requestId target task.value
+          runExecute = case task.value.executor of
+            Just executorId -> executeModuleTaskExecutor env executorId unit name
+            Nothing -> (, Nothing) <$> executeModuleTask env ext unit name requestId Nothing
+        emitTaskStart env requestId target (isJust task.value.executor)
         (mResult, stats) <- runExecute
         case mResult of
           -- The module has no 'main': no execution ever took place, so the scheduler task still completes
@@ -192,7 +194,7 @@ computeResolutions ::
   BuildCache ->
   BuildEnv ->
   UnitName ->
-  SchedulerState TaskKey Bool String BuildExt ->
+  SchedulerState TaskKey TaskValue String BuildExt ->
   ExceptT Text IO (Map ModuleKey ModuleInfo)
 computeResolutions cache env name _state =
   cache.loadUnit name >>= \case
@@ -213,8 +215,8 @@ propagateCompletion ::
   BuildEnv ->
   TaskKey 'Resolved ->
   TaskResult String ->
-  SchedulerState TaskKey Bool String BuildExt ->
-  IO (SchedulerState TaskKey Bool String BuildExt)
+  SchedulerState TaskKey TaskValue String BuildExt ->
+  IO (SchedulerState TaskKey TaskValue String BuildExt)
 propagateCompletion cache env (MetaTask name) (TaskSuccess _) state =
   runExceptT (computeResolutions cache env name state) >>= \case
     Left err -> do

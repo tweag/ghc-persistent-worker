@@ -50,6 +50,7 @@ library
     GhcServer.Build.Compile
     GhcServer.Build.Diff
     GhcServer.Build.Execute
+    GhcServer.Build.Executor
     GhcServer.Build.Metadata
                     GhcServer.Build.Process
                     GhcServer.Build.ProcessChild
@@ -102,6 +103,7 @@ library
     grapesy ^>=1.1,
     optparse-applicative,
     parsec,
+    process,
     silently,
     stm,
     text,

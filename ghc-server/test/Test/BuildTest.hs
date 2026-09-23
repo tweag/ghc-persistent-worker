@@ -162,7 +162,7 @@ runFreshWith :: MonadIO m => Bool -> Bool -> TestProject -> Steps -> m (BuildRes
 runFreshWith recompile rebuild tp steps = liftIO $ timedBuild do
   stateVar <- newBuildState defaultSettings
   (env, events) <- newBuildEnv tp stateVar
-  result <- runBuild 4 testTaskTimeout env ScheduleRequest {steps, recompile, rebuild, process = False}
+  result <- runBuild 4 testTaskTimeout env ScheduleRequest {steps, recompile, rebuild, executor = Nothing}
   evs <- readEvents events
   pure (result, evs)
 
@@ -209,7 +209,7 @@ runFreshWithEvents' :: MonadIO m => Bool -> Bool -> TestProject -> Steps -> m (B
 runFreshWithEvents' recompile rebuild tp steps = liftIO $ timedBuild do
   stateVar <- newBuildState defaultSettings
   (env, events) <- newBuildEnv tp stateVar
-  result <- runBuild 1 testTaskTimeout env ScheduleRequest {steps, recompile, rebuild, process = False}
+  result <- runBuild 1 testTaskTimeout env ScheduleRequest {steps, recompile, rebuild, executor = Nothing}
   evs <- readEvents events
   pure (result, evs)
 
@@ -223,7 +223,7 @@ runFreshWithState' :: MonadIO m => Bool -> Bool -> TestProject -> Steps -> m (Bu
 runFreshWithState' recompile rebuild tp steps = liftIO $ timedBuild do
   stateVar <- newBuildState defaultSettings
   (env, events) <- newBuildEnv tp stateVar
-  result <- runBuild 1 testTaskTimeout env ScheduleRequest {steps, recompile, rebuild, process = False}
+  result <- runBuild 1 testTaskTimeout env ScheduleRequest {steps, recompile, rebuild, executor = Nothing}
   evs <- readEvents events
   pure (result, evs, stateVar)
 
@@ -915,11 +915,11 @@ test_pendingThenEnable =
     (cb, evRef, _decisions) <- newTestBuild tp
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps = [(UnitName "unit0", UnitMetadata)],
-      recompile = False, rebuild = False, process = False
+      recompile = False, rebuild = False, executor = Nothing
     }
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps = [(UnitName "unit0", UnitAll)],
-      recompile = False, rebuild = False, process = False
+      recompile = False, rebuild = False, executor = Nothing
     }
     result <- liftIO (timedStop cb)
     events <- liftIO (readEvents evRef)
@@ -933,7 +933,7 @@ test_metadataOnlyLeavesTasksPending =
     (cb, evRef, _decisions) <- newTestBuild tp
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps = [(UnitName "unit0", UnitMetadata)],
-      recompile = False, rebuild = False, process = False
+      recompile = False, rebuild = False, executor = Nothing
     }
     result <- liftIO (timedStop cb)
     events <- liftIO (readEvents evRef)
@@ -947,11 +947,11 @@ test_enabledNotDowngraded =
     (cb, evRef, _decisions) <- newTestBuild tp
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps = [(UnitName "unit1", UnitAll)],
-      recompile = False, rebuild = False, process = False
+      recompile = False, rebuild = False, executor = Nothing
     }
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps = [(UnitName "unit0", UnitMetadata)],
-      recompile = False, rebuild = False, process = False
+      recompile = False, rebuild = False, executor = Nothing
     }
     result <- liftIO (timedStop cb)
     events <- liftIO (readEvents evRef)
@@ -1004,15 +1004,15 @@ test_multiBatch =
     (cb, evRef, _decisions) <- newTestBuild tp
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps = [(UnitName "unit0", UnitAll)],
-      recompile = False, rebuild = False, process = False
+      recompile = False, rebuild = False, executor = Nothing
     }
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps = [(UnitName "unit3", UnitAll)],
-      recompile = False, rebuild = False, process = False
+      recompile = False, rebuild = False, executor = Nothing
     }
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps = [(UnitName "unit1", UnitAll), (UnitName "unit2", UnitAll)],
-      recompile = False, rebuild = False, process = False
+      recompile = False, rebuild = False, executor = Nothing
     }
     result <- liftIO (timedStop cb)
     events <- liftIO (readEvents evRef)
@@ -1023,10 +1023,10 @@ test_redundantBatch :: TestTree
 test_redundantBatch =
   smallTest "redundant batch for completed units" \ tp -> do
     (cb, _, _) <- newTestBuild tp
-    liftIO $ scheduleBatch cb ScheduleRequest {steps = [], recompile = False, rebuild = False, process = False}
+    liftIO $ scheduleBatch cb ScheduleRequest {steps = [], recompile = False, rebuild = False, executor = Nothing}
     result1 <- liftIO (awaitBuild cb)
     assertSuccess "first batch" result1
-    liftIO $ scheduleBatch cb ScheduleRequest {steps = [], recompile = False, rebuild = False, process = False}
+    liftIO $ scheduleBatch cb ScheduleRequest {steps = [], recompile = False, rebuild = False, executor = Nothing}
     result2 <- liftIO (awaitBuild cb)
     assertSuccess "redundant batch" result2
     liftIO (cancel cb.thread)
@@ -1055,7 +1055,7 @@ test_repeatedRootBuildNoRecompile =
     let
       moduleRequest unit modName = ScheduleRequest {
         steps = [(UnitName (Text.pack unit), UnitModules [ClientModule (Text.pack modName)])],
-        recompile = False, rebuild = False, process = False
+        recompile = False, rebuild = False, executor = Nothing
       }
       rootBuild :: [ScheduleRequest]
       rootBuild = [
@@ -1081,7 +1081,7 @@ test_repeatedModuleRequestNoRecompile =
     (cb, evRef, _decisions) <- newTestBuild tp
     let request = ScheduleRequest {
           steps = [(UnitName "unit0", UnitModules [ClientModule "A0"])],
-          recompile = False, rebuild = False, process = False
+          recompile = False, rebuild = False, executor = Nothing
         }
     liftIO $ scheduleBatch cb request
     result1 <- liftIO (awaitBuild cb)
@@ -1105,13 +1105,13 @@ test_stateAccumulation =
     (cb, evRef, _decisions) <- newTestBuild tp
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps = [(UnitName "unit0", UnitAll)],
-      recompile = False, rebuild = False, process = False
+      recompile = False, rebuild = False, executor = Nothing
     }
     result1 <- liftIO (awaitBuild cb)
     assertSuccess "batch 1" result1
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps = [(UnitName "unit1", UnitAll)],
-      recompile = False, rebuild = False, process = False
+      recompile = False, rebuild = False, executor = Nothing
     }
     result2 <- liftIO (timedStop cb)
     assertSuccess "batch 2" result2
@@ -1129,11 +1129,11 @@ test_multiBatchWithCache =
     (cb, evRef, _decisions) <- newTestBuild tp
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps = [(UnitName "unit0", UnitAll)],
-      recompile = False, rebuild = False, process = False
+      recompile = False, rebuild = False, executor = Nothing
     }
     liftIO $ scheduleBatch cb ScheduleRequest {
       steps = [(UnitName "unit2", UnitAll), (UnitName "unit3", UnitAll)],
-      recompile = False, rebuild = False, process = False
+      recompile = False, rebuild = False, executor = Nothing
     }
     result2 <- liftIO (timedStop cb)
     events2 <- liftIO (readEvents evRef)
@@ -1757,7 +1757,7 @@ persistentBatch cb evRef = do
   before <- liftIO (readEvents evRef)
   liftIO $ scheduleBatch cb ScheduleRequest {
     steps = [(UnitName "unit0", UnitAll), (UnitName "unit1", UnitAll)],
-    recompile = False, rebuild = False, process = False
+    recompile = False, rebuild = False, executor = Nothing
   }
   result <- liftIO (awaitBuild cb)
   after <- liftIO (readEvents evRef)
@@ -1832,7 +1832,7 @@ test_concurrentOverlappingRequests =
         [ (UnitName "unit0", UnitModules [ClientModule "A", ClientModule "B"])
         , (UnitName "unit1", UnitModules [ClientModule "D"])
         ],
-      recompile = False, rebuild = False, process = False
+      recompile = False, rebuild = False, executor = Nothing
     }
     -- Submitted immediately, without awaiting the request above. Overlaps on unit0:B, and
     -- additionally targets unit0:C and unit1:E, which the first request did not.
@@ -1841,7 +1841,7 @@ test_concurrentOverlappingRequests =
         [ (UnitName "unit0", UnitModules [ClientModule "B", ClientModule "C"])
         , (UnitName "unit1", UnitModules [ClientModule "E"])
         ],
-      recompile = False, rebuild = False, process = False
+      recompile = False, rebuild = False, executor = Nothing
     }
     result <- liftIO (timedStop cb)
     events <- liftIO (readEvents evRef)
