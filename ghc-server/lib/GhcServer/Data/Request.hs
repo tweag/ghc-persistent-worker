@@ -2,7 +2,7 @@
 module GhcServer.Data.Request where
 
 import GhcServer.Data.Unit (ClientModule, Unit (..))
-import Types.Api (UnitName)
+import Types.Api (ExecutorId, UnitName)
 
 -- | What to build for a unit: metadata, individual modules, or everything.
 data UnitRequest =
@@ -33,9 +33,9 @@ data ScheduleRequest =
     recompile :: Bool,
     -- | Recompute metadata and recompile even when cached.
     rebuild :: Bool,
-    -- | Run this request's @execute@ tasks in a fresh child process instead of in-process (see
-    -- @kb-process-isolation@ and 'GhcServer.Build.Process').
-    process :: Bool
+    -- | Run this request's @execute@ tasks via a persistent gRPC-addressable executor subprocess (see
+    -- 'GhcServer.Build.Executor') instead of in-process. 'Nothing' runs in-process.
+    executor :: Maybe ExecutorId
   }
   deriving stock (Show, Eq)
 

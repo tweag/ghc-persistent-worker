@@ -18,7 +18,7 @@ import Data.Set (Set)
 import qualified Data.Text as Text
 import GHC (ModuleName)
 import GhcServer.Build.Diff (UnitDiff (..), computeUnitDiff)
-import GhcServer.Build.Schedule (TaskKey (..), compileTasksFromSources, executeTasksFromSources, metadataTasks)
+import GhcServer.Build.Schedule (TaskKey (..), TaskValue, compileTasksFromSources, executeTasksFromSources, metadataTasks)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.Request (
   EffectiveUnit (..),
@@ -87,7 +87,7 @@ effectiveRequests project request
 classifyBuildRequest ::
   BuildEnv ->
   ScheduleRequest ->
-  IO ([Task TaskKey 'Resolved Bool], [Task TaskKey 'Pending Bool])
+  IO ([Task TaskKey 'Resolved TaskValue], [Task TaskKey 'Pending TaskValue])
 classifyBuildRequest env request = do
   diffs <- Map.fromList <$> traverse unitDiff reqs.resolved
   modifyMVar_ env.diff (pure . Map.union diffs)
@@ -148,12 +148,12 @@ classifyBuildRequest env request = do
 
     -- | Execute tasks are only produced for units explicitly requested with 'UnitExecute'\/
     -- 'UnitExecuteModules' -- implicit transitive deps and other request kinds never trigger execution.
-    -- @request.process@ is passed straight to 'executeTasksFromSources', which stores it as the pending
+    -- @request.executor@ is passed straight to 'executeTasksFromSources', which stores it as the pending
     -- execute task's own value -- these branches are the only place execute tasks are created, so no
     -- scope-based gating of the flag is needed here (unlike compile-task enabling above).
     unitExecuteTasks eu = case eu.scope of
-      Explicit UnitExecute -> executeTasksFromSources eu.unit.name request.process (unitSources eu.unit)
-      Explicit (UnitExecuteModules mods) -> executeTasksFromSources eu.unit.name request.process (selectedSources eu.unit mods)
+      Explicit UnitExecute -> executeTasksFromSources eu.unit.name request.executor (unitSources eu.unit)
+      Explicit (UnitExecuteModules mods) -> executeTasksFromSources eu.unit.name request.executor (selectedSources eu.unit mods)
       _ -> []
 
 -- | The source files of the unit's modules whose names the client selected.
