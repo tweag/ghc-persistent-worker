@@ -32,6 +32,8 @@ library
     Proto.Instrument_Fields
     Proto.GhcServer,
     Proto.GhcServer_Fields
+    Proto.Executor,
+    Proto.Executor_Fields
   build-depends:
     base ==4.*,
     bytestring,

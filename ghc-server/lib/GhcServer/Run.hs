@@ -9,6 +9,7 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
 import Data.Bifunctor (first)
 import Data.Text (pack, unpack)
+import GhcServer.Build.ExecutorChild (runExecutor)
 import GhcServer.Build.ProcessChild (runProcessEval)
 import GhcServer.Cabal.Setup (cabalSetup)
 import GhcServer.Data.Config (ServerConfig (..))
@@ -84,6 +85,8 @@ data ExecMode =
   ExecCabalSetup [String]
   |
   ExecEvaluate ProcessEvalOptions
+  |
+  ExecExecutor OsPath
   deriving stock (Show)
 
 -- | Server CLI config prior to resolving the project root, which defaults to the current directory when not given
@@ -141,9 +144,17 @@ evaluateInfo :: ParserInfo ExecMode
 evaluateInfo =
   ExecEvaluate <$> info evaluateParser (allPositional <> progDesc "Evaluate an expression")
 
+executorInfo :: ParserInfo ExecMode
+executorInfo =
+  ExecExecutor <$> info parser (progDesc "Run a persistent executor serving execute tasks until stdin closes")
+  where
+    parser = option readPath (long "socket" <> metavar "PATH" <> help "Unix socket to serve the executor on")
+
 execModeParser :: Parser ExecMode
 execModeParser =
-  subparser (command "act-as-setup" cabalSetupInfo <> command "eval" evaluateInfo)
+  subparser (
+    command "act-as-setup" cabalSetupInfo <> command "eval" evaluateInfo <> command "executor" executorInfo
+    )
   <|>
   (ExecServer <$> serverConfigParser)
 
@@ -166,6 +177,7 @@ runServer = do
     ExecServer raw -> either die pure =<< runExceptT (server =<< lift (resolveServerConfig raw))
     ExecCabalSetup cabalArgs -> cabalSetup cabalArgs
     ExecEvaluate options -> runProcessEval options
+    ExecExecutor socket -> runExecutor socket
   where
     server :: ServerConfig -> ExceptT String IO ()
     server config =

@@ -10,7 +10,7 @@
 -- and folded into the result instead.
 module GhcServer.Build.ProcessChild where
 
-import Control.Concurrent.MVar (newMVar)
+import Control.Concurrent.MVar (MVar, newMVar)
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as ByteString
@@ -52,6 +52,7 @@ import Types.Args (emptyArgs)
 import Types.CachedDeps (CachedBuildPlan (..), CachedBuildPlans (..), CachedUnit (..), JsonFs (..))
 import Types.Log (Logger (..), debugT)
 import Types.Settings (defaultSettings)
+import Types.State (WorkerState)
 import Types.State.Make (MakeState (..))
 
 -- | Resolve a unit's own module map plus its full transitive dependency closure's module maps, purely from the
@@ -96,8 +97,8 @@ loadTransitiveModuleMap outputDir name unitCache =
 -- cross-unit imports resolve to cached interfaces instead of leaving the HPT missing them -- see
 -- 'loadTransitiveModuleMap'), and run 'GhcServer.Build.Execute.executeModuleTask'. All progress reporting goes
 -- to the given logger; the outcome is returned rather than written anywhere.
-runEval :: Logger -> ProcessEvalConfig -> IO EvalOutcome
-runEval logger ProcessEvalConfig {projectRoot, unit, moduleName, sharedBytecodePath} = do
+runEval :: Logger -> MVar WorkerState -> ProcessEvalConfig -> IO EvalOutcome
+runEval logger stateVar ProcessEvalConfig {projectRoot, unit, moduleName, sharedBytecodePath} = do
   debugT logger ("Evaluating " <> moduleName.text <> " in unit " <> unit.name.text)
   runExceptT (loadTransitiveModuleMap outputDir unit.name unit.cache) >>= \case
     Left err -> pure (EvalCacheUnreadable err)
@@ -131,15 +132,16 @@ runEval logger ProcessEvalConfig {projectRoot, unit, moduleName, sharedBytecodeP
     outputDir = projectRoot </> outputDirName
     tmpDir = projectRoot </> tmpDirName
 
-    -- A minimal 'BuildEnv' for a process that only ever runs one execute task and exits: default feature
+    -- A minimal 'BuildEnv' around the given 'Types.State.WorkerState', which is fresh for a one-shot child
+    -- ('runProcessEval') and shared across calls in a persistent executor ('GhcServer.Build.ExecutorChild'):
+    -- default feature
     -- flags (the parent's flags aren't available here and don't matter for a single execute task),
     -- instrumentation disabled (no channel to forward events to), and the in-memory logger created by
-    -- 'runProcessEval', so that nothing reaches stdio. The 'Project' only ever needs to contain the one unit
+    -- 'evalResult', so that nothing reaches stdio. The 'Project' only ever needs to contain the one unit
     -- being executed; 'executeModuleTask' and cache restoration never consult sibling units.
     childBuildEnv = do
       createDirectoryIfMissing True outputDir
       createDirectoryIfMissing True tmpDir
-      stateVar <- newState defaultSettings
       events <- newBuildEvents
       extDepsDb <- newMVar Nothing
       diff <- newMVar Map.empty
@@ -166,33 +168,51 @@ resolveConfig = \case
   Nothing ->
     Aeson.eitherDecodeStrict' <$> ByteString.getContents
 
--- | Run in the child process: set up an in-memory logger before anything else, capture the stdout and stderr of
--- everything that follows, and write the single JSON-encoded 'ProcessEvalResult' to the restored stdout.
---
--- The exit code is deliberately not part of the protocol: the child always exits successfully once it has
--- emitted a result, so a nonzero exit code unambiguously means it crashed before doing so.
---
--- TODO catch exceptions here?
-runProcessEval :: ProcessEvalOptions -> IO ()
-runProcessEval ProcessEvalOptions {configFile} = do
+-- | Run one evaluation against the given 'Types.State.WorkerState' with a fresh in-memory logger, capturing the
+-- stdout and stderr of everything it does, and assemble the 'ProcessEvalResult'.
+evalResult :: MVar WorkerState -> ProcessEvalConfig -> IO ProcessEvalResult
+evalResult stateVar config = do
   (logger, _) <- newTestLog
-  (evalStderr, (evalStdout, outcome)) <- resolveConfig configFile >>= \case
-    Left err -> pure ("", ("", EvalConfigInvalid (pack err)))
-    Right config -> hCapture [IO.stderr] (capture (runEval logger config))
+  (evalStderr, (evalStdout, outcome)) <- hCapture [IO.stderr] (capture (runEval logger stateVar config))
+  finishResult logger (pack evalStdout) (pack evalStderr) outcome
+
+-- | The result for a config that could not be decoded.
+configInvalidResult :: String -> IO ProcessEvalResult
+configInvalidResult err = do
+  (logger, _) <- newTestLog
+  finishResult logger "" "" (EvalConfigInvalid (pack err))
+
+finishResult :: Logger -> Text -> Text -> EvalOutcome -> IO ProcessEvalResult
+finishResult logger evalStdout evalStderr outcome = do
   logger.debug ("Evaluation result: " <> show outcome)
   logMessages <- fmap pack <$> logger.flush
   -- 'max_mem_in_use_bytes'/'max_live_bytes' are only updated when a GC actually runs; a short-lived subprocess
   -- task can otherwise exit without ever triggering one, reporting all-zero stats despite '-T' being enabled
   -- (see the '-with-rtsopts' flags on the executable). Force one last GC so the reported peak reflects reality.
+  -- In a persistent executor, these are peaks over the executor's entire lifetime, not just this call.
   performMajorGC
   rtsStats <- getRTSStats
-  Lazy.ByteString.putStr (Aeson.encode ProcessEvalResult {
-    evalStdout = pack evalStdout,
-    evalStderr = pack evalStderr,
+  pure ProcessEvalResult {
+    evalStdout,
+    evalStderr,
     logMessages,
     outcome,
     stats = ProcessStats {
       maxMemInUseBytes = rtsStats.max_mem_in_use_bytes,
       maxLiveBytes = rtsStats.max_live_bytes
     }
-  })
+  }
+
+-- | Run in the one-shot child process: evaluate the config read from a file or stdin against a fresh
+-- 'Types.State.WorkerState' and write the single JSON-encoded 'ProcessEvalResult' to the restored stdout.
+--
+-- The exit code is deliberately not part of the protocol: the child always exits successfully once it has
+-- emitted a result, so a nonzero exit code unambiguously means it crashed before doing so.
+runProcessEval :: ProcessEvalOptions -> IO ()
+runProcessEval ProcessEvalOptions {configFile} = do
+  result <- resolveConfig configFile >>= \case
+    Left err -> configInvalidResult err
+    Right config -> do
+      stateVar <- newState defaultSettings
+      evalResult stateVar config
+  Lazy.ByteString.putStr (Aeson.encode result)

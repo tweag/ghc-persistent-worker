@@ -70,7 +70,26 @@ spawnProcessEval selfPath config = do
 -- the child reported (see 'GhcServer.Data.ProcessEval.ProcessEvalResult'), if the child got far enough to
 -- report a result at all.
 executeModuleTaskProcess :: BuildEnv -> Unit -> GHC.ModuleName -> IO (Maybe (TaskResult String), Maybe ProcessStats)
-executeModuleTaskProcess buildEnv unit modName = do
+executeModuleTaskProcess buildEnv =
+  executeModuleTaskWith runChild buildEnv
+  where
+    runChild config = do
+      self <- toOsPath <$> getExecutablePath
+      spawnProcessEval self config
+
+-- | Run a module's execute task out of process via the given transport, which sends a 'ProcessEvalConfig' to some
+-- child process and returns its output: either a fresh one-shot subprocess ('executeModuleTaskProcess') or a
+-- persistent executor ('GhcServer.Build.Executor.executeModuleTaskExecutor').
+--
+-- Exports the parent's bytecode to shared memory for the duration of the call, forwards everything the child
+-- recorded to the parent's logger, and converts the child's 'EvalOutcome' into a 'TaskResult'.
+executeModuleTaskWith ::
+  (ProcessEvalConfig -> IO ProcessEvalOutput) ->
+  BuildEnv ->
+  Unit ->
+  GHC.ModuleName ->
+  IO (Maybe (TaskResult String), Maybe ProcessStats)
+executeModuleTaskWith runChild buildEnv unit modName = do
   logger.debug ("Executing " ++ moduleNameString modName ++ " in a subprocess")
   bracket acquireSharedBytecode (traverse_ cleanupSharedBytecode) \ sharedBytecodePath -> do
     try (spawnProcessEval' sharedBytecodePath) >>= \case
@@ -104,8 +123,7 @@ executeModuleTaskProcess buildEnv unit modName = do
           pure Nothing
 
     spawnProcessEval' sharedBytecodePath = do
-      self <- toOsPath <$> getExecutablePath
-      output <- spawnProcessEval self (cfg sharedBytecodePath)
+      output <- runChild (cfg sharedBytecodePath)
       unless (Text.null output.processStderr) do
         logger.info ("Unexpected subprocess stderr: " ++ Text.unpack output.processStderr)
       case output.result of

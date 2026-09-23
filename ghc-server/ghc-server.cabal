@@ -51,6 +51,7 @@ library
     GhcServer.Build.Diff
     GhcServer.Build.Execute
     GhcServer.Build.Executor
+    GhcServer.Build.ExecutorChild
     GhcServer.Build.Metadata
                     GhcServer.Build.Process
                     GhcServer.Build.ProcessChild
@@ -158,6 +159,7 @@ test-suite ghc-server-test
     ghc-server,
     ghc-worker-test-common,
     hedgehog,
+    process,
     tasty >= 1.5,
     tasty-hedgehog,
     temporary,

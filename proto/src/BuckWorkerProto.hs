@@ -12,6 +12,7 @@ import Network.GRPC.Common.Protobuf (Protobuf)
 import Proto.Worker
 import Proto.Instrument
 import Proto.GhcServer (GhcServer)
+import Proto.Executor (Executor)
 
 type instance RequestMetadata (Protobuf Worker _) = NoMetadata
 type instance ResponseInitialMetadata (Protobuf Worker _) = NoMetadata
@@ -24,3 +25,7 @@ type instance ResponseTrailingMetadata (Protobuf Instrument _) = NoMetadata
 type instance RequestMetadata (Protobuf GhcServer _) = NoMetadata
 type instance ResponseInitialMetadata (Protobuf GhcServer _) = NoMetadata
 type instance ResponseTrailingMetadata (Protobuf GhcServer _) = NoMetadata
+
+type instance RequestMetadata (Protobuf Executor _) = NoMetadata
+type instance ResponseInitialMetadata (Protobuf Executor _) = NoMetadata
+type instance ResponseTrailingMetadata (Protobuf Executor _) = NoMetadata

@@ -22,8 +22,10 @@ import Data.Text (Text)
 import GHC (mkModuleName)
 import GhcServer.Build (newBuildState)
 import GhcServer.Build.Compile (compileSingleModule)
+import GhcServer.Build.Executor (callExecutor, ensureExecutor, terminateExecutor)
 import GhcServer.Build.Metadata (runMetadata)
 import GhcServer.Build.Process (spawnProcessEval)
+import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.ProcessEval (
   EvalOutcome (..),
   ProcessEvalConfig (..),
@@ -32,7 +34,7 @@ import GhcServer.Data.ProcessEval (
   )
 import GhcServer.Data.Unit (Project (..))
 import GhcServer.Data.UnitConfig (UnitConfig (..))
-import Hedgehog (annotate, property, test, withTests, (===))
+import Hedgehog (TestT, annotate, assert, property, test, withTests, (===))
 import System.Directory (createDirectoryIfMissing)
 import System.Environment (getExecutablePath)
 import System.FilePath (takeBaseName)
@@ -48,9 +50,14 @@ import Test.BuildTest (
   )
 import Test.Tasty (TestName, TestTree)
 import Test.Tasty.Hedgehog (testProperty)
-import Types.Api (UnitName (..))
+import Types.Api (ExecutorId (..), UnitName (..))
 import Types.CachedDeps (CachedDeps (..))
 import Types.Settings (defaultSettings)
+import Types.State (WorkerState (..))
+import Types.State.Executor (ExecutorHandle (..))
+import System.Process (getPid)
+import Control.Concurrent.MVar (readMVar)
+import Data.Maybe (isJust)
 
 -- ---------------------------------------------------------------------------
 -- Fixture: one unit, two modules -- M1 (leaf) and Main (imports M1, has 'main')
@@ -90,29 +97,69 @@ test_subprocessExecute =
     if takeBaseName selfPath /= "ghc-server-test"
       then annotate ("skipping: running under ghcid/ghci (executable is " ++ selfPath ++ ", not ghc-server-test)")
       else do
-        tp <- liftIO do
-          root <- acquireTemp "ghc-server-subprocess"
-          createSubprocessProject root
-          acquireProject (pure root)
-        stateVar <- liftIO (newBuildState defaultSettings)
-        (buildEnv, _events) <- liftIO (newBuildEnv tp stateVar)
-        let name = UnitName subprocessUnitName
-        unit <- maybe (fail "unit not found") pure (Map.lookup name tp.project.units)
-        (metaErrs, _) <- liftIO (runMetadata buildEnv unit)
-        annotate ("metadata errors: " ++ show metaErrs)
-        unless (null metaErrs) (fail "metadata failed")
-        (m1Errs, _) <- liftIO (compileSingleModule buildEnv unit (mkModuleName "M1") (CachedDeps []) 0)
-        unless (null m1Errs) (fail ("M1 compile failed: " ++ show m1Errs))
-        (mainErrs, _) <- liftIO (compileSingleModule buildEnv unit (mkModuleName "Main") (CachedDeps []) 0)
-        unless (null mainErrs) (fail ("Main compile failed: " ++ show mainErrs))
-        let cfg = ProcessEvalConfig {projectRoot = toOsPath tp.root, unit, moduleName = "Main", sharedBytecodePath = Nothing}
+        (_, cfg) <- compiledProject "ghc-server-subprocess"
         output <- liftIO (spawnProcessEval (toOsPath selfPath) cfg)
         annotate ("subprocess stderr: " ++ Text.unpack output.processStderr)
         output.processStderr === ""
-        result <- either (fail . Text.unpack) pure output.result
-        annotate ("subprocess log: " ++ show result.logMessages)
-        annotate ("eval stdout: " ++ Text.unpack result.evalStdout)
-        annotate ("eval stderr: " ++ Text.unpack result.evalStderr)
-        result.outcome === EvalSuccess (Just "hello from subprocess")
+        checkOutput output
   where
     testName = "execute module in a fresh subprocess restoring cached state" :: TestName
+
+-- | Run metadata and compile the fixture project in-process, returning the build env and the eval config for
+-- @Main@.
+compiledProject :: String -> TestT IO (BuildEnv, ProcessEvalConfig)
+compiledProject tempName = do
+  tp <- liftIO do
+    root <- acquireTemp tempName
+    createSubprocessProject root
+    acquireProject (pure root)
+  stateVar <- liftIO (newBuildState defaultSettings)
+  (buildEnv, _events) <- liftIO (newBuildEnv tp stateVar)
+  let name = UnitName subprocessUnitName
+  unit <- maybe (fail "unit not found") pure (Map.lookup name tp.project.units)
+  (metaErrs, _) <- liftIO (runMetadata buildEnv unit)
+  annotate ("metadata errors: " ++ show metaErrs)
+  unless (null metaErrs) (fail "metadata failed")
+  (m1Errs, _) <- liftIO (compileSingleModule buildEnv unit (mkModuleName "M1") (CachedDeps []) 0)
+  unless (null m1Errs) (fail ("M1 compile failed: " ++ show m1Errs))
+  (mainErrs, _) <- liftIO (compileSingleModule buildEnv unit (mkModuleName "Main") (CachedDeps []) 0)
+  unless (null mainErrs) (fail ("Main compile failed: " ++ show mainErrs))
+  pure (buildEnv, ProcessEvalConfig {projectRoot = toOsPath tp.root, unit, moduleName = "Main", sharedBytecodePath = Nothing})
+
+checkOutput :: ProcessEvalOutput -> TestT IO ()
+checkOutput output = do
+  result <- either (fail . Text.unpack) pure output.result
+  annotate ("subprocess log: " ++ show result.logMessages)
+  annotate ("eval stdout: " ++ Text.unpack result.evalStdout)
+  annotate ("eval stderr: " ++ Text.unpack result.evalStderr)
+  result.outcome === EvalSuccess (Just "hello from subprocess")
+
+-- | Spawn a persistent executor, run the same module in it twice, check that the second call reuses the same
+-- process, and terminate it. Like 'test_subprocessExecute', this relaunches the test binary (in @executor@ mode, see
+-- @test/Main.hs@), so it is skipped under ghcid.
+test_executorExecute :: TestTree
+test_executorExecute =
+  testProperty testName $ withTests 1 $ property $ test do
+    selfPath <- liftIO getExecutablePath
+    if takeBaseName selfPath /= "ghc-server-test"
+      then annotate ("skipping: running under ghcid/ghci (executable is " ++ selfPath ++ ", not ghc-server-test)")
+      else do
+        (buildEnv, cfg) <- compiledProject "ghc-server-executor"
+        let executorId = ExecutorId "unit1"
+        handle1 <- liftIO (ensureExecutor buildEnv executorId)
+        checkOutput =<< liftIO (callExecutor handle1 cfg)
+        handle2 <- liftIO (ensureExecutor buildEnv executorId)
+        checkOutput =<< liftIO (callExecutor handle2 cfg)
+        pid1 <- liftIO (getPid handle1.process)
+        pid2 <- liftIO (getPid handle2.process)
+        annotate ("executor pids: " ++ show (pid1, pid2))
+        assert (isJust pid1)
+        pid1 === pid2
+        terminated <- liftIO (terminateExecutor buildEnv executorId)
+        assert terminated
+        state <- liftIO (readMVar buildEnv.stateVar)
+        Map.member executorId state.executors === False
+        again <- liftIO (terminateExecutor buildEnv executorId)
+        again === False
+  where
+    testName = "execute module twice in a persistent executor" :: TestName
