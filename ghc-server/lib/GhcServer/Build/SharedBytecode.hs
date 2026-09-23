@@ -47,7 +47,7 @@ import Foreign.C.Types (CInt (..), CSize (..))
 import Foreign.Marshal.Utils (copyBytes)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr, ptrToWordPtr, wordPtrToPtr)
 import Foreign.Storable (peekByteOff, pokeByteOff)
-import GHC (Module, ModuleName)
+import GHC (Module, ModuleName, mkModuleName, moduleNameString)
 import GHC.Compact (compact, getCompact)
 import GHC.Compact.Serialized (SerializedCompact (..), importCompactByteStrings, withSerializedCompact)
 import GHC.Driver.Env (HscEnv)
@@ -56,7 +56,7 @@ import GHC.Unit.Home.Graph (HomeUnitEnv (..), HomeUnitGraph, UnitEnvGraph (..), 
 import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..))
 import GHC.Unit.Home.PackageTable (concatHpt)
 import GHC.Unit.Module.ModIface (mi_module)
-import GHC.Unit.Types (UnitId, moduleName)
+import GHC.Unit.Types (UnitId, moduleName, stringToUnitId, unitIdString)
 import GhcServer.Build.BytecodeMirror (MirrorLinkable, mirrorLinkable, rehydrateLinkable)
 import Prelude hiding (log)
 import System.Directory (getFileSize, removeFile)
@@ -68,7 +68,10 @@ import System.Posix.Process (getProcessID)
 -- unit it belongs to and its module name. Only modules for which the parent's HPT already has bytecode that was
 -- successfully mirrored (i.e. that were actually compiled with no unmirrorable construct, see
 -- 'GhcServer.Build.BytecodeMirror.mirrorLinkable') are included.
-type BytecodeMap = Map (UnitId, ModuleName) MirrorLinkable
+--
+-- Keys are plain 'String's rather than 'UnitId'\/'ModuleName': both wrap a 'GHC.Data.FastString.FastString',
+-- whose pinned payload would make 'GHC.Compact.compact' fail with "cannot compact pinned objects".
+type BytecodeMap = Map (String, String) MirrorLinkable
 
 -- ---------------------------------------------------------------------------
 -- Raw @mmap@ FFI (see 'Test.ForkTest' for the precedent: @unix@ has no binding for this).
@@ -163,7 +166,7 @@ collectBytecode hug = do
   where
     bytecodeEntry uid hmi =
       case hmi.hm_linkable.homeMod_bytecode >>= mirrorLinkable of
-        Just mirrored -> [((uid, moduleName (mi_module hmi.hm_iface)), mirrored)]
+        Just mirrored -> [((unitIdString uid, moduleNameString (moduleName (mi_module hmi.hm_iface))), mirrored)]
         Nothing -> []
 
 -- | Compact 'collectBytecode''s result and write it into a fresh @\/dev\/shm@ file, returning its path. Returns
@@ -234,4 +237,7 @@ importSharedBytecode path = do
 -- 'Types.State.Make.MakeState.bytecodeImport' with modules whose bytecode is rehydrated lazily, only when actually
 -- linked, instead of eagerly rehydrating every mirrored module up front regardless of whether it's ever linked.
 bytecodeImportEntries :: BytecodeMap -> Map (UnitId, ModuleName) (HscEnv -> Module -> IO Linkable)
-bytecodeImportEntries = Map.map \ mirrored hsc_env target -> rehydrateLinkable hsc_env target mirrored
+bytecodeImportEntries =
+  Map.map (\ mirrored hsc_env target -> rehydrateLinkable hsc_env target mirrored)
+  .
+  Map.mapKeys (\ (uid, modName) -> (stringToUnitId uid, mkModuleName modName))

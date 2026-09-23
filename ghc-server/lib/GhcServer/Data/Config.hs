@@ -34,7 +34,7 @@ data ClientConfig =
     recompile :: Bool,
     -- | Recompute metadata (and recompile) even when cached.
     rebuild :: Bool,
-    -- | Run this request's execute tasks in a fresh child process instead of in-process.
-    process :: Bool
+    -- | Run this request's execute tasks in the persistent executor subprocess with this ID instead of in-process.
+    executor :: Maybe String
   }
   deriving stock (Show)

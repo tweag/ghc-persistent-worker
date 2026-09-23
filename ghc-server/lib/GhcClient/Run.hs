@@ -3,6 +3,7 @@
 module GhcClient.Run where
 
 import BuckWorkerProto ()
+import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
 import Control.Exception (throwIO, try)
 import Control.Monad.IO.Class (liftIO)
@@ -20,6 +21,7 @@ import Options.Applicative (
   Parser,
   ParserInfo,
   execParser,
+  flag,
   fullDesc,
   header,
   help,
@@ -32,6 +34,7 @@ import Options.Applicative (
   optional,
   progDesc,
   short,
+  str,
   strArgument,
   switch,
   (<**>),
@@ -51,9 +54,16 @@ clientConfigParser = do
   wait <- switch (long "wait" <> short 'w' <> help "Wait for the build to complete before returning")
   recompile <- switch (long "recompile" <> help "Recompile modules even when cached artifacts exist")
   rebuild <- switch (long "rebuild" <> help "Recompute metadata and recompile even when cached")
-  process <- switch (long "process" <> help "Run this request's execute tasks in a fresh child process instead of in-process")
+  executor <- executorParser
   targets <- many (strArgument (metavar "TARGETS..." <> help "Schedule targets (e.g. unit1 unit2:metadata unit2:Module)"))
   pure ClientConfig {..}
+
+-- | @--executor ID@ selects a persistent executor subprocess; @--process@ is shorthand for @--executor default@.
+executorParser :: Parser (Maybe String)
+executorParser =
+  Just <$> option str (long "executor" <> metavar "ID" <> help "Run execute tasks in the persistent executor subprocess ID")
+  <|>
+  flag Nothing (Just "default") (long "process" <> help "Run execute tasks in the persistent executor subprocess 'default'")
 
 clientParserInfo :: ParserInfo ClientConfig
 clientParserInfo =
@@ -111,7 +121,7 @@ client config = do
       ["--wait" | config.wait]
       ++ ["--recompile" | config.recompile]
       ++ ["--rebuild" | config.rebuild]
-      ++ ["--process" | config.process]
+      ++ maybe [] (\ eid -> ["--executor", encodeUtf8 (Text.pack eid)]) config.executor
 
 -- | Parse CLI args and run the client command.
 runClient :: IO ()
