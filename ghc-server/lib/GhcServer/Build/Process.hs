@@ -30,19 +30,23 @@ import qualified GHC
 import GHC (moduleNameString)
 import GhcServer.Build.SharedBytecode (cleanupSharedBytecode, collectBytecode, exportSharedBytecode)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
-import GhcServer.Data.ProcessEval (EvalOutcome (..), ProcessEvalConfig (..), ProcessEvalOutput (..), ProcessEvalResult (..))
+import GhcServer.Data.ProcessEval (
+  EvalOutcome (..),
+  ProcessEvalConfig (..),
+  ProcessEvalOutput (..),
+  ProcessEvalResult (..),
+  )
 import GhcServer.Data.Unit (Unit (..))
 import GhcServer.Log (instrumentLogger)
+import Internal.State (dynamicFeatureOn)
 import System.Environment (getExecutablePath)
 import System.OsPath.Extra (OsPath, fromOsPath, toOsPath)
 import System.Process.Typed (byteStringInput, proc, readProcess, setStdin)
 import Test.Scheduler (TaskResult (..))
 import Types.Api (ProcessStats, UnitName (..), fromGhcModuleName)
-import Types.Args (Args (..))
 import Types.ByteString (fromUtf8Lazy)
 import Types.FeatureFlags (Feature (..))
 import Types.Log (Logger (..), debugT)
-import Types.Settings (featureOn)
 import Types.State (WorkerState (..))
 import Types.State.Make (MakeState (..))
 
@@ -106,8 +110,9 @@ executeModuleTaskWith runChild buildEnv unit modName = do
     -- Mirror and export the parent's currently compiled bytecode into shared memory for the child to restore,
     -- unless the @sharedMemory@ feature is disabled, in which case the child falls back to its usual approach
     -- of restoring cached interfaces\/objects and compiling Core bindings to bytecode itself.
-    acquireSharedBytecode
-      | featureOn FeatureSharedMemory buildEnv.baseArgs.settings = do
+    acquireSharedBytecode =
+      dynamicFeatureOn FeatureSharedMemory buildEnv.stateVar >>= \case
+        True -> do
           state <- readMVar buildEnv.stateVar
           bytecodeMap <- collectBytecode state.make.hug
           path <- exportSharedBytecode bytecodeMap
@@ -118,7 +123,7 @@ executeModuleTaskWith runChild buildEnv unit modName = do
                 )
             Nothing -> logger.debug "No mirrorable bytecode to store in shared memory"
           pure path
-      | otherwise = do
+        False -> do
           logger.debug "sharedMemory feature disabled; subprocess will restore bytecode from cached interfaces"
           pure Nothing
 
