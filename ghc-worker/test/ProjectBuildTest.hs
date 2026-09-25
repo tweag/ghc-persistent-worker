@@ -31,7 +31,7 @@ runInitialBuild project buildSys sessionEnv = do
     buildSys.runInitialBuild project.schedule
   classifyProject project
   classifyFirstBuild result
-  assertBuildResult sessionEnv.tempDir project result
+  assertBuildResult sessionEnv project result
   pure result
 
 -- | Update source files, write Buck cache, and run the resume build.
@@ -42,7 +42,7 @@ runResumeBuild build buildSys initialEnv initialResult = do
   resumeResult <- liftIO $ executeResumeBuild buildSys resumeEnv build initialResult cachedSchedule
   classifyResume build initialResult
   annotateRebuildPlan build.resumePlan
-  assertBuildResult resumeEnv.tempDir build resumeResult
+  assertBuildResult resumeEnv build resumeResult
 
 prop_projectBuild :: TestConfig -> TestEnv -> PropertyT IO ()
 prop_projectBuild conf env = do

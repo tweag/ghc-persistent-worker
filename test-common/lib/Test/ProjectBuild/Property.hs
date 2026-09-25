@@ -3,14 +3,16 @@ module Test.ProjectBuild.Property where
 import Control.Monad (unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_)
+import Data.IORef (writeIORef)
 import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import GHC.Stack (HasCallStack, withFrozenCallStack)
 import Hedgehog (MonadTest, PropertyT, annotate, assert, diff)
 import System.Directory.OsPath (doesFileExist)
-import System.OsPath.Extra (OsPath, fromOsPath, osp, (<.>), (</>))
+import System.OsPath.Extra (fromOsPath, osp, (<.>), (</>))
 import Test.Data.BuildSystem (BuildResult (..))
+import Test.Data.Env (SessionEnv (..), TestEnv (..))
 import Test.Data.Project (InitialProject (..), ModuleKey (..), ModuleSource (..), TaskKey (..), taskModuleKeys)
 import Test.Data.ProjectBuild (ProjectBuild (..), RebuildSet (..), ResumePlan (..))
 import Test.Data.Scheduler (Schedule (..), Task (..), unexpectedFailure)
@@ -34,10 +36,15 @@ showTask task
 
 -- | Shared assertions: no unexpected failures, object files and interfaces exist for succeeded modules.
 -- When the build succeeded without errors, also checks completeness (all expected tasks completed).
-assertBuildResult :: OsPath -> ProjectBuild -> BuildResult -> PropertyT IO ()
-assertBuildResult tempDir project BuildResult {failures, succeeded, completed, hasErrors} = do
+-- When the assertions fail and 'Test.Data.Env.keepFailedDirs' is enabled, the session's source and temp
+-- directories are retained and their paths are printed to the console.
+assertBuildResult :: SessionEnv -> ProjectBuild -> BuildResult -> PropertyT IO ()
+assertBuildResult sessionEnv project BuildResult {failures, succeeded, completed, hasErrors} = do
   let unexpectedFailures = Map.filter unexpectedFailure failures
   missingFiles <- liftIO checkObjectFiles
+  let incomplete = not hasErrors && completed /= project.allKeys
+      hasFailure = not (Map.null unexpectedFailures) || not (null missingFiles) || incomplete
+  liftIO (retainOnFailure sessionEnv hasFailure)
   annotateFailures unexpectedFailures
   annotateMissingFiles missingFiles
   diff unexpectedFailures (==) Map.empty
@@ -60,12 +67,25 @@ assertBuildResult tempDir project BuildResult {failures, succeeded, completed, h
       concat <$> traverse checkMod (taskModuleKeys succeeded)
       where
         checkMod key = do
-          let base = tempDir </> moduleOutputBase key
+          let base = sessionEnv.tempDir </> moduleOutputBase key
               objFile = base <.> [osp|dyn_o|]
               hiFile = base <.> [osp|dyn_hi|]
           objExists <- doesFileExist objFile
           hiExists <- doesFileExist hiFile
           pure $ [objFile | not objExists] ++ [hiFile | not hiExists]
+
+-- | If the build result is a failure and the session's 'TestEnv' has 'keepFailedDirs' enabled, mark the shared
+-- root directory for retention (so 'Test.Env.releaseTestEnv' skips deleting it) and print the paths of the
+-- source and temp directories used by the failing test case.
+retainOnFailure :: SessionEnv -> Bool -> IO ()
+retainOnFailure sessionEnv hasFailure =
+  when (hasFailure && sessionEnv.shared.keepFailedDirs) do
+    writeIORef sessionEnv.shared.retainedDirs True
+    putStrLn $ unlines
+      [ "Test case failed; retaining project directories for inspection:"
+      , "  source: " ++ fromOsPath sessionEnv.sourceDir
+      , "  build:  " ++ fromOsPath sessionEnv.tempDir
+      ]
 
 annotateRebuildPlan :: ResumePlan -> PropertyT IO ()
 annotateRebuildPlan plan =

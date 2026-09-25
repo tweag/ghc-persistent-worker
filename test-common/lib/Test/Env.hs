@@ -1,11 +1,12 @@
 module Test.Env where
 
+import Data.IORef (newIORef, readIORef)
 import System.Directory (removeDirectoryRecursive)
 import System.IO.Temp (createTempDirectory, getCanonicalTemporaryDirectory)
 import System.OsPath.Extra (decodeUtf, encodeUtf)
-import Test.Data.Env (SessionEnv (..), TestEnv (..))
+import Test.Data.Env (KeepFailedDirs (..), SessionEnv (..), TestEnv (..))
 import Test.Run (mkEnv)
-import Test.Tasty (TestTree, withResource)
+import Test.Tasty (TestTree, askOption, withResource)
 import Types.Args (emptyArgs)
 
 -- | Create a new environment for a build test run consisting of two builds.
@@ -33,17 +34,22 @@ newResumeSessionEnv prev = do
   (env, _) <- mkEnv
   pure prev {env, extDepDbs = [], extDeps = mempty}
 
-acquireTestEnv :: IO TestEnv
-acquireTestEnv = do
+acquireTestEnv :: Bool -> IO TestEnv
+acquireTestEnv keepFailedDirs = do
   tmpBase <- getCanonicalTemporaryDirectory
   rootDir <- encodeUtf =<< createTempDirectory tmpBase "project-build-test"
-  pure TestEnv {rootDir, baseArgs = emptyArgs []}
+  retainedDirs <- newIORef False
+  pure TestEnv {rootDir, baseArgs = emptyArgs [], keepFailedDirs, retainedDirs}
 
 releaseTestEnv :: TestEnv -> IO ()
 releaseTestEnv env = do
   rootDirFp <- decodeUtf env.rootDir
-  removeDirectoryRecursive rootDirFp
+  retain <- readIORef env.retainedDirs
+  if retain
+    then putStrLn ("Retaining test artifacts of failing test case(s) in: " ++ rootDirFp)
+    else removeDirectoryRecursive rootDirFp
 
 withTestEnv :: (IO TestEnv -> TestTree) -> TestTree
-withTestEnv =
-  withResource acquireTestEnv releaseTestEnv
+withTestEnv use =
+  askOption \ (KeepFailedDirs keepFailedDirs) ->
+    withResource (acquireTestEnv keepFailedDirs) releaseTestEnv use
