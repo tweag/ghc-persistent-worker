@@ -83,7 +83,7 @@ executeModuleTaskProcess buildEnv =
 
 -- | Run a module's execute task out of process via the given transport, which sends a 'ProcessEvalConfig' to some
 -- child process and returns its output: either a fresh one-shot subprocess ('executeModuleTaskProcess') or a
--- persistent executor ('GhcServer.Build.Executor.executeModuleTaskExecutor').
+-- persistent executor ('GhcServer.Build.ExecutorTask.executeModuleMode').
 --
 -- Exports the parent's bytecode to shared memory for the duration of the call, forwards everything the child
 -- recorded to the parent's logger, and converts the child's 'EvalOutcome' into a 'TaskResult'.
@@ -127,16 +127,8 @@ executeModuleTaskWith runChild buildEnv unit modName = do
           logger.debug "sharedMemory feature disabled; subprocess will restore bytecode from cached interfaces"
           pure Nothing
 
-    spawnProcessEval' sharedBytecodePath = do
-      output <- runChild (cfg sharedBytecodePath)
-      unless (Text.null output.processStderr) do
-        logger.info ("Unexpected subprocess stderr: " ++ Text.unpack output.processStderr)
-      case output.result of
-        Left err -> pure (Just (TaskFailed (Text.unpack err)), Nothing)
-        Right result -> do
-          traverse_ (debugT logger) result.logMessages
-          traverse_ (debugT logger) (captured result)
-          pure (taskResult result, Just result.stats)
+    spawnProcessEval' sharedBytecodePath =
+      runChild (cfg sharedBytecodePath) >>= outputTaskResult logger
 
     -- A crash here (process spawn failure, the child being killed, or any other exception thrown by
     -- 'spawnProcessEval') must never escape uncaught: this runs on the scheduler's own thread, and an
@@ -147,26 +139,6 @@ executeModuleTaskWith runChild buildEnv unit modName = do
     subprocessCrashMessage err =
       "Subprocess for " ++ moduleNameString modName ++ " crashed: " ++ displayException (err :: SomeException)
 
-    taskResult result =
-      case result.outcome of
-        EvalSuccess payload -> Just (TaskSuccess payload)
-        EvalNoMain -> Nothing
-        EvalExecuteFailed msg -> failed msg result
-        EvalConfigInvalid msg -> failed ("Invalid subprocess config: " <> msg) result
-        EvalCacheUnreadable msg -> failed ("Could not load the cached unit: " <> msg) result
-        EvalCacheMissing -> failed "No cached unit on disk" result
-
-    failed msg result =
-      Just (TaskFailed (Text.unpack (Text.unlines (msg : captured result))))
-
-    -- The evaluated module's output, as labeled blocks, omitting the streams that stayed empty.
-    captured result =
-      [
-        label <> ":\n" <> text
-        | (label, text) <- [("Subprocess stdout", result.evalStdout), ("Subprocess stderr", result.evalStderr)]
-        , not (Text.null text)
-      ]
-
     cfg sharedBytecodePath =
       ProcessEvalConfig {
         projectRoot = buildEnv.projectRoot,
@@ -174,4 +146,41 @@ executeModuleTaskWith runChild buildEnv unit modName = do
         moduleName = fromGhcModuleName modName,
         sharedBytecodePath
       }
+
+-- | Forward everything a child recorded to the logger and convert its outcome into a 'TaskResult', alongside the
+-- stats it reported.
+outputTaskResult :: Logger -> ProcessEvalOutput -> IO (Maybe (TaskResult String), Maybe ProcessStats)
+outputTaskResult logger output = do
+  unless (Text.null output.processStderr) do
+    logger.info ("Unexpected subprocess stderr: " ++ Text.unpack output.processStderr)
+  case output.result of
+    Left err -> pure (Just (TaskFailed (Text.unpack err)), Nothing)
+    Right result -> do
+      traverse_ (debugT logger) result.logMessages
+      traverse_ (debugT logger) (capturedOutput result)
+      pure (outcomeTaskResult result, Just result.stats)
+
+outcomeTaskResult :: ProcessEvalResult -> Maybe (TaskResult String)
+outcomeTaskResult result =
+  case result.outcome of
+    EvalSuccess payload -> Just (TaskSuccess payload)
+    EvalNoMain -> Nothing
+    EvalExecuteFailed msg -> failed msg
+    EvalConfigInvalid msg -> failed ("Invalid subprocess config: " <> msg)
+    EvalCacheUnreadable msg -> failed ("Could not load the cached unit: " <> msg)
+    EvalCacheMissing -> failed "No cached unit on disk"
+    EvalLoadFailed msg -> failed ("Could not load the bytecode plan: " <> msg)
+    EvalOptionsMismatch msg -> failed ("Executor session mismatch: " <> msg)
+  where
+    failed msg =
+      Just (TaskFailed (Text.unpack (Text.unlines (msg : capturedOutput result))))
+
+-- | The evaluated module's output, as labeled blocks, omitting the streams that stayed empty.
+capturedOutput :: ProcessEvalResult -> [Text.Text]
+capturedOutput result =
+  [
+    label <> ":\n" <> text
+    | (label, text) <- [("Subprocess stdout", result.evalStdout), ("Subprocess stderr", result.evalStderr)]
+    , not (Text.null text)
+  ]
 

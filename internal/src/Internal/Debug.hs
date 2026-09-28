@@ -16,8 +16,8 @@ import GHC.Unit.Module.Graph (ModuleGraph, ModuleGraphNode (..), ModuleNodeInfo 
 import GHC.Unit.Module.ModSummary (isBootSummary)
 import qualified GHC.Utils.Outputable as Outputable
 import GHC.Utils.Outputable (Outputable, SDoc, hang, hcat, ppr, text, vcat, (<+>))
-import Internal.Compat.GHC914 (hscModuleGraph)
 import System.FilePath ((</>))
+import Types.Api (Target)
 import Types.Target (TargetSpec, renderTargetSpec)
 
 #if defined(UNIT_INDEX)
@@ -42,8 +42,8 @@ import GHC.Unit (ModuleOrigin (..))
 import GHC.Unit.Finder (FindResult (..), findImportedModule)
 import GHC.Unit.State (UnitIndexQuery (..))
 import GHC.Utils.Outputable (showPprUnsafe)
+import Internal.Compat.GHC914 (hscModuleGraph)
 import Internal.Log (dbg)
-import Types.Api (Target)
 
 #endif
 

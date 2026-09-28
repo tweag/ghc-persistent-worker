@@ -4,13 +4,14 @@ module Internal.Cache.Bytecode where
 import Data.Bifunctor (bimap)
 import Data.Foldable (foldr', for_, traverse_)
 import qualified Data.List as List
+import Data.Maybe (fromMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC.ByteCode.Types (bc_bcos)
 import GHC.Data.FlatBag (sizeFlatBag)
 import GHC.Driver.Env (HscEnv, hscInterp)
-import GHC.Linker.Types (Linkable (..), linkableBCOs, linkableModule)
+import GHC.Linker.Types (Linkable, linkableBCOs, linkableModule)
 import GHC.Unit.Home.Graph (HomeUnitEnv (..), UnitEnvGraph (..), unitEnv_lookup_maybe)
 import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..))
 import GHC.Unit.Home.PackageTable (addHomeModInfoToHpt, lookupHpt)
@@ -24,26 +25,31 @@ linkableBcoCount :: Linkable -> Int
 linkableBcoCount lnk =
   sum (fromIntegral . sizeFlatBag . bc_bcos <$> linkableBCOs lnk)
 
--- | Increase the access counter and update the LRU cache entries for each 'Linkable'. Also refreshes the
--- corresponding 'MakeState.bcoHistory' entries, which (unlike 'MakeState.bcoCache') are never removed, so the
--- instrumentation UI's bytecode browser can still display modules after they've been evicted.
-touchBcoCache :: [Linkable] -> MakeState -> MakeState
-touchBcoCache linkables make =
+-- | Module and BCO count of a 'Linkable' if it contains bytecode.
+linkableBcoUsage :: Linkable -> Maybe (Module, Int)
+linkableBcoUsage lnk
+  | null (linkableBCOs lnk) = Nothing
+  | otherwise = Just (linkableModule lnk, linkableBcoCount lnk)
+
+-- | Increase the access counter and update the LRU cache entries for each module that had its bytecode loaded or
+-- used. Also refreshes the corresponding 'MakeState.bcoHistory' entries, which (unlike 'MakeState.bcoCache') are
+-- never removed, so the instrumentation UI's bytecode browser can still display modules after they've been evicted.
+--
+-- The size is 'Nothing' when the linkable isn't available (because it was already loaded and the linker only reports
+-- its usage), in which case the last known size is retained.
+touchBcoCache :: [(Module, Maybe Int)] -> MakeState -> MakeState
+touchBcoCache usages make =
   make {
-    bcoCache = foldr' touch make.bcoCache withBcos,
-    bcoHistory = foldr' touchHistory make.bcoHistory withBcos,
+    bcoCache = foldr' touch make.bcoCache usages,
+    bcoHistory = foldr' touchHistory make.bcoHistory usages,
     bcoAccessCounter
   }
   where
-    withBcos = filter (not . null . linkableBCOs) linkables
+    touch (m, size) = Map.insert m BcoCacheEntry {lastAccess = bcoAccessCounter, size = resolveSize m size}
 
-    touch linkable = Map.insert linkable.linkableModule (newEntry linkable)
+    touchHistory (m, size) = Map.insert m BcoHistoryEntry {lastAccess = bcoAccessCounter, size = resolveSize m size}
 
-    newEntry linkable = BcoCacheEntry {linkable, lastAccess = bcoAccessCounter, size = linkableBcoCount linkable}
-
-    touchHistory linkable = Map.insert linkable.linkableModule (newHistEntry linkable)
-
-    newHistEntry linkable = BcoHistoryEntry {lastAccess = bcoAccessCounter, size = linkableBcoCount linkable}
+    resolveSize m = fromMaybe (maybe 0 (.size) (Map.lookup m make.bcoHistory))
 
     bcoAccessCounter = make.bcoAccessCounter + 1
 

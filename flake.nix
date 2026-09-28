@@ -2,7 +2,8 @@
   description = "GHC persistent worker";
 
   inputs = {
-    hix.url = "github:tek/hix";
+    hix.url = "github:tek/hix/c3b14e3c7902a37fe24ebd42a93aea9b5292404c";
+    # TODO What was this needed for?
     hix.inputs.nixpkgs.url = "github:nixos/nixpkgs/b2243f41e860ac85c0b446eadc6930359b294e79";
     ghc-debug = {
       url = "git+https://gitlab.haskell.org/ghc/ghc-debug";
@@ -44,6 +45,20 @@
           bootCompiler = "ghc9103";
         };
       };
+
+      ghc914-gbc = {
+        nixpkgs = "ghc9141";
+        source.build = {
+          url = "https://github.com/MercuryTechnologies/ghc";
+          version = "9.14.1";
+          flavour = "release+split_sections+ipe";
+          # branch: wip/torsten.schmits/worker-gbc
+          rev = "2708daaf554f4d353314242a8561a7485a3fe0f1";
+          hash = "sha256-bs29BFlF6usk/y6KY7z+s0miG833x20/PA3FN4kqP0A=";
+          bootCompiler = "ghc9103";
+        };
+      };
+
     };
 
     nixpkgs = {

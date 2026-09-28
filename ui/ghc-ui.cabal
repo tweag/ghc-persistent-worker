@@ -36,6 +36,7 @@ library
     Ghc.Ui.App
     Ghc.Ui.Attr
     Ghc.Ui.Cli
+    Ghc.Ui.Data.Executors
     Ghc.Ui.Data.Log
     Ghc.Ui.Data.Main
     Ghc.Ui.Data.Name
@@ -49,6 +50,7 @@ library
     Ghc.Ui.Data.Settings
     Ghc.Ui.Data.Tasks
     Ghc.Ui.Data.WorkerId
+    Ghc.Ui.Event.Executors
     Ghc.Ui.Event.Log
     Ghc.Ui.Event.Main
     Ghc.Ui.Event.OpLog
@@ -61,6 +63,7 @@ library
     Ghc.Ui.GhcDebug
     Ghc.Ui.Monad
     Ghc.Ui.OpLog
+    Ghc.Ui.Render.Executors
     Ghc.Ui.Render.Format
     Ghc.Ui.Render.Layout
     Ghc.Ui.Render.Log

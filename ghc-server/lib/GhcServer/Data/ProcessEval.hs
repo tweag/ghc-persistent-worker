@@ -10,6 +10,7 @@ module GhcServer.Data.ProcessEval where
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import GHC.Generics (Generic)
+import GhcServer.Data.ExecutorPlan (PlanRequest)
 import GhcServer.Data.Unit (Unit)
 import System.OsPath.Extra (OsPath)
 import Types.Api (ModuleName, ProcessStats)
@@ -59,6 +60,14 @@ data EvalOutcome =
   |
   -- | The unit has no cache on disk, so its module map cannot be restored.
   EvalCacheMissing
+  |
+  -- | A persistent executor could not decode or link the bytecode of a 'GhcServer.Data.ExecutorPlan.PlanRequest'.
+  -- Its loaded state is unknown afterwards, so the parent forgets what it recorded as loaded.
+  EvalLoadFailed Text
+  |
+  -- | The executor's plan session was started with GHC options different from the request's. Nothing was linked,
+  -- but the executor can't serve the request, so the parent respawns it.
+  EvalOptionsMismatch Text
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
@@ -87,3 +96,14 @@ data ProcessEvalOutput =
     processStderr :: Text
   }
   deriving stock (Show)
+
+
+-- | The payload of the persistent executor's @Execute@ RPC.
+data ExecutorCall =
+  -- | Restore the unit from the cache and run the module like a one-shot child.
+  ExecuteModule ProcessEvalConfig
+  |
+  -- | Link the parent's bytecode plan in an interface-free session and run the entry (GBC only).
+  ExecutePlan PlanRequest
+  deriving stock (Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)

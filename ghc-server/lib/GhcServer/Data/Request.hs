@@ -2,7 +2,7 @@
 module GhcServer.Data.Request where
 
 import GhcServer.Data.Unit (ClientModule, Unit (..))
-import Types.Api (ExecutorId, UnitName)
+import Types.Api (ExecutorId (..), UnitName (..))
 
 -- | What to build for a unit: metadata, individual modules, or everything.
 data UnitRequest =
@@ -33,11 +33,25 @@ data ScheduleRequest =
     recompile :: Bool,
     -- | Recompute metadata and recompile even when cached.
     rebuild :: Bool,
-    -- | Run this request's @execute@ tasks via a persistent gRPC-addressable executor subprocess (see
+    -- | Run this request's @execute@ tasks via persistent gRPC-addressable executor subprocesses (see
     -- 'GhcServer.Build.Executor') instead of in-process. 'Nothing' runs in-process.
-    executor :: Maybe ExecutorId
+    executor :: Maybe ExecutorSelection
   }
   deriving stock (Show, Eq)
+
+-- | Which persistent executor runs a unit's execute tasks.
+data ExecutorSelection =
+  -- | All units use the executor with this id.
+  ExecutorNamed ExecutorId
+  |
+  -- | Each unit uses its own executor, named after the unit.
+  ExecutorPerUnit
+  deriving stock (Show, Eq)
+
+selectExecutor :: UnitName -> ExecutorSelection -> ExecutorId
+selectExecutor unit = \case
+  ExecutorNamed executorId -> executorId
+  ExecutorPerUnit -> ExecutorId unit.text
 
 -- | Why a unit is part of a build, and at which scope.
 --

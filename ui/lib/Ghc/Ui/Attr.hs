@@ -99,6 +99,9 @@ sectionProject = attrName "sectionProject"
 sectionSettings :: AttrName
 sectionSettings = attrName "sectionSettings"
 
+sectionExecutors :: AttrName
+sectionExecutors = attrName "sectionExecutors"
+
 -- | Applied to a module name within a task\/tree label (see 'UI.Utils.styledTarget', 'UI.Project.draw'):
 -- blue, bold. Shared between the task view's @unit  module@ labels and the project view's module rows so
 -- both use the same color coding.

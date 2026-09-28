@@ -21,6 +21,11 @@ flag linkables
     manual: True
     default: False
 
+flag gbc
+    description: GHC contains the bytecode artifacts (.gbc) backport
+    manual: True
+    default: False
+
 library
   ghc-options: -Wall -Widentities -Wincomplete-uni-patterns -Wmissing-deriving-strategies -Wredundant-constraints -Wunused-type-patterns -Wunused-packages -O2
   default-language: GHC2021
@@ -85,3 +90,6 @@ library
 
   if (flag(linkables))
       cpp-options: -DLINKABLES
+
+  if (flag(gbc))
+      cpp-options: -DGBC

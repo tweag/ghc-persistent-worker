@@ -158,7 +158,8 @@ runEval logger stateVar ProcessEvalConfig {projectRoot, unit, moduleName, shared
         instrChan = Nothing,
         extDepsDb,
         diff,
-        requestIdCounter
+        requestIdCounter,
+        executorRts = []
       }
 
 resolveConfig :: Maybe OsPath -> IO (Either String ProcessEvalConfig)

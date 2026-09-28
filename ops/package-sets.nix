@@ -25,7 +25,7 @@
     opts = ghcOptions ["-finfo-table-map" "-fdistinct-constructor-tables"];
   in allPackages opts;
 
-  buckBinOverrides = {overrideAttrs, notest, nodoc, ...}: {
+  buckBinOverrides = {notest, ...}: {
     ghc-worker = notest;
   };
 
@@ -73,6 +73,7 @@
     buck-worker-internal = flags;
     ghc-worker = flags;
     ghc-server = flags;
+    ghc-worker-test-common = flags;
   };
 
   commonOverrides = flags: [
@@ -95,6 +96,19 @@
   mkGithub = {force, source, nodoc, ...}: {owner ? "tek", repo, rev, hash, path ? ""}:
     nodoc (force (source.sub (config.pkgs.fetchFromGitHub { inherit owner repo rev hash; }) path));
 
+  # GBC build without tests, used by the tool apps.
+  # Hix's builtin env named `profiled` enables profiling, so the same definition yields a profiled and a plain build.
+  gbcToolEnv = defaultEnv [] // {
+    package-set.extends = "ghc914-gbc";
+    overrides = [
+      envOverrides
+      (overrides_mwb_flag ["fixed-nodes" "linkables" "gbc"])
+      ipeOverrides
+      ({notest, ...}: { ghc-worker = notest; ghc-server = notest; })
+    ];
+    ghci.args = ["-DFIXED_NODES" "-DLINKABLES" "-DGBC"];
+  };
+
 in {
 
   envs.ghc910 = {
@@ -102,8 +116,11 @@ in {
     overrides = [envOverrides ({notest, ...}: { ghc-worker = notest; })];
   };
 
-  envs.dev = latestEnv [] // {
+  envs.dev = defaultEnv [] // {
     buildInputs = pkgs: [pkgs.zlib pkgs.snappy pkgs.protobuf build.envs.dev.toolchain.packages.proto-lens-protoc];
+    package-set.extends = "ghc914-gbc";
+    overrides = commonOverrides ["fixed-nodes" "linkables" "gbc"] ++ [ipeOverrides];
+    ghci.args = ["-DFIXED_NODES" "-DLINKABLES" "-DGBC"];
   };
 
   envs.min = latestEnv [buckBinOverrides];
@@ -112,7 +129,15 @@ in {
     expose.scoped = true;
   };
 
-  envs.profiled = defaultEnv [({notest, ...}: { ghc-worker = notest; ghc-server = notest; })];
+  envs.profiled = gbcToolEnv;
+
+  # Dynamically linked, so that the internal interpreter of executors reuses the process's package libraries instead
+  # of loading the static archives with the RTS linker (~370 MB anonymous memory per executor).
+  envs.gbc-tools = gbcToolEnv // {
+    overrides = gbcToolEnv.overrides ++ [
+      ({modify, hsLibC, ...}: { ghc-server = modify hsLibC.enableSharedExecutables; })
+    ];
+  };
 
   envs.profiled-linkables = latestEnv [
     ({notest, ...}: { ghc-worker = notest; ghc-server = notest; })
@@ -126,6 +151,13 @@ in {
     expose.scoped = true;
     package-set.extends = "mercury-ghc9141";
     overrides = commonOverrides ["unit-index" "downsweep-cache"] ++ [ipeOverrides];
+  };
+
+  envs.ghc914-gbc = defaultEnv [buckBinOverrides] // {
+    expose.scoped = true;
+    package-set.extends = "ghc914-gbc";
+    overrides = commonOverrides ["fixed-nodes" "linkables" "gbc"] ++ [ipeOverrides];
+    ghci.args = ["-DFIXED_NODES" "-DLINKABLES" "-DGBC"];
   };
 
   # This environment is for building the worker with an externally provided, impure GHC.
@@ -200,6 +232,44 @@ in {
       base64 = force;
       bitwise = force;
       brick = force;
+      Cabal = hackage "3.16.1.0" "0gi5vxrc5bph99kh04yiicl6ficdav3y366w6jv5vrivm665jlkp";
+      Cabal-syntax = hackage "3.16.1.0" "1gy35b9gfday2nqqvnznjxkr59hdsrfa10cg5r6ykm5nvphi1d85";
+      # cabal-install = hackage "3.16.0.0" "19j0n6hwj4kvdipl20kzqi66l27q16jjwd7mz90m8s1ckwc9zvm4";
+      # cabal-install-solver = hackage "3.16.0.0" "1z8g2pzj4m1n1v6x6pjxhjba9m95d2x1zg4mwim1vl78i0v4nyl3";
+      config-ini = force;
+      lens-family = force;
+      lens-family-core = force;
+      proto-lens = force;
+      proto-lens-protobuf-types = force;
+      proto-lens-protoc = force;
+      proto-lens-runtime = force;
+      string-interpolate = force;
+      tasty = hackage "1.5.4" "0x6khif6n0rzfgkvrbiagg1sj0lwmjfr6qarjnjwmb9ywdk7598b";
+      generic-lens = notest;
+
+      proto-lens-setup = github {
+        repo = "proto-lens";
+        rev = "901331d19c3ab90ec24e231fa69c9ed81204f73b";
+        path = "proto-lens-setup";
+        hash = "sha256-st+j4vK4N00xHB//b62/HPLRBUw/PRGL8bP8WECMU5U=";
+      };
+
+    };
+  };
+
+  package-sets.ghc914-gbc = {
+    compiler = "ghc914-gbc";
+    overrides = api@{hackage, force, notest, ...}: let
+      github = mkGithub api;
+    in {
+      base64 = force;
+      bitwise = force;
+      brick = force;
+      Cabal = hackage "3.16.1.0" "0gi5vxrc5bph99kh04yiicl6ficdav3y366w6jv5vrivm665jlkp";
+      Cabal-syntax = hackage "3.16.1.0" "1gy35b9gfday2nqqvnznjxkr59hdsrfa10cg5r6ykm5nvphi1d85";
+      HTTP = force (hackage "4000.5.0" "0l9fdcyd7zbi7gz3v7wr0whh1c99hj042wld3hq37nms5ns70p1q");
+      # cabal-install = hackage "3.16.0.0" "19j0n6hwj4kvdipl20kzqi66l27q16jjwd7mz90m8s1ckwc9zvm4";
+      # cabal-install-solver = hackage "3.16.0.0" "1z8g2pzj4m1n1v6x6pjxhjba9m95d2x1zg4mwim1vl78i0v4nyl3";
       config-ini = force;
       lens-family = force;
       lens-family-core = force;

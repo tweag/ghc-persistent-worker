@@ -38,7 +38,7 @@ import Internal.Compat.GHC914 (hscModuleGraph)
 import Internal.Compile.Phase (withPhaseEvents)
 import Internal.Compile.TopEnv (patchTopEnv, withCaptureTopEnv)
 import Internal.Debug (pprModuleFull)
-import Internal.Error (eitherMessages, noteGhc)
+import Internal.Error (eitherMessagesIO, noteGhc)
 import Internal.Log (logTimedD)
 import System.OsPath.Extra (fromOsPath)
 import Types.Api (Events)
@@ -68,9 +68,9 @@ computeSummary ::
   FilePath ->
   IO ModSummary
 computeSummary logger hsc_env src = do
-    logTimedD logger ("Computing fresh ModSummary for" <+> text src) do
-      summResult <- summariseFile hsc_env (ue_unsafeHomeUnit (hsc_unit_env hsc_env)) mempty src Nothing Nothing
-      setHiLocation hsc_env <$> eitherMessages GhcDriverMessage summResult
+  logTimedD logger ("Computing fresh ModSummary for" <+> text src) do
+    summResult <- summariseFile hsc_env (ue_unsafeHomeUnit (hsc_unit_env hsc_env)) mempty src Nothing Nothing
+    setHiLocation hsc_env <$> eitherMessagesIO hsc_env GhcDriverMessage summResult
 
 -- | Find a module in the module graph and return its `ModSummary`.
 lookupSummary ::

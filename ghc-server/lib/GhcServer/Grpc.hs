@@ -19,7 +19,7 @@ import GHC (moduleNameString)
 import GhcServer.Build (Build (..), awaitBuild, scheduleBatch)
 import GhcServer.Build.Executor (terminateExecutor)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
-import GhcServer.Data.Request (ScheduleRequest (..), UnitRequest (..))
+import GhcServer.Data.Request (ExecutorSelection (..), ScheduleRequest (..), UnitRequest (..))
 import GhcServer.Data.Unit (ClientModule (..), Project (..), Unit (..))
 import GhcServer.Handler (ServerContext (..), executeCommand, runClean)
 import GhcServer.Log (emitEvent)
@@ -126,7 +126,7 @@ triggerTask mchan build project TaskTrigger {target, task} = do
     request = case task of
       TaskKind.Metadata -> ScheduleRequest {steps, recompile = False, rebuild = False, executor = Nothing}
       TaskKind.Build rebuild -> ScheduleRequest {steps, recompile = rebuild, rebuild, executor = Nothing}
-      Execute {executor} -> ScheduleRequest {steps = map toExecuteStep steps, recompile = False, rebuild = False, executor}
+      Execute {executor} -> ScheduleRequest {steps = map toExecuteStep steps, recompile = False, rebuild = False, executor = ExecutorNamed <$> executor}
 
     toExecuteStep (name, unitReq) = (name, executeVariant unitReq)
 

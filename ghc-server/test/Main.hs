@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 module Main where
 
 import GhcServer.Build.ExecutorChild (runExecutor)
@@ -9,10 +10,14 @@ import Test.BuildTest (test_serverBuild)
 import Test.CabalTest (test_cabalTests)
 import Test.CacheTest (test_depLoadOrder)
 import Test.CompactBytecodeTest (test_compactBytecode)
-import Test.ForkTest (test_forkShared)
+import Test.ExecutorPlanTest (test_executorPlan)
+import Test.GbcTransportTest (test_gbcTransport)
 import Test.ScheduleTest (test_schedule)
 import Test.SchedulerTest (test_scheduler)
-import Test.SubprocessTest (test_executorExecute, test_subprocessExecute)
+import Test.SubprocessTest (test_executorEvents, test_executorExecute, test_subprocessExecute)
+#if defined(GBC)
+import Test.SubprocessTest (test_executorPlanExecute)
+#endif
 import Test.Tasty (DependencyType (..), TestTree, defaultMain, dependentTestGroup)
 
 tests :: TestTree
@@ -23,11 +28,16 @@ tests =
     test_depLoadOrder,
     test_schedule,
     test_scheduler,
-  test_forkShared "forkProcess-shared-mmap",
-  test_compactBytecode,
-  test_subprocessExecute,
-  test_executorExecute
-    -- test_forkMetadata deliberately not wired in: it hangs (see Test.ForkMetadataTest module docs / kb-process-isolation).
+    test_compactBytecode,
+    test_gbcTransport,
+    test_executorPlan,
+    test_subprocessExecute,
+    test_executorExecute,
+    test_executorEvents
+#if defined(GBC)
+    ,
+    test_executorPlanExecute
+#endif
     ]
 
 main :: IO ()

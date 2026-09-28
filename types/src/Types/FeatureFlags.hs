@@ -31,6 +31,10 @@ data Feature =
   -- subprocess falls back to the basic approach of restoring cached interfaces\/objects and compiling Core
   -- bindings to bytecode itself (see 'Internal.Cache.Hpt.loadCachedByteCode').
   FeatureSharedMemory
+  |
+  -- | Transfer the bytecode payloads of executor plans through an append-only segment in shared memory instead of
+  -- @.gbc@ files (see 'GhcServer.Build.PayloadArena'). Only effective with the GBC backport.
+  FeatureSharedPayloads
   deriving stock (Eq, Show, Ord, Enum, Bounded, Generic)
   deriving anyclass (Binary, FromJSON, ToJSON)
 
@@ -46,4 +50,5 @@ parseFeatureFlag = \case
   "incremental-build-plan" -> Right FeatureIncrementalBuildPlan
   "lazy-byte-code" -> Right FeatureLazyByteCode
   "shared-memory" -> Right FeatureSharedMemory
+  "shared-payloads" -> Right FeatureSharedPayloads
   flag -> Left ("Invalid feature flag: " <> flag)

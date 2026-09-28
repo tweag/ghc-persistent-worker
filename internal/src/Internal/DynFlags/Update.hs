@@ -57,6 +57,10 @@ import Internal.Compat.GHC914 (impliedXFlags)
 
 import System.OsPath (unsafeEncodeUtf)
 
+#elif defined(GBC)
+
+import System.OsPath.Extra (toOsPath)
+
 #endif
 
 splitPaths :: ByteString -> [String]
@@ -82,7 +86,11 @@ addPackageDB path dflags =
 
 addPackageDB :: String -> DynFlags -> DynFlags
 addPackageDB path dflags =
+#if defined(GBC)
+  dflags {packageDBFlags = PackageDB (PkgDbPath (toOsPath path)) : packageDBFlags dflags}
+#else
   dflags {packageDBFlags = PackageDB (PkgDbPath path) : packageDBFlags dflags}
+#endif
 
 #endif
 

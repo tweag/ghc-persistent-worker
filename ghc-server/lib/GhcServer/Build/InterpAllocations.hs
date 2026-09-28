@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 -- | Recreating the interpreter allocations referenced by a 'GHC.ByteCode.Types.CompiledByteCode' in another
 -- process.
 --
@@ -35,6 +37,10 @@ module GhcServer.Build.InterpAllocations (
   allocStrings,
   allocString,
   rebuildItbls,
+#if defined(GBC)
+  rebuildItblDescrs,
+  toGhciConInfoTable,
+#endif
 ) where
 
 import Control.Exception (evaluate)
@@ -69,6 +75,11 @@ import GHC.Unit.Types (Module)
 import GHC.Utils.Outputable (ppr, showSDocUnsafe)
 import GHCi.Message (Message (MallocStrings, MkConInfoTable))
 import GHCi.RemoteTypes (fromRemotePtr)
+
+#if defined(GBC)
+import GHC.Types.Name (Name)
+import qualified GHCi.Message as GHCi
+#endif
 
 -- | The arguments of 'MkConInfoTable'. Uses 'ShortByteString' because a strict 'ByteString' is pinned and would
 -- break compaction.
@@ -108,7 +119,22 @@ conInfoTable profile dcon =
 
 allocConInfoTable :: HscEnv -> ConInfoTable -> IO ItblPtr
 allocConInfoTable env t =
+#if defined(GBC)
+  ItblPtr <$> interpCmd (hscInterp env) (MkConInfoTable (toGhciConInfoTable t))
+
+toGhciConInfoTable :: ConInfoTable -> GHCi.ConInfoTable
+toGhciConInfoTable t =
+  GHCi.ConInfoTable {
+    conItblTablesNextToCode = t.tablesNextToCode,
+    conItblPtrs = t.ptrs,
+    conItblNPtrs = t.nptrs,
+    conItblConTag = t.conNo,
+    conItblPtrTag = t.ptrTag,
+    conItblDescr = fromShort t.descr
+  }
+#else
   ItblPtr <$> interpCmd (hscInterp env) (MkConInfoTable t.tablesNextToCode t.ptrs t.nptrs t.conNo t.ptrTag (fromShort t.descr))
+#endif
 
 -- | Read the contents of all string literals from the (internal) interpreter's memory. See module docs.
 readStrings :: AddrEnv -> IO (NameEnv ShortByteString)
@@ -155,7 +181,22 @@ allocStrings env strings =
 -- | Allocate info tables for all data constructors of the target module, using the 'TyCon's from the importing
 -- process's own home unit graph (i.e. its loaded interface).
 rebuildItbls :: HscEnv -> Module -> IO ItblEnv
+#if defined(GBC)
+rebuildItbls env target = do
+  descrs <- rebuildItblDescrs env target
+  fmap mkNameEnv $ for descrs \ (n, itbl) ->
+    (n,) . (n,) . ItblPtr <$> interpCmd (hscInterp env) (MkConInfoTable itbl)
+
+-- | Info table descriptions for all data constructors of the target module, computed from the 'TyCon's in the
+-- importing process's own home unit graph.
+rebuildItblDescrs :: HscEnv -> Module -> IO [(Name, GHCi.ConInfoTable)]
+rebuildItblDescrs env target =
+  lookupHugByModule target (hsc_HUG env) >>= \case
+    Just hmi -> pure (mkITbls (targetProfile env.hsc_dflags) (typeEnvTyCons hmi.hm_details.md_types))
+    Nothing -> fail ("rebuildItblDescrs: module not in home unit graph: " ++ showSDocUnsafe (ppr target))
+#else
 rebuildItbls env target =
   lookupHugByModule target (hsc_HUG env) >>= \case
     Just hmi -> mkITbls (hscInterp env) (targetProfile env.hsc_dflags) (typeEnvTyCons hmi.hm_details.md_types)
     Nothing -> fail ("rebuildItbls: module not in home unit graph: " ++ showSDocUnsafe (ppr target))
+#endif

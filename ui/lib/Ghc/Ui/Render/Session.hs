@@ -8,6 +8,7 @@ import Data.Time (UTCTime)
 import Ghc.Ui.Data.Name (Name)
 import Ghc.Ui.Data.OpLog (OpLogState)
 import Ghc.Ui.Data.Session (SessionState (..), Stats (..), Worker (..))
+import Ghc.Ui.Render.Executors (renderExecutors)
 import Ghc.Ui.Render.Format (formatBytes, formatPs)
 import Ghc.Ui.Render.OpLog (renderOpLogEmbed)
 import Ghc.Ui.Render.Project (renderProject)
@@ -32,13 +33,16 @@ renderStats workerCount Stats {..} =
     memoryStats = Text.concat [" " <> k <> "=" <> formatBytes v | (k, v) <- Map.toList memory]
 
 renderSession :: Name -> UTCTime -> OpLogState -> SessionState -> Widget Name
-renderSession current now opLog SessionState {project, tasks, workers, finishedWorkerStats, settings} =
+renderSession current now opLog SessionState {project, tasks, workers, finishedWorkerStats, settings, executors} =
   vBox [
     padAll 2 $ hBox [
       hLimitPercent 50 $ padRight (Pad 3) $ vBox [renderProject current project, fill ' '],
       renderTasks current now tasks
     ],
-    padAll 2 $ renderSettings current settings,
+    padAll 2 $ hBox [
+      hLimitPercent 40 $ padRight (Pad 3) $ renderSettings current settings,
+      renderExecutors current executors
+    ],
     hBorder,
     renderStats (length workers) (foldMap (.stats) workers <> finishedWorkerStats),
     hBorder,

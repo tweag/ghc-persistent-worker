@@ -44,6 +44,7 @@ import qualified Types.Args as Args
 import Types.Args (Args (..))
 import Types.BuckArgs (IsInterpreted (Compiled))
 import Types.BuildPlan.Incremental (BuckHashesPath (..), BuildPlanPath (..))
+import Types.Compat.GHC914 (sanitizeGhcArgs)
 import Types.Env (Env (..))
 import Types.Target (ModuleTarget (..), TargetSpec (..))
 
@@ -138,12 +139,12 @@ metadataArgs env useIncremental GenUnit {key, modules, depUnits} =
   env.shared.baseArgs {
     buildPlan = Just buildPlanPath,
     sourceHashes = if useIncremental then Just perUnitMetaPath else Nothing,
-    ghcOptions = staticMetaArgs ++ extDepDbArgs ++ thArgs ++ extDepPkgArgs ++ metaArgs ++ unitDepArgs
+    ghcOptions = sanitizeGhcArgs (staticMetaArgs ++ extDepDbArgs ++ thArgs ++ extDepPkgArgs ++ metaArgs ++ unitDepArgs)
   }
   where
     metaArgs = [
       "-this-unit-id", unitName key,
-      "-dep-json=" ++ fromOsPath (sessionTmpDir </> [osp|dep.json|]),
+      "-dep-json", fromOsPath (sessionTmpDir </> [osp|dep.json|]),
       "-dep-makefile=" ++ fromOsPath (sessionTmpDir </> [osp|dep.make|]),
       "-odir", fromOsPath outDir,
       "-hidir", fromOsPath outDir

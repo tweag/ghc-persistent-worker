@@ -86,7 +86,8 @@ runCabalFresh tp steps = timedBuild do
         instrChan = Nothing,
         diff = diffMVar,
         extDepsDb,
-        requestIdCounter
+        requestIdCounter,
+        executorRts = []
       }
   result <- runBuild 4 testTaskTimeout env ScheduleRequest {steps, recompile = False, rebuild = False, executor = Nothing}
   evs <- readEvents events

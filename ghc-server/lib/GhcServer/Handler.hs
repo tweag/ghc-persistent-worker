@@ -8,7 +8,6 @@ import Control.Concurrent.STM (atomically, modifyTVar')
 import Control.Exception (SomeException (..), displayException, fromException, try)
 import Control.Monad (filterM, join, when)
 import Control.Monad.Extra (whenMaybe)
-import Data.Functor ((<&>))
 import Data.IORef (newIORef)
 import Data.Int (Int32)
 import qualified Data.Map.Strict as Map
@@ -25,7 +24,9 @@ import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (newBuildEvents)
 import GhcServer.Data.Config (ServerConfig (..))
 import qualified GhcServer.Data.Request as Request
-import GhcServer.Data.Request (ScheduleRequest (ScheduleRequest), UnitRequest (..))
+import GhcServer.Data.Request (ExecutorSelection (..), ScheduleRequest (ScheduleRequest), UnitRequest (..))
+import GhcServer.Build.Executor (executorStatsReport)
+import Data.Foldable (traverse_)
 import GhcServer.Data.Unit (ClientModule (..), Project (..), Unit (..), UnitCache (..))
 import GhcServer.Log (emitLog, newLogger)
 import GhcServer.Path (cacheDirName, outputDirName, tmpDirName)
@@ -46,7 +47,7 @@ import qualified Types.Args as Args
 import Types.Args (emptyArgs)
 import Types.FeatureFlags (Feature (..))
 import Types.Grpc (CommandEnv (..), RequestArgs (..))
-import Types.Log (Logger)
+import Types.Log (Logger (..))
 import Types.Settings (featureOn)
 import Types.State (WorkerState (executors, settings))
 
@@ -161,7 +162,7 @@ data Flags =
     wait :: Bool,
     recompile :: Bool,
     rebuild :: Bool,
-    executorId :: Maybe ExecutorId
+    executor :: Maybe ExecutorSelection
   }
 
 -- | Parse schedule arguments from the client's command line.
@@ -181,7 +182,7 @@ data Flags =
 parseScheduleArgs :: Project -> [String] -> Either String ScheduleCommand
 parseScheduleArgs project = \case
   "schedule" : rest -> do
-    let (flags, targets) = extractFlags rest
+    (flags, targets) <- extractFlags rest
     steps <- case targets of
       [] -> Right [(name, UnitAll) | name <- Map.keys project.units]
       _ -> concat <$> traverse (parseTarget project) targets
@@ -189,21 +190,23 @@ parseScheduleArgs project = \case
       recompile = flags.recompile || flags.rebuild
       rebuild = flags.rebuild
     Right ScheduleCommand {
-      request = ScheduleRequest {steps, recompile, rebuild, executor = flags.executorId},
+      request = ScheduleRequest {steps, recompile, rebuild, executor = flags.executor},
       scheduleWait = flags.wait
     }
   other ->
     Left ("Unknown command: " ++ unwords other)
   where
-    extractFlags = go Flags {wait = False, recompile = False, rebuild = False, executorId = Nothing}
+    extractFlags = go Flags {wait = False, recompile = False, rebuild = False, executor = Nothing}
 
-    go :: Flags -> [String] -> (Flags, [String])
+    go :: Flags -> [String] -> Either String (Flags, [String])
     go acc = \case
       "--wait" : ts -> go acc {wait = True} ts
       "--recompile" : ts -> go acc {recompile = True} ts
       "--rebuild" : ts -> go acc {rebuild = True} ts
-      "--executor" : eid : ts -> go acc {executorId = Just (ExecutorId (Text.pack eid))} ts
-      ts -> (acc, ts)
+      "--executor" : eid : ts -> go acc {executor = Just (ExecutorNamed (ExecutorId (Text.pack eid)))} ts
+      "--executors" : "unit" : ts -> go acc {executor = Just ExecutorPerUnit} ts
+      "--executors" : other : _ -> Left ("Invalid executor scheme: " ++ other ++ " (supported: unit)")
+      ts -> Right (acc, ts)
 
 -- | Format a build result as a human-readable report.
 formatResult :: BuildResult -> [String]
@@ -248,7 +251,8 @@ buildEnv config outputDir tmpDir project log = do
     instrChan,
     extDepsDb,
     diff,
-    requestIdCounter
+    requestIdCounter,
+    executorRts = config.executorRts
   }
 
 -- | Everything created at server boot that is needed to serve both the GhcServer protocol and (optionally) the
@@ -261,8 +265,8 @@ data ServerContext =
     buildEnv :: BuildEnv
   }
 
-handle :: Project -> Build -> RequestArgs -> IO ([String], Int32)
-handle project build (RequestArgs argv) =
+handle :: BuildEnv -> Project -> Build -> RequestArgs -> IO ([String], Int32)
+handle env project build (RequestArgs argv) =
   either parseError run (parseScheduleArgs project argv)
   where
     run cmd = do
@@ -271,9 +275,11 @@ handle project build (RequestArgs argv) =
       then wait
       else pure (["Scheduled."], 0)
 
-    wait =
-      awaitBuild build <&> \ result ->
-        (formatResult result, if result.success then 0 else 1)
+    wait = do
+      result <- awaitBuild build
+      -- Only printed by the verbose logger.
+      traverse_ env.log.info =<< executorStatsReport env
+      pure (formatResult result, if result.success then 0 else 1)
 
     parseError message = pure ([message], 1)
 
@@ -296,7 +302,7 @@ serverContext config = do
   -- forwarding decisions to it is otherwise a no-op cost not worth guarding separately in production.
   build <- newBuild (\ decision -> emitLog env.instrChan "scheduler" "debug" (show decision)) config.maxJobs 300 env
   pure ServerContext {
-    grpcHandler = GrpcHandler (const (handle project build)),
+grpcHandler = GrpcHandler (const (handle env project build)),
     build,
     buildEnv = env
   }

@@ -7,6 +7,8 @@ import Data.Time (UTCTime)
 import GHC.Generics (Generic)
 import Ghc.Ui.Data.Log qualified as Log
 import Ghc.Ui.Data.Log (LogState)
+import Ghc.Ui.Data.Executors qualified as Executors
+import Ghc.Ui.Data.Executors (ExecutorsState)
 import Ghc.Ui.Data.Project qualified as Project
 import Ghc.Ui.Data.Project (ProjectState)
 import Ghc.Ui.Data.Settings qualified as Settings
@@ -59,6 +61,7 @@ data SessionState =
     tasks :: TasksState,
     project :: ProjectState,
     settings :: SettingsState,
+    executors :: ExecutorsState,
     log :: LogState,
     startTime :: UTCTime,
     endTime :: Maybe UTCTime,
@@ -81,6 +84,7 @@ initialState sessionId startTime =
     tasks = Tasks.initialState,
     project = Project.initialState,
     settings = Settings.initialState,
+    executors = Executors.initialState,
     log = Log.initialState,
     startTime = startTime,
     endTime = Nothing,

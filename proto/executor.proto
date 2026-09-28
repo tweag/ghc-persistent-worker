@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package executor;
 
+message Empty {}
+
 message Encoded {
   bytes payload = 1;
 }
@@ -10,4 +12,6 @@ message Encoded {
 // The payload of a request is a JSON-encoded ProcessEvalConfig, the response a JSON-encoded ProcessEvalResult.
 service Executor {
   rpc Execute(Encoded) returns (Encoded) {};
+  // Periodic status snapshots; each element is a JSON-encoded Types.Api.ExecutorStatus.
+  rpc Events(Empty) returns (stream Encoded) {};
 }

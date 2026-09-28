@@ -4,7 +4,7 @@
 {-# OPTIONS_GHC -Wno-duplicate-exports#-}
 {-# OPTIONS_GHC -Wno-dodgy-exports#-}
 module Proto.Executor (
-        Executor(..), Encoded()
+        Executor(..), Empty(), Encoded()
     ) where
 import qualified Control.DeepSeq
 import qualified Data.ProtoLens.Prism
@@ -31,6 +31,66 @@ import qualified Data.Vector
 import qualified Data.Vector.Generic
 import qualified Data.Vector.Unboxed
 import qualified Text.Read
+{- | Fields :
+      -}
+data Empty
+  = Empty'_constructor {_Empty'_unknownFields :: !Data.ProtoLens.FieldSet}
+  deriving stock (Prelude.Eq, Prelude.Ord)
+instance Prelude.Show Empty where
+  showsPrec _ __x __s
+    = Prelude.showChar
+        '{'
+        (Prelude.showString
+           (Data.ProtoLens.showMessageShort __x) (Prelude.showChar '}' __s))
+instance Data.ProtoLens.Message Empty where
+  messageName _ = Data.Text.pack "executor.Empty"
+  packedMessageDescriptor _
+    = "\n\
+      \\ENQEmpty"
+  packedFileDescriptor _ = packedFileDescriptor
+  fieldsByTag = let in Data.Map.fromList []
+  unknownFields
+    = Lens.Family2.Unchecked.lens
+        _Empty'_unknownFields
+        (\ x__ y__ -> x__ {_Empty'_unknownFields = y__})
+  defMessage = Empty'_constructor {_Empty'_unknownFields = []}
+  parseMessage
+    = let
+        loop :: Empty -> Data.ProtoLens.Encoding.Bytes.Parser Empty
+        loop x
+          = do end <- Data.ProtoLens.Encoding.Bytes.atEnd
+               if end then
+                   do (let missing = []
+                       in
+                         if Prelude.null missing then
+                             Prelude.return ()
+                         else
+                             Prelude.fail
+                               ((Prelude.++)
+                                  "Missing required fields: "
+                                  (Prelude.show (missing :: [Prelude.String]))))
+                      Prelude.return
+                        (Lens.Family2.over
+                           Data.ProtoLens.unknownFields (\ !t -> Prelude.reverse t) x)
+               else
+                   do tag <- Data.ProtoLens.Encoding.Bytes.getVarInt
+                      case tag of
+                        wire
+                          -> do !y <- Data.ProtoLens.Encoding.Wire.parseTaggedValueFromWire
+                                        wire
+                                loop
+                                  (Lens.Family2.over
+                                     Data.ProtoLens.unknownFields (\ !t -> (:) y t) x)
+      in
+        (Data.ProtoLens.Encoding.Bytes.<?>)
+          (do loop Data.ProtoLens.defMessage) "Empty"
+  buildMessage
+    = \ _x
+        -> Data.ProtoLens.Encoding.Wire.buildFieldSet
+             (Lens.Family2.view Data.ProtoLens.unknownFields _x)
+instance Control.DeepSeq.NFData Empty where
+  rnf
+    = \ x__ -> Control.DeepSeq.deepseq (_Empty'_unknownFields x__) ()
 {- | Fields :
      
          * 'Proto.Executor_Fields.payload' @:: Lens' Encoded Data.ByteString.ByteString@ -}
@@ -144,57 +204,79 @@ data Executor = Executor {}
 instance Data.ProtoLens.Service.Types.Service Executor where
   type ServiceName Executor = "Executor"
   type ServicePackage Executor = "executor"
-  type ServiceMethods Executor = '["execute"]
+  type ServiceMethods Executor = '["events", "execute"]
   packedServiceDescriptor _
     = "\n\
       \\bExecutor\DC21\n\
-      \\aExecute\DC2\DC1.executor.Encoded\SUB\DC1.executor.Encoded\"\NUL"
+      \\aExecute\DC2\DC1.executor.Encoded\SUB\DC1.executor.Encoded\"\NUL\DC20\n\
+      \\ACKEvents\DC2\SI.executor.Empty\SUB\DC1.executor.Encoded\"\NUL0\SOH"
 instance Data.ProtoLens.Service.Types.HasMethodImpl Executor "execute" where
   type MethodName Executor "execute" = "Execute"
   type MethodInput Executor "execute" = Encoded
   type MethodOutput Executor "execute" = Encoded
   type MethodStreamingType Executor "execute" = 'Data.ProtoLens.Service.Types.NonStreaming
+instance Data.ProtoLens.Service.Types.HasMethodImpl Executor "events" where
+  type MethodName Executor "events" = "Events"
+  type MethodInput Executor "events" = Empty
+  type MethodOutput Executor "events" = Encoded
+  type MethodStreamingType Executor "events" = 'Data.ProtoLens.Service.Types.ServerStreaming
 packedFileDescriptor :: Data.ByteString.ByteString
 packedFileDescriptor
   = "\n\
-    \\SOexecutor.proto\DC2\bexecutor\"#\n\
+    \\SOexecutor.proto\DC2\bexecutor\"\a\n\
+    \\ENQEmpty\"#\n\
     \\aEncoded\DC2\CAN\n\
-    \\apayload\CAN\SOH \SOH(\fR\apayload2=\n\
+    \\apayload\CAN\SOH \SOH(\fR\apayload2o\n\
     \\bExecutor\DC21\n\
-    \\aExecute\DC2\DC1.executor.Encoded\SUB\DC1.executor.Encoded\"\NULJ\136\ETX\n\
-    \\ACK\DC2\EOT\NUL\NUL\f\SOH\n\
+    \\aExecute\DC2\DC1.executor.Encoded\SUB\DC1.executor.Encoded\"\NUL\DC20\n\
+    \\ACKEvents\DC2\SI.executor.Empty\SUB\DC1.executor.Encoded\"\NUL0\SOHJ\187\EOT\n\
+    \\ACK\DC2\EOT\NUL\NUL\DLE\SOH\n\
     \\b\n\
     \\SOH\f\DC2\ETX\NUL\NUL\DC2\n\
     \\b\n\
     \\SOH\STX\DC2\ETX\STX\NUL\DC1\n\
+    \\t\n\
+    \\STX\EOT\NUL\DC2\ETX\EOT\NUL\DLE\n\
     \\n\
     \\n\
-    \\STX\EOT\NUL\DC2\EOT\EOT\NUL\ACK\SOH\n\
+    \\ETX\EOT\NUL\SOH\DC2\ETX\EOT\b\r\n\
     \\n\
     \\n\
-    \\ETX\EOT\NUL\SOH\DC2\ETX\EOT\b\SI\n\
+    \\STX\EOT\SOH\DC2\EOT\ACK\NUL\b\SOH\n\
+    \\n\
+    \\n\
+    \\ETX\EOT\SOH\SOH\DC2\ETX\ACK\b\SI\n\
     \\v\n\
-    \\EOT\EOT\NUL\STX\NUL\DC2\ETX\ENQ\STX\DC4\n\
+    \\EOT\EOT\SOH\STX\NUL\DC2\ETX\a\STX\DC4\n\
     \\f\n\
-    \\ENQ\EOT\NUL\STX\NUL\ENQ\DC2\ETX\ENQ\STX\a\n\
+    \\ENQ\EOT\SOH\STX\NUL\ENQ\DC2\ETX\a\STX\a\n\
     \\f\n\
-    \\ENQ\EOT\NUL\STX\NUL\SOH\DC2\ETX\ENQ\b\SI\n\
+    \\ENQ\EOT\SOH\STX\NUL\SOH\DC2\ETX\a\b\SI\n\
     \\f\n\
-    \\ENQ\EOT\NUL\STX\NUL\ETX\DC2\ETX\ENQ\DC2\DC3\n\
+    \\ENQ\EOT\SOH\STX\NUL\ETX\DC2\ETX\a\DC2\DC3\n\
     \\215\SOH\n\
-    \\STX\ACK\NUL\DC2\EOT\n\
-    \\NUL\f\SOH\SUB\202\SOH A persistent execute-task subprocess spawned by ghc-server (see GhcServer.Build.Executor).\n\
+    \\STX\ACK\NUL\DC2\EOT\f\NUL\DLE\SOH\SUB\202\SOH A persistent execute-task subprocess spawned by ghc-server (see GhcServer.Build.Executor).\n\
     \ The payload of a request is a JSON-encoded ProcessEvalConfig, the response a JSON-encoded ProcessEvalResult.\n\
     \\n\
     \\n\
     \\n\
-    \\ETX\ACK\NUL\SOH\DC2\ETX\n\
-    \\b\DLE\n\
+    \\ETX\ACK\NUL\SOH\DC2\ETX\f\b\DLE\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\NUL\DC2\ETX\v\STX+\n\
+    \\EOT\ACK\NUL\STX\NUL\DC2\ETX\r\STX+\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\SOH\DC2\ETX\v\ACK\r\n\
+    \\ENQ\ACK\NUL\STX\NUL\SOH\DC2\ETX\r\ACK\r\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\STX\DC2\ETX\v\SO\NAK\n\
+    \\ENQ\ACK\NUL\STX\NUL\STX\DC2\ETX\r\SO\NAK\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\ETX\DC2\ETX\v 'b\ACKproto3"
+    \\ENQ\ACK\NUL\STX\NUL\ETX\DC2\ETX\r '\n\
+    \b\n\
+    \\EOT\ACK\NUL\STX\SOH\DC2\ETX\SI\STX/\SUBU Periodic status snapshots; each element is a JSON-encoded Types.Api.ExecutorStatus.\n\
+    \\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\SOH\SOH\DC2\ETX\SI\ACK\f\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\SOH\STX\DC2\ETX\SI\r\DC2\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\SOH\ACK\DC2\ETX\SI\GS#\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\SOH\ETX\DC2\ETX\SI$+b\ACKproto3"

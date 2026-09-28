@@ -13,6 +13,8 @@ data Name =
   |
   Settings
   |
+  Executors
+  |
   Sessions
   |
   StartServer

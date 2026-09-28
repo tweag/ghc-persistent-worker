@@ -25,6 +25,7 @@ import Ghc.Ui.Data.Session (SessionState (..))
 import qualified Ghc.Ui.Data.Sessions as Sessions
 import Ghc.Ui.Data.Settings (LocalFlag (ProcessExecute), SettingKind (..), localFlagEnabled)
 import Ghc.Ui.Data.WorkerId (WorkerId (..))
+import Ghc.Ui.Event.Executors qualified as Executors
 import Ghc.Ui.Event.Log (handleLogEvent)
 import Ghc.Ui.Event.OpLog (handleOpLogEvent, logMainEvent)
 import Ghc.Ui.Event.Popup (focus, handleForm, handleListEventOf, listKeyEvent, openPopup, popupKeyEvent, staticDialog)
@@ -236,7 +237,8 @@ handleGlobalKey current event = \case
     case current of
       Tasks -> focus Project
       Project -> focus Settings
-      Settings -> focus Tasks
+      Settings -> focus Executors
+      Executors -> focus Tasks
       _ -> pure ()
 
   _ ->
@@ -244,6 +246,7 @@ handleGlobalKey current event = \case
       Tasks -> handleListEventOf (currentSession . #tasks) event
       Project -> handleListEventOf (currentSession . #project . #rows) event
       Settings -> handleListEventOf (currentSession . #settings . #rows) event
+      Executors -> handleListEventOf (currentSession . #executors . #rows) event
       _ -> pure ()
 
 -- | Keys that operate on the project view specifically: build\/execute triggers (which read their targets from
@@ -302,6 +305,18 @@ settingsKey event = \case
   KChar ' ' -> toggleFeature
   key -> handleGlobalKey Settings event key
 
+-- | Keys that operate on the executors view: 'k' terminates the selected executor. Any other key falls through to
+-- 'handleGlobalKey'.
+executorsKey :: Event -> Key -> MainM ()
+executorsKey event = \case
+  KChar 'k' ->
+    inSession #executors Executors.markSelectedKilling \case
+      Nothing -> logOp "No executor selected"
+      Just executor -> do
+        logOp ("Terminating executor " <> executor.text)
+        withApi \ api -> api.terminateExecutor executor
+  key -> handleGlobalKey Executors event key
+
 keyEvent ::
   (Event -> Key -> MainM ()) ->
   Event ->
@@ -334,6 +349,9 @@ vtyEvent = \case
 
   Settings ->
     keyEvent settingsKey
+
+  Executors ->
+    keyEvent executorsKey
 
   Tasks ->
     keyEvent tasksKey

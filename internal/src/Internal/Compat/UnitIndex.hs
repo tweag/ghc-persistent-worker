@@ -8,12 +8,12 @@ import GHC.Driver.Env (HscEnv (..))
 import GHC.Platform (PlatformConstants)
 import qualified GHC.Unit as GHC (initUnits)
 import GHC.Unit (HomeUnit, UnitDatabase, UnitId, UnitState)
-import GHC.Unit.Env (UnitEnv (..))
 
 #if defined(UNIT_INDEX)
 
 import GHC (Logger)
 import GHC.Unit (UnitConfig)
+import GHC.Unit.Env (UnitEnv (..))
 import qualified GHC.Unit.State as GHC (readUnitDatabase)
 import System.OsPath.Extra (OsPath)
 

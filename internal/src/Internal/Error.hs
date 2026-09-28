@@ -1,3 +1,5 @@
+{-# language CPP #-}
+
 module Internal.Error where
 
 import Control.Exception (AsyncException (..), Exception (..), SomeException, throwIO)
@@ -10,6 +12,7 @@ import GHC (DynFlags, Ghc, GhcException (..), GhcMonad, getSessionDynFlags, noSr
 import GHC.Data.Bag (listToBag)
 import GHC.Data.FastString (mkFastString)
 import GHC.Driver.Config.Diagnostic (initDiagOpts)
+import GHC.Driver.DynFlags (HasDynFlags (..))
 import GHC.Driver.Env (HscEnv (..))
 import GHC.Driver.Errors.Types (DriverMessage (..), DriverMessages, GhcMessage (..))
 import GHC.Types.Error (
@@ -23,6 +26,13 @@ import GHC.Types.Error (
   singleMessage,
   )
 import GHC.Types.SourceError (SourceError, throwErrors)
+
+#if defined(GBC)
+
+import GHC.Types.SourceError (initSourceErrorContext)
+
+#endif
+
 import GHC.Types.SrcLoc (mkGeneralSrcSpan)
 import GHC.Utils.Error (mkPlainMsgEnvelope)
 import GHC.Utils.Outputable (Outputable (..), SDoc, text)
@@ -49,14 +59,51 @@ handleExceptions logger errResult =
 
     fm = liftIO . logger.fatal . text
 
+-- | Throw a 'SourceError', using the error context derived from 'DynFlags' when the GHC API requires it.
+throwErrorsFor ::
+  MonadIO m =>
+  DynFlags ->
+  Messages GhcMessage ->
+  m a
+
+#if defined(GBC)
+
+throwErrorsFor dflags = throwErrors (initSourceErrorContext dflags)
+
+#else
+
+throwErrorsFor _ = throwErrors
+
+#endif
+
+throwErrorsWithContext ::
+  MonadIO m =>
+  HasDynFlags m =>
+  (a -> GhcMessage) ->
+  Messages a ->
+  m b
+throwErrorsWithContext toMessage errs = do
+  dflags <- getDynFlags
+  throwErrorsFor dflags (toMessage <$> errs)
+
 eitherMessages ::
   MonadIO m =>
+  HasDynFlags m =>
   (a -> GhcMessage) ->
   Either (Messages a) b ->
   m b
 eitherMessages toMessage = \case
   Right b -> pure b
-  Left errs -> throwErrors (toMessage <$> errs)
+  Left errs -> throwErrorsWithContext toMessage errs
+
+eitherMessagesIO ::
+  HscEnv ->
+  (a -> GhcMessage) ->
+  Either (Messages a) b ->
+  IO b
+eitherMessagesIO hsc_env toMessage = \case
+  Right b -> pure b
+  Left errs -> throwErrorsFor hsc_env.hsc_dflags (toMessage <$> errs)
 
 noteGhc ::
   MonadIO m =>
@@ -129,14 +176,14 @@ workerError ::
   m a
 workerError reason = do
   dflags <- getSessionDynFlags
-  throwErrors (GhcDriverMessage <$> unknownErrors (Just "worker") dflags reason)
+  throwErrorsFor dflags (GhcDriverMessage <$> unknownErrors (Just "worker") dflags reason)
 
 workerErrorIO ::
   HscEnv ->
   SDoc ->
   IO a
-workerErrorIO hsc_env reason = do
-  throwErrors (GhcDriverMessage <$> unknownErrors (Just "worker") hsc_env.hsc_dflags reason)
+workerErrorIO hsc_env reason =
+  throwErrorsFor hsc_env.hsc_dflags (GhcDriverMessage <$> unknownErrors (Just "worker") hsc_env.hsc_dflags reason)
 
 eitherWorkerError ::
   GhcMonad m =>
