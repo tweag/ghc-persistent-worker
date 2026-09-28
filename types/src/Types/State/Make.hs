@@ -9,11 +9,20 @@ import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import GHC (HscEnv, ModuleGraph, ModuleName, emptyMG)
 import GHC.Data.Graph.Directed (Node)
-import GHC.Linker.Types (Linkable)
 import GHC.Runtime.Interpreter (Interp)
 import GHC.Unit.Env (HomeUnitGraph)
 import GHC.Unit.Module.Graph (ModuleGraphNode, NodeKey)
 import GHC.Unit.Types (Module, UnitId)
+
+#if defined(GBC)
+
+import GHC.Linker.Types (LinkableWith, ModuleByteCode)
+
+#else
+
+import GHC.Linker.Types (Linkable)
+
+#endif
 
 #if defined(UNIT_INDEX)
 
@@ -26,6 +35,13 @@ data UnitIndex = UnitIndex
 #endif
 
 type LibName = String
+
+-- | The type of 'GHC.Unit.Home.ModInfo.homeMod_bytecode'.
+#if defined(GBC)
+type HomeByteCode = LinkableWith ModuleByteCode
+#else
+type HomeByteCode = Linkable
+#endif
 
 -- | Currently requested and loaded dynamic libraries
 --   which are being loaded via direct loadDLL calls.
@@ -79,7 +95,6 @@ emptyEModuleGraph = EModuleGraph
 -- | Loader state tracking metadata for a single 'Linkable'.
 data BcoCacheEntry =
   BcoCacheEntry {
-    linkable :: Linkable,
     -- | A measure for the age of this entry, representing the value of 'bcoAccessCounter' at the time it was last used.
     lastAccess :: Int,
     -- | The number of BCOs contained in the linkable, used as a proxy for size.
@@ -145,10 +160,10 @@ data MakeState =
     -- Core ('Internal.State.Linkables.lazyLoadByteCode'); a hit rehydrates the entry (the closure captures whatever
     -- source-specific representation the caller built it from, e.g. a mirrored, 'Name'-free linkable) and removes it
     -- from this map, since after insertion into the HPT the module's 'HomeModLinkable.homeMod_bytecode' is no longer
-    -- 'Nothing' and will never be looked up here again. Kept as a plain 'GHC.Linker.Types.Linkable'-producing
+    -- 'Nothing' and will never be looked up here again. Kept as a plain 'HomeByteCode'-producing
     -- function (rather than an importer-specific type) so this module doesn't need to depend on whichever package
     -- defines the external source.
-    bytecodeImport :: M.Map (UnitId, ModuleName) (HscEnv -> Module -> IO Linkable)
+    bytecodeImport :: M.Map (UnitId, ModuleName) (HscEnv -> Module -> IO HomeByteCode)
   }
 
 -- | Historic cache-tracking metadata for a module that has (or had) an entry in 'MakeState.bcoCache'. See

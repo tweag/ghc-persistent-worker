@@ -22,8 +22,7 @@
 -- Parent side: 'exportSharedBytecode' walks the parent's persisted 'GHC.Unit.Home.Graph.HomeUnitGraph'
 -- (available from 'Types.State.Make.MakeState' without needing a live 'HscEnv'), mirrors and compacts every
 -- mirrorable module's bytecode into a single 'GHC.Compact.Compact' region, and writes it into a freshly created
--- @\/dev\/shm@ file via a raw @mmap@\/@munmap@ FFI binding (the @unix@ package has no wrapper for @mmap@; see
--- 'Test.ForkTest' for the precedent).
+-- @\/dev\/shm@ file via a raw @mmap@\/@munmap@ FFI binding (the @unix@ package has no wrapper for @mmap@).
 --
 -- | Child side: 'importSharedBytecode' opens the same file, @mmap@s it read-only, and reconstructs a 'Compact'
 -- value in the child's own heap via 'GHC.Compact.Serialized.importCompactByteStrings' (which allocates fresh
@@ -51,20 +50,20 @@ import GHC (Module, ModuleName, mkModuleName, moduleNameString)
 import GHC.Compact (compact, getCompact)
 import GHC.Compact.Serialized (SerializedCompact (..), importCompactByteStrings, withSerializedCompact)
 import GHC.Driver.Env (HscEnv)
-import GHC.Linker.Types (Linkable)
 import GHC.Unit.Home.Graph (HomeUnitEnv (..), HomeUnitGraph, UnitEnvGraph (..), homeUnitEnv_hpt)
-import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..))
+import GHC.Unit.Home.ModInfo (HomeModInfo (..))
 import Data.Maybe (catMaybes)
 import GHC.Unit.Home.PackageTable (concatHpt)
 import GHC.Unit.Module.ModIface (mi_module)
 import GHC.Unit.Types (UnitId, moduleName, stringToUnitId, unitIdString)
-import GhcServer.Build.BytecodeMirror (MirrorLinkable, mirrorLinkable, mirrorSourceFor, rehydrateLinkable)
+import GhcServer.Build.BytecodeMirror (MirrorLinkable, homeModBytecodeLinkable, mirrorLinkable, mirrorSourceFor, rehydrateLinkable)
 import GHC.Driver.DynFlags (targetProfile)
 import Prelude hiding (log)
 import System.Directory (getFileSize, removeFile)
 import System.IO (IOMode (ReadMode, ReadWriteMode), hSetFileSize, openBinaryFile)
 import System.Posix.IO (closeFd, handleToFd)
 import System.Posix.Process (getProcessID)
+import Types.State.Make (HomeByteCode)
 
 -- | Everything shared across the process boundary: one mirrored 'MirrorLinkable' per home module, keyed by the
 -- unit it belongs to and its module name. Only modules for which the parent's HPT already has bytecode that was
@@ -76,7 +75,7 @@ import System.Posix.Process (getProcessID)
 type BytecodeMap = Map (String, String) MirrorLinkable
 
 -- ---------------------------------------------------------------------------
--- Raw @mmap@ FFI (see 'Test.ForkTest' for the precedent: @unix@ has no binding for this).
+-- Raw @mmap@ FFI (@unix@ has no binding for this).
 -- ---------------------------------------------------------------------------
 
 foreign import ccall unsafe "mmap"
@@ -91,8 +90,8 @@ protRead = 0x1
 protReadWrite :: CInt
 protReadWrite = 0x1 + 0x2
 
--- | @MAP_SHARED@ (Linux/POSIX value). We map a real file descriptor, not an anonymous region, so
--- @MAP_ANONYMOUS@ is not needed here (unlike 'Test.ForkTest').
+-- @MAP_SHARED@ (Linux/POSIX value). We map a real file descriptor, not an anonymous region, so
+-- @MAP_ANONYMOUS@ is not needed here.
 mapShared :: CInt
 mapShared = 0x01
 
@@ -169,7 +168,7 @@ collectBytecode hug = do
     bytecodeEntry uid profile hmi = do
       src <- mirrorSourceFor profile hmi
       pure do
-        mirrored <- hmi.hm_linkable.homeMod_bytecode >>= mirrorLinkable src
+        mirrored <- homeModBytecodeLinkable hmi >>= mirrorLinkable src
         pure ((unitIdString uid, moduleNameString (moduleName (mi_module hmi.hm_iface))), mirrored)
 
 -- | Compact 'collectBytecode''s result and write it into a fresh @\/dev\/shm@ file, returning its path. Returns
@@ -239,7 +238,7 @@ importSharedBytecode path = do
 -- actually need it. This is what lets 'GhcServer.Build.Process.runEval' populate
 -- 'Types.State.Make.MakeState.bytecodeImport' with modules whose bytecode is rehydrated lazily, only when actually
 -- linked, instead of eagerly rehydrating every mirrored module up front regardless of whether it's ever linked.
-bytecodeImportEntries :: BytecodeMap -> Map (UnitId, ModuleName) (HscEnv -> Module -> IO Linkable)
+bytecodeImportEntries :: BytecodeMap -> Map (UnitId, ModuleName) (HscEnv -> Module -> IO HomeByteCode)
 bytecodeImportEntries =
   Map.map (\ mirrored hsc_env target -> rehydrateLinkable hsc_env target mirrored)
   .

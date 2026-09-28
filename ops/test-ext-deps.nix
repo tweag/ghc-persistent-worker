@@ -98,6 +98,9 @@
         ${lib.escapeShellArgs depPkgArgs} \
         -o pkg/libHS${name}-ghc${ghcVersion}.so \
         pkg/${modName}.dyn_o
+
+      # Static archive, needed by statically linked hosts using the internal interpreter
+      ${pkgs.binutils}/bin/ar rcs pkg/libHS${name}.a pkg/${modName}.o
     '';
 
     installPhase = ''
@@ -107,6 +110,7 @@
       cp pkg/${modName}.hi $out/${name}/
       cp pkg/${modName}.dyn_hi $out/${name}/
       cp pkg/libHS${name}-ghc${ghcVersion}.so $out/${name}/
+      cp pkg/libHS${name}.a $out/${name}/
 
       # Write package config
       cat > $out/${name}/${name}.conf <<EOF

@@ -22,6 +22,7 @@ import Proto.GhcServer_Fields qualified as Fields
 import Types.Api (
   ApiRequest (..),
   ApiResponse (..),
+  ExecutorId (..),
   SomeApiRequest (..),
   Target,
   TaskKind (..),
@@ -107,13 +108,19 @@ toggleFeature :: Feature -> RequestM ()
 toggleFeature feature =
   requestLogError (ToggleFeature feature) ("Toggling feature " <> Text.pack (show feature))
 
+-- | Request termination of a persistent executor on the connected server(s).
+terminateExecutor :: ExecutorId -> RequestM ()
+terminateExecutor executor =
+  requestLogError (TerminateExecutor executor) ("Terminating executor " <> executor.text)
+
 serverApi :: ServerEnv -> ApiConfig -> ServerApi
 serverApi server config =
   ServerApi {
     triggerTask = \ t k -> run (triggerTask t k),
     evictBytecode = run . evictBytecode,
     clean = run . clean,
-    toggleFeature = run . toggleFeature
+    toggleFeature = run . toggleFeature,
+    terminateExecutor = run . terminateExecutor
   }
   where
     run = flip runReaderT RequestEnv {..}

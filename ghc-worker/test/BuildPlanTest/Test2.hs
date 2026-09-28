@@ -18,7 +18,7 @@ import GHC (DynFlags (..), Ghc, GhcMode (..), Target (..))
 import GHC.Driver.Env (hscUpdateFlags)
 import GHC.Driver.Monad (modifySession)
 import GHC.Types.Error (Messages (..))
-import GHC.Types.SourceError (SourceError (..))
+import GHC.Types.SourceError (SourceError, srcErrorMessages)
 import GHC.Unit (UnitId, stringToUnitId)
 import Hedgehog (forAll, property, withTests, (===))
 import qualified Hedgehog.Gen as Gen (int)
@@ -76,7 +76,7 @@ test_buildPlan =
       log <- liftIO $ newLog Nothing
       let logger = newLogger log
       numErrs <- transientSession (ghcOptions unit1 []) do
-        catch (runBuildPlan logger targets >> pure 0) \(SourceError msg) -> do
-          let errs = toList (getMessages msg)
+        catch (runBuildPlan logger targets >> pure 0) \ (err :: SourceError) -> do
+          let errs = toList (getMessages (srcErrorMessages err))
           pure (length errs)
       numMissingImports === numErrs

@@ -3,11 +3,13 @@ module GhcServer.GenProject.Run where
 
 import GhcServer.GenProject (
   ExtDepsConfig (..),
+  TestsShape (..),
   productionUnitCount,
   wideUnitCount,
   writeFlatProject,
   writeProductionProject,
   writeProject,
+  writeTestsProject,
   writeWideProject,
   )
 import Options.Applicative (
@@ -30,6 +32,7 @@ import Options.Applicative (
   )
 import System.Directory.OsPath (createDirectoryIfMissing)
 import System.Environment (lookupEnv)
+import System.Exit (die)
 import System.OsPath (OsPath)
 import System.OsPath.Extra (fromOsPath, toOsPath)
 
@@ -42,6 +45,8 @@ data GenCommand =
   Flat {dir :: OsPath, numModules :: Int}
   |
   Production {dir :: OsPath, depth :: Int, bigMods :: Int}
+  |
+  Tests {dir :: OsPath, shape :: TestsShape}
   deriving stock (Show)
 
 deepParser :: Parser GenCommand
@@ -70,13 +75,22 @@ productionParser =
     <*> argument auto (metavar "DEPTH" <> help "Tree depth (> 0)")
     <*> argument auto (metavar "BIG_MODS" <> help "Modules per level in big unit (> 0)")
 
+testsParser :: Parser GenCommand
+testsParser =
+  Tests
+    <$> argument (toOsPath <$> str) (metavar "DIRECTORY" <> help "Output directory")
+    <*> (TestsShape
+      <$> argument auto (metavar "UNITS" <> help "Number of units (> 0)")
+      <*> argument auto (metavar "MODULES" <> help "Modules per unit, including tests")
+      <*> argument auto (metavar "TESTS" <> help "Test modules per unit (< MODULES)"))
+
 genCommandParser :: Parser GenCommand
 genCommandParser =
   hsubparser
     ( command "deep" (info deepParser (progDesc "Binary tree of modules, 2*depth units (default)"))
     <> command "wide" (info wideParser (progDesc "Binary tree of units, 2^depth-1 units"))
     <> command "flat" (info flatParser (progDesc "Single unit, module 0 imports all others"))
-    <> command "production" (info productionParser (progDesc "Binary tree of small units + one large downstream unit"))
+    <> command "tests" (info testsParser (progDesc "Chain of units, each with library modules and test modules defining main"))
     )
 
 genParserInfo :: ParserInfo GenCommand
@@ -147,6 +161,19 @@ executeCommand extDeps = \case
     putStrLn ("  total units:    " ++ show units)
     putStrLn ("  total modules:  " ++ show (treeUnits * 3 + bigUnitMods))
     putStrLn ("  ext deps: " ++ extDepsInfo extDeps)
+
+  Tests {dir, shape}
+    | shape.units < 1 || shape.tests < 0 || shape.modules <= shape.tests ->
+      die "tests: need UNITS >= 1, TESTS >= 0 and MODULES > TESTS"
+    | otherwise -> do
+      createDirectoryIfMissing True dir
+      writeTestsProject dir shape extDeps
+      putStrLn ("Generated tests project in " ++ fromOsPath dir)
+      putStrLn ("  units:          " ++ show shape.units)
+      putStrLn ("  modules/unit:   " ++ show shape.modules ++ " (" ++ show shape.tests ++ " tests)")
+      putStrLn ("  total modules:  " ++ show (shape.units * shape.modules))
+      putStrLn ("  total tests:    " ++ show (shape.units * shape.tests))
+      putStrLn ("  ext deps: " ++ extDepsInfo extDeps)
 
 extDepsInfo :: Maybe ExtDepsConfig -> String
 extDepsInfo =

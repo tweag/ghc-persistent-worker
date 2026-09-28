@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 -- | Unit tests for 'GhcServer.Build.Schedule' pure functions:
 -- 'resolveFromCachedUnit' and 'nodeDepsToTaskKeys'.
 module Test.ScheduleTest where
@@ -9,6 +11,9 @@ import Data.Set (Set)
 import qualified Data.Text as Text
 import GHC (ModuleName, mkModuleName, moduleNameString)
 import GHC.Unit.Module.Graph (ModNodeKeyWithUid (..), ModuleGraphNode (..), NodeKey (..))
+#if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
+import GHC.Unit.Module.Graph (ModuleNodeEdge, mkNormalEdge)
+#endif
 import GHC.Unit.Types (GenWithIsBoot (..), IsBootInterface (..), UnitId, stringToUnitId)
 import GhcServer.Build.Schedule (
   ModuleInfo (..),
@@ -117,7 +122,7 @@ runNodeDepsSpec spec = do
     nameMap = Map.fromList [(stringToUnitId uid, UnitName (Text.pack n)) | (uid, n) <- spec.unitIds]
     srcMap = Map.fromList
       [((stringToUnitId hm.uid, mkModuleName hm.modName), toOsPath hm.src) | hm <- spec.homeModules]
-    depKeys = [mkNodeKey uid m | (uid, m) <- spec.deps]
+    depKeys = [mkEdge (mkNodeKey uid m) | (uid, m) <- spec.deps]
     node = ModuleNode depKeys undefined
   spec.expected === nodeDepsToTaskKeys nameMap srcMap node
 
@@ -172,7 +177,7 @@ test_nodeDepsNotHome =
     let
       nameMap = Map.singleton (stringToUnitId "u0") (UnitName "u0")
       srcMap = Map.empty
-      node = ModuleNode [mkNodeKey "u0" "A"] undefined
+      node = ModuleNode [mkEdge (mkNodeKey "u0" "A")] undefined
     Set.empty === nodeDepsToTaskKeys nameMap srcMap node
 
 test_nodeDepsMultiUnit :: TestTree
@@ -394,3 +399,11 @@ test_schedule =
         , test_resolveCachedCrossUnitMissing
         ]
     ]
+
+#if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
+mkEdge :: NodeKey -> ModuleNodeEdge
+mkEdge = mkNormalEdge
+#else
+mkEdge :: NodeKey -> NodeKey
+mkEdge k = k
+#endif

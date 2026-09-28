@@ -5,15 +5,18 @@ module GhcServer.Run where
 
 import Common.Grpc (runGrpcServer)
 import Control.Applicative (many, optional, (<|>))
+import Control.Exception (finally)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
 import Data.Bifunctor (first)
 import Data.Text (pack, unpack)
 import GhcServer.Build.ExecutorChild (runExecutor)
+import GhcServer.Build.PayloadArena (payloadSegmentPath, removeSegment)
 import GhcServer.Build.ProcessChild (runProcessEval)
 import GhcServer.Cabal.Setup (cabalSetup)
 import GhcServer.Data.Config (ServerConfig (..))
 import GhcServer.Data.ProcessEval (ProcessEvalOptions (..))
+import GhcServer.GbcTransport (GbcTransportOptions (..), runGbcTransport)
 import GhcServer.Grpc (serverMethods)
 import GhcServer.Handler (serverContext)
 import GhcServer.Optparse (readPath)
@@ -36,6 +39,7 @@ import Options.Applicative (
   progDesc,
   short,
   strArgument,
+  strOption,
   subparser,
   switch,
   value,
@@ -87,6 +91,8 @@ data ExecMode =
   ExecEvaluate ProcessEvalOptions
   |
   ExecExecutor OsPath
+  |
+  ExecGbcTransport GbcTransportOptions
   deriving stock (Show)
 
 -- | Server CLI config prior to resolving the project root, which defaults to the current directory when not given
@@ -97,7 +103,8 @@ data RawServerConfig =
     maxJobs :: Int,
     verbose :: Bool,
     jsonConfig :: Bool,
-    settings :: Settings
+    settings :: Settings,
+    executorRts :: [String]
   }
   deriving stock (Show)
 
@@ -109,6 +116,12 @@ serverConfigParser = do
   verbose <- switch (long "verbose" <> short 'v' <> help "Print the build log on success")
   jsonConfig <- switch (long "json-config" <> help "Force unit.json-based project discovery even if a .cabal file is present")
   settings <- featureFlagsParser
+  executorRts <- words <$> strOption (
+    long "executor-rts"
+    <> metavar "OPTS"
+    <> help "RTS options for persistent executor subprocesses, separated by spaces"
+    <> value "-N -A16M"
+    )
   pure RawServerConfig {..}
 
 -- | Resolve a 'RawServerConfig' into a 'ServerConfig', defaulting the project root to the current directory when
@@ -128,7 +141,8 @@ resolveServerConfig raw = do
     maxJobs = raw.maxJobs,
     verbose = raw.verbose,
     jsonConfig = raw.jsonConfig,
-    settings = raw.settings
+    settings = raw.settings,
+    executorRts = raw.executorRts
   }
 
 cabalSetupInfo :: ParserInfo ExecMode
@@ -150,10 +164,25 @@ executorInfo =
   where
     parser = option readPath (long "socket" <> metavar "PATH" <> help "Unix socket to serve the executor on")
 
+gbcTransportInfo :: ParserInfo ExecMode
+gbcTransportInfo =
+  ExecGbcTransport <$> info parser (progDesc "Compile a generated project and run it repeatedly in a bytecode-plan executor")
+  where
+    parser = do
+      serverExe <- strOption (long "server-exe" <> metavar "PATH" <> help "Executable run in executor mode")
+      project <- strOption (long "project" <> metavar "DIR" <> help "Directory for the generated project")
+      functions <- option auto (long "functions" <> metavar "N" <> help "Functions in the fat module" <> value 500)
+      childRts <- words <$> strOption (long "child-rts" <> metavar "OPTS" <> help "RTS options for the child" <> value "")
+      sharedPayloads <- switch (long "shared-payloads" <> help "Transfer payloads through shared memory")
+      pure GbcTransportOptions {..}
+
 execModeParser :: Parser ExecMode
 execModeParser =
   subparser (
-    command "act-as-setup" cabalSetupInfo <> command "eval" evaluateInfo <> command "executor" executorInfo
+    command "act-as-setup" cabalSetupInfo
+    <> command "eval" evaluateInfo
+    <> command "executor" executorInfo
+    <> command "gbc-transport" gbcTransportInfo
     )
   <|>
   (ExecServer <$> serverConfigParser)
@@ -178,6 +207,7 @@ runServer = do
     ExecCabalSetup cabalArgs -> cabalSetup cabalArgs
     ExecEvaluate options -> runProcessEval options
     ExecExecutor socket -> runExecutor socket
+    ExecGbcTransport options -> runGbcTransport options
   where
     server :: ServerConfig -> ExceptT String IO ()
     server config =
@@ -186,4 +216,4 @@ runServer = do
         createDirectoryIfMissing True (config.projectRoot </> socketDirName)
         ctx <- serverContext config
         hPutStrLn stderr ("Starting ghc-server on " ++ fromOsPath socket)
-        runGrpcServer socket (serverMethods ctx)
+        runGrpcServer socket (serverMethods ctx) `finally` (removeSegment =<< payloadSegmentPath)

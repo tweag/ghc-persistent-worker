@@ -8,6 +8,7 @@ import Data.Text qualified as Text
 import Data.Time (secondsToNominalDiffTime)
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import qualified Ghc.Ui.Data.Log as Ui
+import Ghc.Ui.Data.Executors qualified as Executors
 import Ghc.Ui.Data.Name (Name)
 import Ghc.Ui.Data.Project (ProjectUnit (..))
 import qualified Ghc.Ui.Data.Session as Session
@@ -96,6 +97,12 @@ handleApiEvent worker = \case
 
   BytecodeSnapshot {..} ->
     zoom #project (Project.updateBytecode entries)
+
+  ExecutorUpdate {executor, pid, status} ->
+    #executors %= Executors.upsert executor pid status
+
+  ExecutorGone {executor} ->
+    #executors %= Executors.remove executor
 
 handleSessionEvent :: SessionEvent -> EventM Name SessionState ()
 handleSessionEvent (ApiEvent worker event) = handleApiEvent worker event

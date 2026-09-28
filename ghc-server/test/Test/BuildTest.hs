@@ -131,7 +131,8 @@ newBuildEnv tp stateVar = do
     instrChan = Nothing,
     extDepsDb,
     diff = diffVar,
-    requestIdCounter
+    requestIdCounter,
+    executorRts = []
   }, events)
 
 -- ---------------------------------------------------------------------------

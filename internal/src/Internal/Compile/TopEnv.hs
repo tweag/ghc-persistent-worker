@@ -13,14 +13,21 @@ import Control.Monad.IO.Class (liftIO)
 import Data.IORef (IORef, newIORef, writeIORef)
 import GHC (ModIface)
 import GHC.Driver.Env (HscEnv (..))
-import GHC.Driver.Plugins (Plugin (typeCheckResultAction), PluginWithArgs (PluginWithArgs), Plugins (staticPlugins), StaticPlugin (StaticPlugin), defaultPlugin)
-import GHC.Iface.Syntax (IfaceImport (IfaceImport), ImpIfaceList (ImpIfaceAll, ImpIfaceEverythingBut, ImpIfaceExplicit))
-import GHC.Tc.Types (ImpUserList (ImpUserAll, ImpUserEverythingBut, ImpUserExplicit), ImportUserSpec (ImpUserSpec, ius_decl, ius_imports), TcGblEnv (tcg_import_decls, tcg_rdr_env))
+import GHC.Driver.Plugins (Plugin (..), PluginWithArgs (..), Plugins (..), StaticPlugin (..), defaultPlugin)
+import GHC.Iface.Syntax (IfaceImport (..), ImpIfaceList (..))
+import GHC.Tc.Types (ImpUserList (..), ImportUserSpec (..), TcGblEnv (tcg_import_decls, tcg_rdr_env))
 import GHC.Types.Name.Reader (GlobalRdrEnv, forceGlobalRdrEnv, globalRdrEnvLocal)
 import GHC.Unit.Module.ModIface (IfaceTopEnv (..), set_mi_top_env)
 
 #if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
+import GHC.Types.Name.Set (nameSetElemsStable)
+#endif
+
+#if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
 import GHC.Types.Avail (sortAvails)
+#endif
+
+#if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
 import GHC.Types.Name.Reader (globalRdrEnvElts, gresToAvailInfo)
 #endif
 
@@ -50,7 +57,13 @@ withCaptureTopEnv hsc_env = do
   where
     plugins = hsc_env.hsc_plugins
 
-    plugin ref = StaticPlugin (PluginWithArgs (captureTopEnvPlugin ref) [])
+    plugin ref =
+      StaticPlugin {
+        spPlugin = PluginWithArgs (captureTopEnvPlugin ref) []
+#if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
+        , spInitialised = False
+#endif
+      }
 
 -- | Patch a 'ModIface' with an @mi_top_env@ reconstructed from captured typechecking data, following the same
 -- construction as 'GHC.Iface.Make.mkIfaceTc' (@maybeGlobalRdrEnv@/@mkIfaceImports@), but using the real environment
@@ -66,8 +79,17 @@ patchTopEnv CapturedTopEnv {rdrEnv, importDecls} =
     toIfaceImport ImpUserSpec {ius_decl, ius_imports} =
       case ius_imports of
         ImpUserAll -> IfaceImport ius_decl ImpIfaceAll
+#if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
+        ImpUserExplicit {iul_avails, iul_non_explicit_parents} ->
+          IfaceImport ius_decl ImpIfaceExplicit {
+            iil_avails = sortAvails iul_avails,
+            iil_non_explicit_parents = nameSetElemsStable iul_non_explicit_parents
+          }
+        ImpUserEverythingBut ns -> IfaceImport ius_decl (ImpIfaceEverythingBut (nameSetElemsStable ns))
+#else
         ImpUserExplicit env -> IfaceImport ius_decl (ImpIfaceExplicit (forceGlobalRdrEnv env))
         ImpUserEverythingBut ns -> IfaceImport ius_decl (ImpIfaceEverythingBut ns)
+#endif
 
 #if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
     rdrs = IfaceTopEnv (sortAvails (gresToAvailInfo (globalRdrEnvElts exports))) imports

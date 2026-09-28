@@ -40,7 +40,6 @@ import GHC.Driver.Session (dynHiSuf_, dynamicNow, hiDir, hiSuf_, targetProfile)
 import GHC.Iface.Binary (CheckHiWay (..), TraceBinIFace (QuietBinIFace), readBinIface)
 import GHC.Iface.Errors.Ppr (readInterfaceErrorDiagnostic)
 import GHC.Iface.Errors.Types (ReadInterfaceError (..))
-import GHC.Linker.Types (Linkable (..), LinkablePart (..))
 import GHC.Types.Avail (AvailInfo (..))
 import GHC.Types.Name (nameOccName)
 import GHC.Types.Name.Occurrence (mkOccEnv)
@@ -73,7 +72,20 @@ import Types.FeatureFlags (Feature (..))
 import Types.Log (Logger (..))
 import Types.Settings (Settings (..), featureOn)
 import Types.State (WorkerState (make, settings))
-import Types.State.Make (bcoLoadState)
+import Types.State.Make (HomeByteCode, bcoLoadState)
+
+#if defined(GBC)
+
+import Control.Monad (join)
+import GHC.ByteCode.Serialize (readBinByteCode)
+import GHC.Linker.Types (LinkableWith (..))
+import GHC.Unit.Module.Status (RecompBytecodeLinkable (..), RecompLinkables (..))
+
+#else
+
+import GHC.Linker.Types (Linkable (..), LinkablePart (..))
+
+#endif
 
 #if !defined(LINKABLES)
 
@@ -120,6 +132,18 @@ loadWholeCoreBindings hsc_env _iface details (Linkable utc_time this_mod uls) =
 
 import GHC.Driver.Main(initWholeCoreBindings)
 
+#if defined(GBC)
+
+loadWholeCoreBindings ::
+  HscEnv ->
+  ModIface ->
+  ModDetails ->
+  RecompLinkables ->
+  IO HomeModLinkable
+loadWholeCoreBindings = initWholeCoreBindings
+
+#else
+
 loadWholeCoreBindings ::
   HscEnv ->
   ModIface ->
@@ -127,6 +151,8 @@ loadWholeCoreBindings ::
   Linkable ->
   IO Linkable
 loadWholeCoreBindings = initWholeCoreBindings
+
+#endif
 
 #endif
 
@@ -147,7 +173,24 @@ coreBindings iface wcb_mod_location =
 
 #endif
 
-loadCachedByteCodeFrom :: HscEnv -> ModLocation -> ModIface -> ModDetails -> IO (Maybe Linkable)
+
+#if defined(GBC)
+
+loadCachedByteCodeFrom :: HscEnv -> ModLocation -> ModIface -> ModDetails -> IO (Maybe HomeByteCode)
+loadCachedByteCodeFrom hsc_env location iface details =
+  fmap join $ for (coreBindings iface location) \ wcb -> do
+    wcbLinkable <- bcoLinkable wcb
+    let linkable = RecompLinkables {recompLinkables_bytecode = WholeCoreBindingsLinkable wcbLinkable, recompLinkables_object = Nothing}
+    (.homeMod_bytecode) <$> loadWholeCoreBindings hsc_env iface details linkable
+   where
+    bcoLinkable parts = do
+      if_time <- modificationTimeIfExists (ml_hi_file_ospath location)
+      time <- maybe getCurrentTime pure if_time
+      return $! Linkable time (mi_module iface) parts
+
+#else
+
+loadCachedByteCodeFrom :: HscEnv -> ModLocation -> ModIface -> ModDetails -> IO (Maybe HomeByteCode)
 loadCachedByteCodeFrom hsc_env location iface details =
   for (coreBindings iface location) \ wcb -> do
     linkable <- bcoLinkable [CoreBindings wcb]
@@ -158,6 +201,8 @@ loadCachedByteCodeFrom hsc_env location iface details =
       time <- maybe getCurrentTime pure if_time
       return $! Linkable time (mi_module iface) parts
 
+#endif
+
 -- | Re-read a module's interface from disk.
 --
 -- Used when the in-memory 'ModIface' lacks the Core bindings required to lazily produce bytecode, since the on-disk
@@ -166,13 +211,30 @@ reloadIfaceFromDisk :: HscEnv -> ModLocation -> IO ModIface
 reloadIfaceFromDisk hsc_env location =
   readBinIface (targetProfile (hsc_dflags hsc_env)) (hsc_NC hsc_env) IgnoreHiWay QuietBinIFace (ml_hi_file location)
 
+-- | Load a home module's bytecode from its bytecode file (@.gbc@), which GHCs with bytecode objects write instead of
+-- Core bindings in the interface when @-fbyte-code-and-object-code@ is enabled.
+-- Older GHCs don't support this, so the result is always 'Nothing'.
+loadByteCodeFile :: HscEnv -> ModLocation -> Module -> IO (Maybe HomeByteCode)
+
+#if defined(GBC)
+
+loadByteCodeFile hsc_env location module_ =
+  modificationTimeIfExists (ml_bytecode_file_ospath location) >>= traverse \ time ->
+    Linkable time module_ <$> readBinByteCode hsc_env (ml_bytecode_file location)
+
+#else
+
+loadByteCodeFile _ _ _ = pure Nothing
+
+#endif
+
 -- | Load bytecode from an interface.
 -- Used only for modules missing from the current target's HPT when restoring the Buck cache after restarting a build.
 --
 -- The missing fields in @ModLocation@ aren't vital for the bytecode's purpose, but it wouldn't hurt to add them
 -- eventually.
 -- For example, the source file is used to add debug info and find foreign export stubs.
-loadCachedByteCode :: HscEnv -> FilePath -> ModIface -> ModDetails -> IO (Maybe Linkable)
+loadCachedByteCode :: HscEnv -> FilePath -> ModIface -> ModDetails -> IO (Maybe HomeByteCode)
 loadCachedByteCode hsc_env ifaceFile iface details =
   loadCachedByteCodeFrom hsc_env location iface details
    where
@@ -184,6 +246,9 @@ loadCachedByteCode hsc_env ifaceFile iface details =
         ml_obj_file = error "loadCachedByteCode",
         ml_dyn_obj_file = error "loadCachedByteCode",
         ml_hie_file = error "loadCachedByteCode"
+#if defined(GBC)
+        , ml_bytecode_file = error "loadCachedByteCode"
+#endif
       }
 
 -- | module loading state

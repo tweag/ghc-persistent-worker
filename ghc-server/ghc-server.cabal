@@ -11,6 +11,11 @@ flag mwb
     manual: True
     default: False
 
+flag gbc
+    description: GHC contains the bytecode artifacts (.gbc) backport
+    manual: True
+    default: False
+
 common all
   ghc-options: -Wall -Widentities -Wincomplete-uni-patterns -Wmissing-deriving-strategies -Wredundant-constraints -Wunused-type-patterns -Wunused-packages
   default-language: GHC2021
@@ -39,6 +44,9 @@ common all
   if (flag(mwb))
       cpp-options: -DMWB -DDOWNSWEEP_CACHE -DUNIT_INDEX
 
+  if (flag(gbc))
+      cpp-options: -DGBC
+
 library
   import: all
   ghc-options: -O2
@@ -51,10 +59,15 @@ library
     GhcServer.Build.Diff
     GhcServer.Build.Execute
     GhcServer.Build.Executor
-    GhcServer.Build.ExecutorChild
+      GhcServer.Build.ExecutorChild
+      GhcServer.Build.ExecutorLoad
+      GhcServer.Build.ExecutorPlan
+      GhcServer.Build.ExecutorTask
+    GhcServer.Build.GbcBuffer
     GhcServer.Build.Metadata
                     GhcServer.Build.Process
                     GhcServer.Build.ProcessChild
+    GhcServer.Build.PayloadArena
     GhcServer.Build.Propagate
     GhcServer.Build.Schedule
     GhcServer.Build.BytecodeMirror
@@ -68,10 +81,12 @@ library
     GhcServer.Data.BuildEvent
     GhcServer.Data.BuildSystem
     GhcServer.Data.Config
+    GhcServer.Data.ExecutorPlan
     GhcServer.Data.ProcessEval
     GhcServer.Data.Request
     GhcServer.Data.Unit
     GhcServer.Data.UnitConfig
+    GhcServer.GbcTransport
     GhcServer.Cache
     GhcServer.GenProject
     GhcServer.GenProject.Run
@@ -106,6 +121,7 @@ library
     ghc-worker-test-common,
     ghci,
     grapesy ^>=1.1,
+    mmap,
     optparse-applicative,
     parsec,
     process,
@@ -121,7 +137,7 @@ executable ghc-server
   import: all
   main-is: Main.hs
   hs-source-dirs: app/ghc-server
-  ghc-options: -O2 -threaded "-with-rtsopts=-K512M -I5 -A128M -T -N"
+  ghc-options: -O2 -threaded -rtsopts "-with-rtsopts=-K512M -I5 -A128M -T -N"
   build-depends:
     ghc-server
 
@@ -152,8 +168,8 @@ test-suite ghc-server-test
     Test.CabalTest
     Test.CacheTest
     Test.CompactBytecodeTest
-    Test.ForkMetadataTest
-    Test.ForkTest
+    Test.ExecutorPlanTest
+    Test.GbcTransportTest
     Test.ScheduleTest
     Test.SchedulerTest
     Test.SubprocessTest

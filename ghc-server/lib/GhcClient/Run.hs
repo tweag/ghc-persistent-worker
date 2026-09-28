@@ -11,6 +11,8 @@ import Control.Monad.Trans.Except (ExceptT, runExceptT, throwE)
 import Data.Text qualified as Text
 import Data.Text.Encoding (encodeUtf8)
 import GhcServer.Data.Config (ClientConfig (..))
+import GhcServer.Data.Request (ExecutorSelection (..))
+import Types.Api (ExecutorId (..))
 import GhcServer.Optparse (readPath)
 import GhcServer.Path (socketPath)
 import Internal.Log (dbg)
@@ -20,6 +22,7 @@ import Network.GRPC.Common.Protobuf (Proto, Protobuf, defMessage, (&), (.~))
 import Options.Applicative (
   Parser,
   ParserInfo,
+  eitherReader,
   execParser,
   flag,
   fullDesc,
@@ -58,12 +61,19 @@ clientConfigParser = do
   targets <- many (strArgument (metavar "TARGETS..." <> help "Schedule targets (e.g. unit1 unit2:metadata unit2:Module)"))
   pure ClientConfig {..}
 
--- | @--executor ID@ selects a persistent executor subprocess; @--process@ is shorthand for @--executor default@.
-executorParser :: Parser (Maybe String)
+-- | @--executor ID@ selects a persistent executor subprocess; @--process@ is shorthand for @--executor default@;
+-- @--executors unit@ uses a separate executor for each unit.
+executorParser :: Parser (Maybe ExecutorSelection)
 executorParser =
-  Just <$> option str (long "executor" <> metavar "ID" <> help "Run execute tasks in the persistent executor subprocess ID")
+  Just . ExecutorNamed . ExecutorId <$> option str (long "executor" <> metavar "ID" <> help "Run execute tasks in the persistent executor subprocess ID")
   <|>
-  flag Nothing (Just "default") (long "process" <> help "Run execute tasks in the persistent executor subprocess 'default'")
+  Just <$> option (eitherReader executorScheme) (long "executors" <> metavar "SCHEME" <> help "Run execute tasks in multiple persistent executor subprocesses; 'unit' uses one per unit")
+  <|>
+  flag Nothing (Just (ExecutorNamed "default")) (long "process" <> help "Run execute tasks in the persistent executor subprocess 'default'")
+  where
+    executorScheme = \case
+      "unit" -> Right ExecutorPerUnit
+      other -> Left ("Invalid executor scheme: " ++ other ++ " (supported: unit)")
 
 clientParserInfo :: ParserInfo ClientConfig
 clientParserInfo =
@@ -121,7 +131,11 @@ client config = do
       ["--wait" | config.wait]
       ++ ["--recompile" | config.recompile]
       ++ ["--rebuild" | config.rebuild]
-      ++ maybe [] (\ eid -> ["--executor", encodeUtf8 (Text.pack eid)]) config.executor
+      ++ foldMap executorArgs config.executor
+
+    executorArgs = \case
+      ExecutorNamed executorId -> ["--executor", encodeUtf8 executorId.text]
+      ExecutorPerUnit -> ["--executors", "unit"]
 
 -- | Parse CLI args and run the client command.
 runClient :: IO ()

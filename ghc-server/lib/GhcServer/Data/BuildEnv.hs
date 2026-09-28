@@ -39,5 +39,8 @@ data BuildEnv =
     -- instance (see 'GhcServer.Build.Propagate.nextRequestId'), included in the 'CompileStart'\/'CompileEnd'\/
     -- 'PhaseStart'\/'PhaseEnd' events a task emits, so the @instrument@ UI can match events to the exact task
     -- instance instead of matching by target text.
-    requestIdCounter :: IORef Int
+    requestIdCounter :: IORef Int,
+    -- | RTS options passed to persistent executor subprocesses (see 'GhcServer.Build.Executor.spawnExecutor').
+    -- Without them, executors run with the RTS options baked into the executable.
+    executorRts :: [String]
   }

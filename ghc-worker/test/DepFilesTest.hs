@@ -72,11 +72,19 @@ test_usedDepFiles = do
     }]
 
   ["out/Dep.dyn_hi"] ===
+#if defined(GBC)
+    files [UsageHomeModuleBytecode {
+      usg_mod_name = dep,
+      usg_unit_id = uid,
+      usg_bytecode_hash = fingerprint0
+    }]
+#else
     files [UsageHomeModuleInterface {
       usg_mod_name = dep,
       usg_unit_id = uid,
       usg_iface_hash = fingerprint0
     }]
+#endif
 
   -- We do not expect an entry for an external package module. The -hidir flag is needed to derive the path anyways.
   [] ===

@@ -136,6 +136,20 @@ data ProcessStats =
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary, FromJSON, ToJSON)
 
+-- | Current state of a persistent executor, published periodically by the executor child (see
+-- 'GhcServer.Build.ExecutorChild') and forwarded to clients in 'ExecutorUpdate'.
+data ExecutorStatus =
+  ExecutorStatus {
+    -- | Memory currently in use by the RTS (@gcdetails_mem_in_use_bytes@) as of the last GC.
+    memInUseBytes :: Word64,
+    -- | Live data as of the last GC (@gcdetails_live_bytes@).
+    liveBytes :: Word64,
+    -- | Calls that were received and not yet answered, i.e. running plus queued ones.
+    activeTasks :: Int
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (Binary, FromJSON, ToJSON)
+
 data TaskKind =
   Metadata
   |
@@ -289,6 +303,16 @@ data Event =
   |
   -- | Indicates that all scheduled tasks have concluded.
   RequestCompleted { statusMessage :: Text }
+  |
+  -- | Periodic status of a running executor.
+  ExecutorUpdate {
+    executor :: ExecutorId,
+    pid :: Maybe Int,
+    status :: ExecutorStatus
+  }
+  |
+  -- | The executor process has stopped or was terminated.
+  ExecutorGone { executor :: ExecutorId }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary)
 

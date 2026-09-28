@@ -15,7 +15,7 @@ import qualified GHC
 import GHC (Target)
 import GHC.Data.Maybe (mapMaybe)
 import GHC.Driver.Backend (noBackend)
-import GHC.Driver.DynFlags (backend)
+import GHC.Driver.DynFlags (HasDynFlags, backend)
 import GHC.Driver.Env (HscEnv (..), hscActiveUnitId, hsc_units)
 import GHC.Driver.Errors.Types (DriverMessages, GhcMessage (..))
 import GHC.Driver.Monad (GhcMonad (..), liftIO, withSession)
@@ -24,7 +24,6 @@ import GHC.Driver.Pipeline (TPhase (..), mkPipeEnv, runPipeline, use)
 import GHC.Driver.Pipeline.Monad (PipelineOutput (..))
 import GHC.Driver.Session (pgm_F)
 import GHC.Types.Error (unionManyMessages)
-import GHC.Types.SourceError (throwErrors)
 import GHC.Types.Unique.Map (UniqMap)
 import GHC.Unit (GenWithIsBoot (..), UnitState (..))
 import GHC.Unit.Env (UnitEnv (..))
@@ -56,7 +55,7 @@ import Internal.BuildPlan.Json (assembleFields, mergePackageDeps)
 import qualified Internal.Compat.FixedNodes as FixedNodes
 import Internal.Compat.FixedNodes (pattern CompileNode, pattern FixedNode, downsweepCompat)
 import Internal.Compat.GHC914 (edgeTarget, hscModuleGraph, mapMGM)
-import Internal.Error (eitherMessages, eitherWorkerError)
+import Internal.Error (eitherMessages, eitherWorkerError, throwErrorsWithContext)
 import Internal.Log (logTimed)
 import Internal.ValidateNames (validateModuleNames)
 import System.FilePath (splitExtension)
@@ -355,10 +354,14 @@ addPerModuleFlagsToModuleGraph perModuleFlags mg0 =
           pure summary {GHC.ms_hspp_opts = dflags}
         _ -> pure summary
 
-checkErrors :: MonadIO m => [DriverMessages] -> m ()
+checkErrors ::
+  MonadIO m =>
+  HasDynFlags m =>
+  [DriverMessages] ->
+  m ()
 checkErrors errs =
   unless (isEmptyMessages msgs) do
-    throwErrors (GhcDriverMessage <$> msgs)
+    throwErrorsWithContext GhcDriverMessage msgs
   where
     msgs = unionManyMessages errs
 

@@ -26,7 +26,8 @@ import GHC.Utils.Outputable (ppr, (<+>))
 import GhcServer.Build.Compile (compileSingleModule)
 import GhcServer.Build.Diff (UnitDiff (..), changedModuleKeys, moduleGraphDelta, staleClosure)
 import GhcServer.Build.Execute (executeModuleTask)
-import GhcServer.Build.Executor (executeModuleTaskExecutor)
+import GhcServer.Build.Executor (recordExecutorStats)
+import GhcServer.Build.ExecutorTask (executeModuleTaskExecutor)
 import GhcServer.Build.Metadata (runMetadata)
 import GhcServer.Build.Schedule (
   BuildExt (..),
@@ -171,6 +172,7 @@ dispatchTask env ext task =
             Nothing -> (, Nothing) <$> executeModuleTask env ext unit name requestId Nothing
         emitTaskStart env requestId target (isJust task.value.executor)
         (mResult, stats) <- runExecute
+        for_ ((,) <$> task.value.executor <*> stats) (uncurry (recordExecutorStats env))
         case mResult of
           -- The module has no 'main': no execution ever took place, so the scheduler task still completes
           -- successfully (see 'GhcServer.Build.Execute.executeModuleTask'), but the end event is tagged

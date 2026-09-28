@@ -66,7 +66,11 @@ usedDepFiles hsc_env iface =
       UsageHomeModule {usg_mod_name, usg_unit_id} -> abiHashFile usg_unit_id usg_mod_name
       -- This includes the TH case where GHC compares mi_iface_hash, not just the ABI.
       -- -fprefer-byte-code is required for correctness.
+#if defined(GBC)
+      UsageHomeModuleBytecode {usg_mod_name, usg_unit_id} -> interfaceFile usg_unit_id usg_mod_name
+#else
       UsageHomeModuleInterface {usg_mod_name, usg_unit_id} -> interfaceFile usg_unit_id usg_mod_name
+#endif
       UsageMergedRequirement {usg_mod} -> abiHashFileOf usg_mod
       -- We assume that addDependentFiles are correctly tracked separately as srcs_deps in the buck2 rules.
       -- At the time of writing, adding additional paths causes errors when these

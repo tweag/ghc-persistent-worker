@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 module Internal.Evaluate where
 
@@ -12,8 +13,15 @@ import GHC.Core.Type (Type)
 import GHC.Data.Bag (emptyBag)
 import GHC.Driver.Config (initEvalOpts)
 import GHC.Driver.DynFlags (wopt_unset)
-import GHC.Driver.Env (hscInterp, hscSetActiveUnitId, hsc_home_unit, hsc_interp, mkInteractiveHscEnv, runInteractiveHsc)
-import GHC.Driver.Env.Types (HscEnv (hsc_IC), hsc_mod_graph)
+import GHC.Driver.Env (
+  hscInterp,
+  hscSetActiveUnitId,
+  hsc_home_unit,
+  hsc_interp,
+  mkInteractiveHscEnv,
+  runInteractiveHsc,
+  )
+import GHC.Driver.Env.Types (HscEnv (hsc_IC))
 import GHC.Driver.Errors.Types (hoistTcRnMessage)
 import GHC.Driver.Flags (WarningFlag (Opt_WarnUnusedLocalBinds))
 import GHC.Driver.Main (hscParseStmtWithLocation, hscParsedStmt, ioMsgMaybe)
@@ -22,7 +30,7 @@ import GHC.Hs.Extension (GhcPs)
 import GHC.Iface.Load (loadSrcInterface)
 import GHC.Runtime.Context (InteractiveContext (..), InteractiveImport (..))
 import GHC.Runtime.Eval (execOptions, exprType, setContext)
-import GHC.Runtime.Eval.Types (ExecOptions (..), IcGlobalRdrEnv (..), isStep)
+import GHC.Runtime.Eval.Types (ExecOptions (..), IcGlobalRdrEnv (..), SingleStep)
 import GHC.Runtime.Interpreter (evalStmt, wormhole)
 import GHC.Tc.Module (TcRnExprMode (TM_Inst))
 import GHC.Tc.Utils.Env (lookupGlobal)
@@ -46,15 +54,27 @@ import GHC.Unit.Finder qualified as Finder
 import GHC.Unit.Finder.Types (FindResult (..))
 import GHC.Unit.Home (homeUnitId)
 import GHC.Unit.Module.ModIface (mi_exports)
-import GHC.Unit.Types (IsBootInterface (..), moduleName)
+import GHC.Unit.Types (IsBootInterface (..), Module, moduleName)
 import GHC.Utils.Outputable (ppr, text, (<+>))
 import GHCi.Message (EvalResult (..), EvalStatus_ (..))
 import GHCi.RemoteTypes (ForeignHValue, HValueRef)
 import Internal.Cache.Hpt (loadHomeUnit)
+import Internal.Compat.GHC914 (hscSetModuleGraph)
 import Internal.Log (logDebugD, logTimed)
 import Language.Haskell.Syntax.Expr (GhciLStmt)
 import Language.Haskell.Syntax.Module.Name (ModuleName (..), mkModuleName)
 import System.OsPath.Extra (toOsPath)
+
+#if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
+
+import GHC.Driver.Config (EvalStep)
+import GHC.Runtime.Eval.Types (enableGhcStepMode)
+
+#else
+
+import GHC.Runtime.Eval.Types (isStep)
+
+#endif
 import Types.Env (Env (..))
 import Types.State (WorkerState (..))
 import Types.State.Make (EModuleGraph (..), MakeState (..))
@@ -73,7 +93,7 @@ setupEvaluationSession env (Just homeUnit) target = do
   hsc_env2 <- liftIO $ withMVar env.state \ state -> do
     (_, hsc_env1) <-
       loadHomeUnit env.log dflags0 (moduleUnitId target.module_) (state, hsc_env0) (toOsPath homeUnit)
-    pure hsc_env1 {hsc_mod_graph = state.make.moduleGraphState.moduleGraph}
+    pure (hscSetModuleGraph state.make.moduleGraphState.moduleGraph hsc_env1)
   let hsc_env = hscSetActiveUnitId (moduleUnitId target.module_) hsc_env2
   setSession hsc_env
   dflags <- getSessionDynFlags
@@ -117,7 +137,7 @@ evaluate env mHomeUnit target imports expr =
         liftIO (resolveTargetModule hsc_env modname pkgqual) >>= \case
           Left err -> logDebugD env.log (text (renderModuleLookupError modname err)) >> pure False
           Right () -> do
-            setContext [IIModule modname]
+            setContext [moduleImport target.module_]
 
             for_ imports \ imp ->
               loadImport env (mkModuleName imp) >>= \case
@@ -193,7 +213,7 @@ executeMain env mHomeUnit target =
             hasMain <- liftIO (moduleHasMain hsc_env modname pkgqual)
             if not hasMain
               then pure (Right Nothing)
-              else runMain hsc_env modname
+              else runMain hsc_env
   where
     -- Inspect @main@'s result type (post-typecheck, via GHC's own @:type@-style machinery) to decide whether its
     -- return value can be usefully exfiltrated. Only a small set of wired-in stringly/numeric types is
@@ -203,8 +223,8 @@ executeMain env mHomeUnit target =
     -- 'String' (either @main@ itself, for 'ResultString', or @fmap show main@, for 'ResultShowable' -- 'show' is
     -- dispatched by GHC's typechecker while type-checking this very statement, not by us), letting the bound
     -- 'ForeignHValue' be unsafely coerced directly to 'String' rather than printed.
-    runMain hsc_env modname = do
-      setContext [IIModule modname]
+    runMain hsc_env = do
+      setContext [moduleImport target.module_]
       mty <- exprType TM_Inst "main"
       let mkind = classifyMainResultType mty
           -- A bind statement ('execResult <- ...'), not a bare expression statement: GHC's interactive
@@ -324,6 +344,27 @@ evalStmt' stmt _stmt_text ExecOptions{..} = do
       -- Empty statement / comment: nothing to run, so trivially succeed with no bound values.
       Nothing -> pure (EvalComplete 0 (EvalSuccess []))
       Just (_ids, hval, _fix_env) -> liftIO do
-        let eval_opts = initEvalOpts idflags' (isStep execSingleStep)
+        let eval_opts = initEvalOpts idflags' (stepMode execSingleStep)
         evalStmt interp eval_opts (execWrap hval)
 
+
+-- | An interactive context import for a whole module.
+moduleImport :: Module -> InteractiveImport
+
+#if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
+
+moduleImport = IIModule
+
+-- | Whether the single-step mode enables stepping in the interpreter.
+stepMode :: SingleStep -> EvalStep
+stepMode = enableGhcStepMode
+
+#else
+
+moduleImport = IIModule . moduleName
+
+-- | Whether the single-step mode enables stepping in the interpreter.
+stepMode :: SingleStep -> Bool
+stepMode = isStep
+
+#endif

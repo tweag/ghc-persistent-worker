@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Test.Bytecode where
 
 import Control.Concurrent.MVar (modifyMVar_, readMVar)
@@ -6,10 +8,7 @@ import Data.Functor ((<&>))
 import Data.List (isPrefixOf)
 import Data.Maybe (mapMaybe)
 import GHC (isExternalName, moduleNameFS)
-import GHC.ByteCode.Types (bc_bcos, unlinkedBCOName)
 import GHC.Data.FastString (FastString)
-import GHC.Data.FlatBag (elemsFlatBag)
-import GHC.Linker.Types (Loader (..), LoaderState (..), linkableBCOs)
 import GHC.Runtime.Interpreter.Types (Interp (..))
 import GHC.Unit.Module.Env (moduleEnvToList)
 import GHC.Unit.Types (GenModule (..), unitFS)
@@ -25,6 +24,17 @@ import Types.Settings (Settings (..), setFeature)
 import qualified Types.State as WorkerState
 import Types.State (WorkerState (..))
 import Types.State.Make (MakeState (..))
+
+#if defined(GBC)
+import GHC.Linker.Types (BytecodeLoaderState (..), BytecodeState (..), LinkerEnv (..), Loader (..), LoaderState (..))
+import GHC.Types.Name (nameModule_maybe)
+import GHC.Types.Name.Env (nonDetNameEnvElts)
+import GHC.Unit.Types (interactiveUnit)
+#else
+import GHC.ByteCode.Types (bc_bcos, unlinkedBCOName)
+import GHC.Data.FlatBag (elemsFlatBag)
+import GHC.Linker.Types (Loader (..), LoaderState (..), linkableBCOs)
+#endif
 
 enableLazyByteCode :: TestEnv -> TestEnv
 enableLazyByteCode testEnv =
@@ -60,8 +70,15 @@ envLoader env = do
 loadedBcos :: Env -> TestT IO [(FastString, FastString, [String])]
 loadedBcos env = do
   Loader lsVar <- evalMaybe =<< liftIO (envLoader env)
+#if defined(GBC)
+  LoaderState {bcos_loaded, bco_loader_state} <- evalMaybe =<< liftIO (readMVar lsVar)
+  let closures = fst <$> nonDetNameEnvElts bco_loader_state.homePackage_loaded.bco_linker_env.closure_env
+  -- Splice expressions are loaded as modules in the interactive unit, which aren't relevant here.
+  pure [modBcos m (bcoNames m closures) | (m, _) <- moduleEnvToList bcos_loaded, m.moduleUnit /= interactiveUnit]
+#else
   LoaderState {bcos_loaded} <- evalMaybe =<< liftIO (readMVar lsVar)
   pure [modBcos m (bcoNames linkable) | (m, linkable) <- moduleEnvToList bcos_loaded]
+#endif
   where
     modBcos m ns =
       (unitFS m.moduleUnit, moduleNameFS m.moduleName, mapMaybe interestingName ns)
@@ -73,5 +90,12 @@ loadedBcos env = do
       | otherwise
       = Nothing
 
+#if defined(GBC)
+    -- The loader state only retains usage info for loaded linkables, so the names of the top-level BCOs are
+    -- recovered from the closures the linker registered for the module.
+    bcoNames m closures =
+      [n | n <- closures, nameModule_maybe n == Just m]
+#else
     bcoNames lnk =
       [unlinkedBCOName bco | cbc <- linkableBCOs lnk, bco <- elemsFlatBag (bc_bcos cbc)]
+#endif

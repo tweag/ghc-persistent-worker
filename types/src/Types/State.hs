@@ -9,7 +9,7 @@ import GHC (HscEnv)
 import System.OsPath (OsPath)
 import Types.Api (ExecutorId)
 import Types.Settings (Settings)
-import Types.State.Executor (ExecutorHandle)
+import Types.State.Executor (ExecutorHandle, PayloadCache)
 import Types.State.Make (MakeState (..))
 
 data BinPath =
@@ -32,7 +32,11 @@ data WorkerState =
     -- | Persistent execute-task subprocesses, keyed by the client-specified 'ExecutorId'. Populated lazily by
     -- 'GhcServer.Build.Executor.ensureExecutor' the first time a given id is dispatched to, and reused for every
     -- subsequent execute task naming the same id, until explicitly terminated (@TerminateExecutor@ API request).
-    executors :: Map ExecutorId ExecutorHandle
+    executors :: Map ExecutorId ExecutorHandle,
+
+    -- | Bytecode payloads prepared for executors, shared by all of them.
+    -- See 'GhcServer.Build.ExecutorPlan'.
+    payloads :: PayloadCache
   }
 
 -- | The empty executor map, for constructing a fresh 'WorkerState'.

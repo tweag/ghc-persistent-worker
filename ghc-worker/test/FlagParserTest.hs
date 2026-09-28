@@ -29,7 +29,7 @@ import GHC.Utils.Error (pprMessages)
 import GHC.Utils.Outputable (Outputable (..), showPprUnsafe)
 import Hedgehog (TestT, assert, evalEither, failure, (===))
 import Internal.DynFlags.Parse (parseDynFlags)
-#if !MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
+#if !MIN_VERSION_GLASGOW_HASKELL(9,14,0,0) || defined(GBC)
 import System.OsPath.Extra (toOsPath)
 #endif
 import Test.Run (assertJust, unitTest)
@@ -46,7 +46,7 @@ instance Show DbRef where
     PkgDbPath path -> show path
 
 dbRef :: String -> DbRef
-#if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
+#if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0) && !defined(GBC)
 dbRef path = DbRef (PkgDbPath path)
 #else
 dbRef path = DbRef (PkgDbPath (toOsPath path))

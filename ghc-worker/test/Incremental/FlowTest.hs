@@ -1,4 +1,4 @@
-{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE CPP, PatternSynonyms #-}
 
 module Incremental.FlowTest where
 
@@ -156,6 +156,9 @@ targetValid =
 -- initial build (module 5 was modified, module 9 was added, in unit2).
 -- It's important to assert that all fixed nodes in the current unit have intact dependencies.
 targetRecomputed :: [(String, String, Bool, [(String, String)])]
+
+#if defined(MWB)
+
 targetRecomputed =
   [
     ("unit1", "U1M0", fixed, []),
@@ -177,6 +180,27 @@ targetRecomputed =
     ("unit2", "U2M8", fixed, [("unit2", "U2M5"), ("unit2", "U2M7"), ("unit1", "U1M8")]),
     ("unit2", "U2M9", False, [("unit1", "U1M9"), ("unit2", "U2M5"), ("unit2", "U2M4")])
   ]
+
+#else
+
+-- | Stock GHC's @downsweep@ can't reuse the cached graph, so the result only contains the modules reachable from the
+-- updated sources, all of which are compile nodes.
+targetRecomputed =
+  [
+    ("unit1", "U1M0", False, []),
+    ("unit1", "U1M3", False, []),
+    ("unit1", "U1M4", False, []),
+    ("unit1", "U1M5", False, [("unit1", "U1M4")]),
+    ("unit1", "U1M8", False, []),
+    ("unit1", "U1M9", False, []),
+    ("unit2", "U2M0", False, [("unit1", "U1M0")]),
+    ("unit2", "U2M3", False, [("unit1", "U1M3"), ("unit2", "U2M0")]),
+    ("unit2", "U2M4", False, [("unit1", "U1M4"), ("unit2", "U2M3")]),
+    ("unit2", "U2M5", False, [("unit1", "U1M8"), ("unit1", "U1M5"), ("unit2", "U2M4"), ("unit2", "U2M3"), ("unit2", "U2M0")]),
+    ("unit2", "U2M9", False, [("unit1", "U1M9"), ("unit2", "U2M5"), ("unit2", "U2M4")])
+  ]
+
+#endif
 
 targetModuleGraph :: Unit -> Map ModuleKey [ModuleKey]
 targetModuleGraph unit =

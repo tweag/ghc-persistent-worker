@@ -353,6 +353,7 @@
           "ghc-worker-test-common"
           "ghci"
           "grapesy"
+          "mmap"
           "optparse-applicative"
           "parsec"
           "process"
@@ -482,6 +483,12 @@
           default = false;
         };
 
+        gbc = {
+          description = "GHC contains the bytecode artifacts (.gbc) backport";
+          manual = true;
+          default = false;
+        };
+
       };
 
       when = [
@@ -500,6 +507,10 @@
         {
           condition = "flag(linkables)";
           cpp-options = ["-DLINKABLES"];
+        }
+        {
+          condition = "flag(gbc)";
+          cpp-options = ["-DGBC"];
         }
       ];
 

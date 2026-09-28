@@ -5,6 +5,14 @@
   serverPkg = build.packages.min.ghc-server.package;
   uiPkg = build.packages.min.ghc-ui.package;
   profiledServerPkg = build.packages.profiled.ghc-server.package;
+  gbcServerPkg = build.packages.gbc-tools.ghc-server.package;
+
+  # Prebuilt ext dep packages for the GBC GHC, used by `test-executor`.
+  gbcExtDeps = import ./test-ext-deps.nix {
+    inherit (config) pkgs;
+    inherit lib;
+    ghc = build.envs.gbc-tools.toolchain.packages.ghc;
+  };
   profiteur = build.envs.tools.toolchain.packages.profiteur;
 
   # Prebuilt ext dep packages for the mwb-26-07-linkables GHC, used by profiling apps.
@@ -82,6 +90,63 @@ in {
 
     outputs.apps.ui = util.zapp "ui" ''
     exec ${uiPkg}/bin/ghc-ui --server-exe ${serverPkg}/bin/ghc-server "$@"
+    '';
+
+    outputs.apps.gbc-transport = util.zapp "gbc-transport" ''
+project=$(mktemp -d --tmpdir gbc-transport.XXXXXXXX)
+    ${cleanup}
+    server=${gbcServerPkg}/bin/ghc-server
+    $server gbc-transport --server-exe $server --project $project "$@"
+    '';
+
+    outputs.apps.test-executor = util.zapp "test-executor" ''
+    if (( $# < 3 ))
+    then
+      echo "Usage: nix run .#test-executor UNITS MODULES TESTS [EXECUTOR_RTS_OPTS...]"
+      echo "Generates UNITS chained units with MODULES modules each, TESTS of which define main, and executes the tests"
+echo "in one persistent executor per unit, interleaved with the compilation of downstream units."
+      echo "The remaining args are RTS options for the executors, e.g. '-N1 -A16M'."
+      echo "Set SHARED_PAYLOADS=1 to transfer bytecode payloads through shared memory (feature flag shared-payloads)."
+      echo "The output of the tests is compared with the values expected by the generator."
+      exit 1
+    fi
+    project=$(mktemp -d --tmpdir test-executor.XXXXXXXX)
+    ${cleanup}
+    server="${gbcServerPkg}/bin/ghc-server"
+    client="${gbcServerPkg}/bin/ghc-client"
+    stats=$project/server-rts-stats
+    server_log=$project/server.log
+
+    resource_test_ext_deps=${gbcExtDeps} ${gbcServerPkg}/bin/gen-project tests $project $1 $2 $3
+
+    # The verbose log contains the executor stats reported after the request and the output of the tests.
+    features=()
+    [[ -n $SHARED_PAYLOADS ]] && features=(--enable shared-payloads)
+    $server --root $project --verbose $features --executor-rts "$*[4,-1]" +RTS -s$stats -RTS 2>$server_log &
+    server_pid=$!
+
+    zmodload zsh/datetime
+    start=$EPOCHREALTIME
+    exit_code=0
+$client --root $project --wait --executors unit '*:execute' || exit_code=$?
+    print "Client finished after $(( EPOCHREALTIME - start ))s with exit code $exit_code"
+
+    kill -INT $server_pid
+    wait $server_pid || true
+    server_pid=""
+    print '\nExecutor stats:'
+    grep '^executor ' $server_log
+    print '\nServer RTS stats:'
+    cat $stats
+    grep -Eo '^U[0-9]+Test[0-9]+: .*' $server_log | sort > $project/actual-output
+    if diff $project/expected-output $project/actual-output
+    then
+      print "\nTest output matches ($(wc -l < $project/expected-output) lines)."
+    else
+      print '\nTest output differs from expected output (< expected, > actual).'
+      (( exit_code == 0 )) && exit_code=1
+    fi
+    exit $exit_code
     '';
 
     outputs.apps.rebuild-impure-worker = util.zapp "rebuild-impure-worker" ''

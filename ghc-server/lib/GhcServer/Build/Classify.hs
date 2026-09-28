@@ -27,6 +27,7 @@ import GhcServer.Data.Request (
   UnitRequest (..),
   UnitScope (..),
   isCompileRequest,
+  selectExecutor,
   )
 import GhcServer.Data.Unit (ClientModule, Project (..), Unit (..), clientModuleName, unitSources)
 import GhcServer.Log (emitLog)
@@ -148,13 +149,15 @@ classifyBuildRequest env request = do
 
     -- | Execute tasks are only produced for units explicitly requested with 'UnitExecute'\/
     -- 'UnitExecuteModules' -- implicit transitive deps and other request kinds never trigger execution.
-    -- @request.executor@ is passed straight to 'executeTasksFromSources', which stores it as the pending
+    -- @request.executor@ is resolved for the unit and passed to 'executeTasksFromSources', which stores it as the pending
     -- execute task's own value -- these branches are the only place execute tasks are created, so no
     -- scope-based gating of the flag is needed here (unlike compile-task enabling above).
     unitExecuteTasks eu = case eu.scope of
-      Explicit UnitExecute -> executeTasksFromSources eu.unit.name request.executor (unitSources eu.unit)
-      Explicit (UnitExecuteModules mods) -> executeTasksFromSources eu.unit.name request.executor (selectedSources eu.unit mods)
+      Explicit UnitExecute -> executeTasksFromSources eu.unit.name (unitExecutor eu) (unitSources eu.unit)
+      Explicit (UnitExecuteModules mods) -> executeTasksFromSources eu.unit.name (unitExecutor eu) (selectedSources eu.unit mods)
       _ -> []
+
+    unitExecutor eu = selectExecutor eu.unit.name <$> request.executor
 
 -- | The source files of the unit's modules whose names the client selected.
 --

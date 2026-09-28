@@ -21,6 +21,7 @@ import qualified Types.Settings as Settings
 import Types.Settings (Settings (..))
 import qualified Types.State
 import Types.State (BinPath (..), WorkerState (..))
+import Types.State.Executor (emptyPayloadCache)
 import Types.State.Make (EModuleGraph (..), MakeState (..), emptyEModuleGraph, emptyLibLoadState)
 
 newState :: Settings -> IO (MVar WorkerState)
@@ -49,7 +50,8 @@ newState settings = do
       bcoHistory = M.empty,
       bytecodeImport = M.empty
     },
-    executors = Types.State.emptyExecutors
+    executors = Types.State.emptyExecutors,
+    payloads = emptyPayloadCache
   }
 
 modifyMakeState :: MVar WorkerState -> (MakeState -> IO (MakeState, a)) -> IO a

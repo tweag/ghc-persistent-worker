@@ -1,6 +1,7 @@
 -- | CLI configuration types for the standalone GHC server and client.
 module GhcServer.Data.Config where
 
+import GhcServer.Data.Request (ExecutorSelection)
 import System.OsPath (OsPath)
 import Types.Settings (Settings)
 
@@ -17,7 +18,9 @@ data ServerConfig =
     -- discovery auto-detects: a @.cabal@ file triggers Cabal-based discovery, otherwise @unit.json@ files are used.
     jsonConfig :: Bool,
     -- | Initial settings.
-    settings :: Settings
+    settings :: Settings,
+    -- | RTS options for persistent executor subprocesses.
+    executorRts :: [String]
   }
   deriving stock (Show)
 
@@ -34,7 +37,7 @@ data ClientConfig =
     recompile :: Bool,
     -- | Recompute metadata (and recompile) even when cached.
     rebuild :: Bool,
-    -- | Run this request's execute tasks in the persistent executor subprocess with this ID instead of in-process.
-    executor :: Maybe String
+    -- | Run this request's execute tasks in persistent executor subprocesses instead of in-process.
+    executor :: Maybe ExecutorSelection
   }
   deriving stock (Show)

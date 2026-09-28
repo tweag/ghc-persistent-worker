@@ -30,7 +30,6 @@ import GHC.Driver.Errors.Types (DriverMessages, GhcMessage (..))
 import GHC.Driver.Make (ModNodeKeyWithUid (..), summariseFile)
 import GHC.Driver.Session (updatePlatformConstants)
 import GHC.Driver.Config.Finder (initFinderOpts)
-import GHC.Types.SourceError (throwErrors)
 import GHC.Types.SourceFile (HscSource (HsSrcFile))
 import GHC.Unit (GenWithIsBoot (..), HomeUnit, UnitDatabase, UnitId (..), UnitState)
 import GHC.Unit.Env (HomeUnitEnv (..), UnitEnv (..), updateHug)
@@ -45,7 +44,7 @@ import Internal.Compat.GHC914 (moduleNodeEdge)
 import Internal.Compat.UnitIndex (initUnits)
 import Internal.DynFlags (buckLocation, parseFlags, setupPath)
 import Internal.DynFlags.Parse (parseDynFlags)
-import Internal.Error (eitherMessages, unknownErrors)
+import Internal.Error (eitherMessagesIO, unknownErrors)
 import Internal.Log (logDebugD, logTimed, logTimedD)
 import Internal.State (updateMakeState)
 import qualified Internal.State.Make as Make
@@ -181,7 +180,7 @@ loadCachedModule useFixedNodes hsc_env unit (JsonFs modName) CachedModule {sourc
         False -> pure Nothing
         True -> do
           summResult <- summariseFile hsc_env (DefiniteHomeUnit unit Nothing) mempty (fromOsPath src) Nothing Nothing
-          summary <- eitherMessages GhcDriverMessage summResult
+          summary <- eitherMessagesIO hsc_env GhcDriverMessage summResult
           -- Apply per-module GHC flags.
           (dflags', _, _) <- GHC.parseDynamicFlags
               hsc_env.hsc_logger
@@ -230,7 +229,7 @@ readParseGHCArgs parseFast hsc_env0 dflags0 args_file
     args <- BS.readFile (fromOsPath args_file)
     -- TODO: for correctness, we may need to ensure there are no positional args left
     -- by ensureNoPositionalArgs, but this needs to be adjusted with client implementation.
-    either (throwErrors . fmap GhcDriverMessage) pure (fst <$> parseDynFlags dflags0 args)
+    eitherMessagesIO hsc_env0 GhcDriverMessage (fst <$> parseDynFlags dflags0 args)
   | otherwise = do
     args <- readFile (fromOsPath args_file)
     (dflags1, _, _, _) <- parseFlags dflags0 hsc_env0.hsc_logger (buckLocation <$> lines args)

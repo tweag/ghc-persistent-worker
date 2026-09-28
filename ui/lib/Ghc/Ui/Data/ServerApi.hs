@@ -1,6 +1,6 @@
 module Ghc.Ui.Data.ServerApi where
 
-import Types.Api (Target, TaskKind)
+import Types.Api (ExecutorId, Target, TaskKind)
 import Types.FeatureFlags (Feature)
 
 -- | Abstraction of gRPC endpoints.
@@ -11,5 +11,6 @@ data ServerApi =
     triggerTask :: Target -> TaskKind -> IO (),
     evictBytecode :: Target -> IO (),
     clean :: Target -> IO (),
-    toggleFeature :: Feature -> IO ()
+    toggleFeature :: Feature -> IO (),
+    terminateExecutor :: ExecutorId -> IO ()
   }
