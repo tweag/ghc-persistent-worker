@@ -5,17 +5,17 @@ import Data.Bifunctor (bimap)
 import Data.Foldable (foldr', for_, traverse_)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
-import Data.Set (Set)
 import qualified Data.Set as Set
+import Data.Set (Set)
 import GHC.ByteCode.Types (bc_bcos)
 import GHC.Data.FlatBag (sizeFlatBag)
 import GHC.Driver.Env (HscEnv, hscInterp)
-import GHC.Linker.Loader (unload)
 import GHC.Linker.Types (Linkable (..), linkableBCOs, linkableModule)
 import GHC.Unit.Home.Graph (HomeUnitEnv (..), UnitEnvGraph (..), unitEnv_lookup_maybe)
 import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..))
 import GHC.Unit.Home.PackageTable (addHomeModInfoToHpt, lookupHpt)
 import GHC.Unit.Types (Module, moduleName, moduleUnitId)
+import Internal.Compat.Unload (unloadModules)
 import Types.State.Make (BcoCacheEntry (..), BcoHistoryEntry (..), MakeState (..))
 
 -- | Count the number of BCOs in a 'Linkable' as a coarse proxy measure for memory usage.
@@ -74,10 +74,10 @@ unloadEvicted hsc_env evicted make
   | null evicted = pure make
   | otherwise = do
       traverse_ (dropFromHpt make.hug . fst) evicted
-      unload (hscInterp hsc_env) hsc_env (linkable <$> Map.elems kept)
-      pure make {bcoCache = kept}
+      unloadModules (hscInterp hsc_env) hsc_env modules
+      pure make {bcoCache = Map.withoutKeys make.bcoCache (Set.fromList modules)}
   where
-    kept = Map.withoutKeys make.bcoCache (Set.fromList (fst <$> evicted))
+    modules = fst <$> evicted
 
 -- | If the tracked total size of 'MakeState.bcoCache' exceeds the given limit, unload the least recently used excess
 -- entries.
