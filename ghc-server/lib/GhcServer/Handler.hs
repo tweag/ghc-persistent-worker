@@ -40,7 +40,7 @@ import System.Directory.OsPath (doesDirectoryExist, removeDirectoryRecursive)
 import System.Exit (ExitCode (..), exitSuccess)
 import System.OsPath (OsPath, (</>))
 import System.OsPath.Extra (toOsPath)
-import Test.Scheduler (SchedulerResources (..), SchedulerState (..))
+import Test.Data.Scheduler (SchedulerResources (..), SchedulerState (..))
 import qualified Text.Parsec as Parsec
 import Types.Api (ApiResponse (..), ExecutorId (..), HomeModule (..), Target (..), UnitName (..), toGhcModuleName)
 import qualified Types.Args as Args

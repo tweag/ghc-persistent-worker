@@ -13,7 +13,7 @@ import Prelude hiding (log)
 import System.Directory.OsPath (createDirectoryIfMissing)
 import System.OsPath ((</>))
 import System.OsPath.Extra (toOsPath)
-import Types.Api (UnitName (..))
+import Types.Api (RequestId, UnitName (..), eventsForRequest)
 import Types.Args (Args (..))
 import Types.BuckArgs (IsInterpreted (..))
 import Types.CachedDeps (CachedDeps)
@@ -78,12 +78,15 @@ compileSingleModule ::
   Unit ->
   ModuleName ->
   CachedDeps ->
-  Int ->
+  RequestId ->
   IO ([(UnitName, ModuleName, String)], [String])
 compileSingleModule buildEnv unit modName cachedDeps requestId = do
   (result, captured) <- withModuleSession buildEnv unit modName Nothing cachedDeps \ logger env target ->
     withGhcMakeModule Compiled target env Nothing \ _targetSpec ->
-      compileModuleWithDepsInHpt logger (emitEvent buildEnv.instrChan) requestId (TargetModule target)
+      compileModuleWithDepsInHpt
+        logger
+        (eventsForRequest requestId (emitEvent buildEnv.instrChan))
+        (TargetModule target)
   pure $ case result of
     Just _ -> ([], captured)
     Nothing -> ([(unit.name, modName, "Compilation failed:\n" ++ unlines captured)], [])

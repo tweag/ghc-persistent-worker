@@ -47,8 +47,16 @@ import GhcServer.Data.Unit (Project (..), Unit (..))
 import GhcServer.Log qualified as Log
 import GhcServer.Log (emitLog)
 import GhcWorker.Grpc (pushBytecodeState)
-import Test.Scheduler (Phase (..), SchedulerState (..), Task (..), TaskResult (..), addResolutions)
-import Types.Api (Event (..), HomeModule (..), ProcessStats, Target (..), UnitName (..), fromGhcModuleName)
+import Test.Data.Scheduler (Phase (..), Propagated (..), SchedulerState (..), Task (..), TaskResult (..))
+import Types.Api (
+  Event (..),
+  HomeModule (..),
+  ProcessStats,
+  RequestId (..),
+  Target (..),
+  UnitName (..),
+  fromGhcModuleName,
+  )
 import Types.Log (Logger (..))
 
 
@@ -73,13 +81,13 @@ emitBytecodeState env = for_ env.instrChan (pushBytecodeState env.stateVar)
 -- @instrument@ UI can match events to the exact task instance instead of matching by target text (which
 -- collides when the same target is dispatched more than once, e.g. as both a direct request and a transitive
 -- dependency of another request).
-nextRequestId :: BuildEnv -> IO Int
-nextRequestId env = atomicModifyIORef' env.requestIdCounter \ n -> (n + 1, n)
+nextRequestId :: BuildEnv -> IO RequestId
+nextRequestId env = RequestId <$> atomicModifyIORef' env.requestIdCounter \ n -> (n + 1, n)
 
 -- | Send a 'CompileStart' event for a metadata or compile task about to run. @process@ marks whether this
 -- task instance runs (or, for execute tasks, is about to run) in a subprocess -- always 'False' except for
 -- execute tasks dispatched with @--process@ (see 'dispatchTask').
-emitTaskStart :: BuildEnv -> Int -> Target -> Bool -> IO ()
+emitTaskStart :: BuildEnv -> RequestId -> Target -> Bool -> IO ()
 emitTaskStart env requestId target process = emitEvent env CompileStart {target, debuggable = False, process, requestId}
 
 -- | Send a 'CompileEnd' event for a metadata or compile task that just finished, deriving the exit code,
@@ -88,7 +96,7 @@ emitTaskStart env requestId target process = emitEvent env CompileStart {target,
 -- carries the RTS memory stats a subprocess execute task's child reported, 'Nothing' for every other task kind.
 -- @noMain@ is 'True' only for an execute task whose module has no @main@ (see 'dispatchTask''s 'ExecuteModule'
 -- case), 'False' for every other call site.
-emitTaskEnd :: BuildEnv -> Int -> Target -> TaskResult String -> Maybe ProcessStats -> Bool -> IO ()
+emitTaskEnd :: BuildEnv -> RequestId -> Target -> TaskResult String -> Maybe ProcessStats -> Bool -> IO ()
 emitTaskEnd env requestId target result stats noMain = do
   emitEvent env CompileEnd {
     target,
@@ -110,7 +118,7 @@ emitTaskEnd env requestId target result stats noMain = do
 -- | Run an instrumented task: emits 'CompileStart' before and 'CompileEnd' after, deriving the target's
 -- display text from the given unit\/module description. Always an in-process task (metadata\/compile never run
 -- in a subprocess), so @process@ is always 'False' and @stats@ always 'Nothing'.
-withTaskEvents :: BuildEnv -> Int -> Target -> IO (TaskResult String) -> IO (TaskResult String)
+withTaskEvents :: BuildEnv -> RequestId -> Target -> IO (TaskResult String) -> IO (TaskResult String)
 withTaskEvents env requestId target action = do
   emitTaskStart env requestId target False
   result <- action
@@ -128,7 +136,7 @@ skipMetadata env name = do
 --
 -- Before compilation, assembles 'CachedDeps' from the 'BuildExt' module map
 -- and passes them to the worker for HPT pre-population.
-compile :: BuildExt -> BuildEnv -> Unit -> ModuleName -> Int -> IO (TaskResult String)
+compile :: BuildExt -> BuildEnv -> Unit -> ModuleName -> RequestId -> IO (TaskResult String)
 compile ext env unit modName requestId = do
   env.log.debugD ("Compile:" <+> O.text (Text.unpack unit.name.text) O.<> ":" O.<> ppr modName)
   logEvent env.events (ModuleCompiled unit.name modName)
@@ -211,20 +219,22 @@ computeResolutions cache env name _state =
 -- the unit's changed modules (Phase 0), the module-graph delta against the pre-refresh graph,
 -- and (for @--recompile@) the unit's entire module set; extends the current generation's stale
 -- closure by downstream reachability over the merged module graph; and derives resolutions
--- restricted to stale modules.  For all other completions the state is returned unchanged.
+-- restricted to stale modules.  If the unit's cache cannot be decoded, the completion is turned into a
+-- 'TaskFailed'.  For all other completions the result and extension state are returned unchanged, with no
+-- resolutions.
 propagateCompletion ::
   BuildCache ->
   BuildEnv ->
   TaskKey 'Resolved ->
   TaskResult String ->
   SchedulerState TaskKey TaskValue String BuildExt ->
-  IO (SchedulerState TaskKey TaskValue String BuildExt)
-propagateCompletion cache env (MetaTask name) (TaskSuccess _) state =
+  IO (Propagated TaskKey String BuildExt)
+propagateCompletion cache env (MetaTask name) (TaskSuccess payload) state =
   runExceptT (computeResolutions cache env name state) >>= \case
     Left err -> do
       let errS = Text.unpack err
       env.log.debug ("Cache decode failure during propagation: " ++ errS)
-      pure state {failures = Map.insert (MetaTask name) errS state.failures}
+      pure Propagated {result = TaskFailed errS, newExt = state.ext, newResolutions = Map.empty}
     Right newModules -> do
       diffs <- readMVar env.diff
       let
@@ -257,6 +267,6 @@ propagateCompletion cache env (MetaTask name) (TaskSuccess _) state =
         ++ " priorStale=" ++ show (Set.toList priorStale)
         ++ " stale=" ++ show (Set.toList stale)
         ++ " newResolutions=" ++ show (Map.keys newResolutions)
-      pure (addResolutions newResolutions state {ext = ext'})
-propagateCompletion _ _ _ _ state =
-  pure state
+      pure Propagated {result = TaskSuccess payload, newExt = ext', newResolutions}
+propagateCompletion _ _ _ result state =
+  pure Propagated {result, newExt = state.ext, newResolutions = Map.empty}

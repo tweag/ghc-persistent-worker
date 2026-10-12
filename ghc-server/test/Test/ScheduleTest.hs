@@ -26,7 +26,7 @@ import GhcServer.Build.Schedule (
   )
 import Hedgehog (TestT, property, test, withTests, (===))
 import System.OsPath.Extra (toOsPath)
-import Test.Scheduler (Phase (..))
+import Test.Data.Scheduler (Phase (..))
 import Test.Tasty (DependencyType (..), TestName, TestTree, dependentTestGroup)
 import Test.Tasty.Hedgehog (testProperty)
 import Types.Api (UnitName (..))
