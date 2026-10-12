@@ -63,6 +63,18 @@ data UnitSummary =
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary)
 
+-- | Metadata for tracking the loaded bytecode of a module.
+data TrackedBytecode =
+  TrackedBytecode {
+    key :: HomeModule,
+    size :: Int,
+    lastAccess :: Int,
+    resident :: Bool,
+    pendingEviction :: Bool
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (Binary, FromJSON, ToJSON)
+
 -- | Specification for selecting build targets by names, especially from the UI.
 data Target =
   TargetProject
@@ -170,6 +182,22 @@ data Event =
     durationMs :: Word,
     requestId :: RequestId
   }
+  |
+  -- | The project structure at the point when a client connects.
+  ProjectStructure { units :: [UnitSummary] }
+  |
+  -- | Sent when bytecode in the loader state was accessed.
+  BytecodeSnapshot { entries :: [TrackedBytecode] }
+  |
+  LogMessage {
+    category :: String,
+    level :: String,
+    message :: String,
+    timestampMs :: Integer
+  }
+  |
+  -- | Indicates that all scheduled tasks have concluded.
+  RequestCompleted { statusMessage :: Text }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary)
 
