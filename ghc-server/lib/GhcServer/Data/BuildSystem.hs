@@ -6,7 +6,7 @@ module GhcServer.Data.BuildSystem where
 
 import GhcServer.Build.Schedule (BuildExt, TaskKey, TaskValue)
 import GhcServer.Data.Request (ScheduleRequest)
-import Test.Scheduler (Handlers)
+import Test.Data.Scheduler (Handlers)
 
 -- | Build-system handlers wired into the scheduler.
 --

@@ -1,6 +1,7 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
--- | End-to-end tests for the standalone GHC server build pipeline.
+
+-- | End-to-end tests for the GHC server build pipeline.
 --
 -- Creates synthetic multi-unit projects in temporary directories and builds
 -- them under various scheduling scenarios.
@@ -35,8 +36,10 @@ import GhcServer.Build (
   stopBuild,
   )
 import GhcServer.Build.Execute (executeModuleTask)
+import GhcServer.Build.Propagate (propagateCompletion)
 import GhcServer.Build.Schedule (TaskKey (..), emptyBuildExt)
 import GhcServer.Cache (cacheExists)
+import GhcServer.Data.BuildCache (BuildCache (..))
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (BuildEvent (..), BuildEvents, newBuildEvents, readEvents)
 import GhcServer.Data.Request (ScheduleRequest (..), UnitRequest (..))
@@ -52,15 +55,18 @@ import System.IO.Temp (createTempDirectory, getCanonicalTemporaryDirectory)
 import System.OsPath (OsPath)
 import System.OsPath.Extra (toOsPath)
 import System.Timeout (timeout)
-import Test.Scheduler (SchedulerDecision (..), TaskResult (..))
+import Test.Data.Scheduler (SchedulerDecision (..), SchedulerState (..), TaskResult (..))
+import Test.Scheduler (applyPropagated)
+import Test.Scheduler.Decision (evalTraced)
+import Test.Scheduler.State (initialSchedulerState)
 import Test.Tasty (DependencyType (..), TestName, TestTree, dependentTestGroup, withResource)
 import Test.Tasty.Hedgehog (testProperty)
 import Types.Api qualified as Api
 import Types.Api (TaskTrigger (..), UnitName (..))
 import Types.Args (emptyArgs)
+import Types.Settings (defaultSettings)
 import Types.State (WorkerState (..))
 import Types.State.Make (MakeState (..))
-import Types.Settings (defaultSettings)
 
 -- ---------------------------------------------------------------------------
 -- Low-level helpers
@@ -1902,6 +1908,24 @@ test_failedTaskNotRetried =
     diff "unit1:E" elem (decisionSkipped batch2)
     liftIO (cancel cb.thread)
 
+-- | Regression test: a cache decode failure found while propagating a successful metadata completion must still
+-- be visible in the scheduler's 'failures' once the completion has been recorded.
+--
+-- The scheduler records the result returned by 'propagateCompletion', and recording a success clears the task's
+-- entry in 'failures'. The failure therefore has to be reported as the propagated result.
+test_propagateDecodeFailureSurvives :: TestTree
+test_propagateDecodeFailureSurvives =
+  execProjectTest "cache decode failure during propagation is not erased by recording the completion" \ tp -> do
+    stateVar <- liftIO (newBuildState defaultSettings)
+    (buildEnv, _) <- liftIO (newBuildEnv tp stateVar)
+    let
+      key = MetaTask (UnitName "unit0")
+      missingCache = BuildCache {unitCached = \ _ -> pure False, loadUnit = \ _ -> pure Nothing}
+    propagated <-
+      liftIO (propagateCompletion missingCache buildEnv key (TaskSuccess Nothing) (initialSchedulerState emptyBuildExt))
+    let recorded = evalTraced (applyPropagated key propagated (initialSchedulerState emptyBuildExt))
+    diff (Map.member key recorded.failures) (==) True
+
 test_persistentSessions :: TestTree
 test_persistentSessions =
   dependentTestGroup "Persistent scheduler sessions" AllFinish
@@ -1926,6 +1950,7 @@ test_serverBuild =
     , test_incrementalRecompilation
     , test_persistentSessions
     , test_executeModule
+    , test_propagateDecodeFailureSurvives
     , test_uiRebuildRace
     ]
 

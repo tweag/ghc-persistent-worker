@@ -29,7 +29,8 @@ import Internal.Evaluate (executeMain)
 import Internal.Session (withGhcMakeModule)
 import Prelude hiding (log)
 import System.OsPath.Extra (fromOsPath)
-import Test.Scheduler (TaskResult (..))
+import Test.Data.Scheduler (TaskResult (..))
+import Types.Api (RequestId)
 import Types.Args (Args (..))
 import Types.BuckArgs (IsInterpreted (..))
 import Types.Env (Env (..))
@@ -59,7 +60,7 @@ data ExecOutcome =
 -- and a runtime failure via 'ExecRan False') from the deliberate no-@main@ skip ('ExecNoMain'). Only the
 -- failure modes are reported as a failed task ('TaskFailed'); 'ExecNoMain' is reported as 'Nothing' so the
 -- caller ('GhcServer.Build.Propagate.dispatchTask') can distinguish "skip" from "ran/failed".
-executeModuleTask :: BuildEnv -> BuildExt -> Unit -> ModuleName -> Int -> Maybe (HscEnv -> IO ()) -> IO (Maybe (TaskResult String))
+executeModuleTask :: BuildEnv -> BuildExt -> Unit -> ModuleName -> RequestId -> Maybe (HscEnv -> IO ()) -> IO (Maybe (TaskResult String))
 executeModuleTask buildEnv ext unit modName _requestId sharedBytecodeHook = do
   (outcome, captured) <- withModuleSession buildEnv unit modName (Just "execute") cachedDeps \ logger env target -> do
     logger.debug ("Executing " ++ moduleNameString modName ++ " in-place")

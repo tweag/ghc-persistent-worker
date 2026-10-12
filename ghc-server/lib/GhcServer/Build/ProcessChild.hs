@@ -45,7 +45,7 @@ import System.IO.Silently (capture, hCapture)
 import System.Mem (performMajorGC)
 import System.OsPath.Extra (OsPath, fromOsPath, (</>))
 import Test.Log (newTestLog)
-import Test.Scheduler (TaskResult (..))
+import Test.Data.Scheduler (TaskResult (..))
 import Types.Api (ModuleName (..), ProcessStats (..), UnitName (..), toGhcModuleName)
 import qualified Types.Args as Args
 import Types.Args (emptyArgs)

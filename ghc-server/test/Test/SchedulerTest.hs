@@ -4,24 +4,12 @@ module Test.SchedulerTest where
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Set (Set)
-import Test.Scheduler (
-  Generation,
-  Phase (..),
-  Resolution (..),
-  SchedulerState (..),
-  Task (..),
-  TaskResult (..),
-  addResolutions,
-  bumpGeneration,
-  classifyTask,
-  initialGeneration,
-  insertPending,
-  nextGeneration,
-  promote,
-  promoteEnabled,
-  recordResult,
-  )
 import Hedgehog (TestT, property, test, withTests, (===))
+import Test.Data.Scheduler (Generation, Phase (..), Resolution (..), SchedulerState (..), Task (..), TaskResult (..))
+import Test.Scheduler.Active (classifyTaskIn)
+import Test.Scheduler.Decision (Traced, evalTraced)
+import Test.Scheduler.Pending (addResolutions, insertPending, promote, promoteEnabled)
+import Test.Scheduler.State (bumpGeneration, recordResult)
 import Test.Tasty (DependencyType (..), TestName, TestTree, dependentTestGroup)
 import Test.Tasty.Hedgehog (testProperty)
 
@@ -57,6 +45,13 @@ unitTest :: TestName -> TestT IO () -> TestTree
 unitTest desc t =
   testProperty desc (withTests 1 (property (test t)))
 
+-- | The generation of a scheduler that has not processed any request.
+initialGeneration :: Generation
+initialGeneration = 0
+
+nextGeneration :: Generation -> Generation
+nextGeneration = succ
+
 -- | The generation the pure tests operate in.
 --
 -- Deliberately one past 'initialGeneration', so that resolutions stamped with it are newer
@@ -64,6 +59,11 @@ unitTest desc t =
 -- request's resolutions are always computed after the completions of earlier requests.
 testGeneration :: Generation
 testGeneration = nextGeneration initialGeneration
+
+-- | Activate a task that is not part of a batch.
+classifyTask :: Task TestKey 'Resolved TestTask -> State -> Traced TestKey State
+classifyTask =
+  classifyTaskIn Set.empty
 
 emptyState :: State
 emptyState =
@@ -77,7 +77,6 @@ emptyState =
     failures = Map.empty,
     resolutions = Map.empty,
     generation = testGeneration,
-    trace = [],
     ext = ()
   }
 
@@ -163,14 +162,14 @@ specState spec =
 
 runPromote :: PromoteSpec -> TestT IO ()
 runPromote spec = do
-  let result = promote (Set.map TK spec.promoteKeys) (specState spec)
+  let result = evalTraced (promote (Set.map TK spec.promoteKeys) (specState spec))
   spec.expectPending === pendingKeys result
   spec.expectUnsatisfied === unsatisfiedKeys result
   spec.expectReady === readyKeys result
 
 runPromoteEnabled :: PromoteSpec -> TestT IO ()
 runPromoteEnabled spec = do
-  let result = promoteEnabled (specState spec)
+  let result = evalTraced (promoteEnabled (specState spec))
   spec.expectPending === pendingKeys result
   spec.expectUnsatisfied === unsatisfiedKeys result
   spec.expectReady === readyKeys result
@@ -281,7 +280,7 @@ test_promoteUpdatesAccepted =
         resolutions_ = [(1, (ResolvedVal 10, Set.empty))],
         promoteKeys = Set.singleton 1
       }
-      result = promote (Set.map TK spec.promoteKeys) (specState spec)
+      result = evalTraced (promote (Set.map TK spec.promoteKeys) (specState spec))
     Set.member (TK 1) (Map.keysSet result.accepted) === True
 
 -- ---------------------------------------------------------------------------
@@ -344,7 +343,7 @@ test_insertPendingMergesEnabled =
       state = emptyState {
         pending = Map.singleton (TK 1) (pendingTask 1 Set.empty False 10)
       }
-      result = insertPending (pendingTask 1 Set.empty True 10) state
+      result = evalTraced (insertPending (pendingTask 1 Set.empty True 10) state)
     case Map.lookup (TK 1) result.pending of
       Just t -> t.enabled === True
       Nothing -> fail "task should be in pending"
@@ -356,7 +355,7 @@ test_insertPendingResolvesImmediately =
       state = emptyState {
         resolutions = mkResolutions [(1, (ResolvedVal 10, Set.empty))]
       }
-      result = insertPending (pendingTask 1 Set.empty True 10) state
+      result = evalTraced (insertPending (pendingTask 1 Set.empty True 10) state)
     Map.null result.pending === True
     readyKeys result === Set.singleton 1
 
@@ -372,8 +371,8 @@ test_insertPendingDoesNotDuplicateAlreadyAcceptedReadyTask =
       state = emptyState {
         resolutions = mkResolutions [(1, (ResolvedVal 10, Set.empty))]
       }
-      afterFirst = insertPending (pendingTask 1 Set.empty True 10) state
-      afterSecond = insertPending (pendingTask 1 Set.empty True 10) afterFirst
+      afterFirst = evalTraced (insertPending (pendingTask 1 Set.empty True 10) state)
+      afterSecond = evalTraced (insertPending (pendingTask 1 Set.empty True 10) afterFirst)
     length afterFirst.ready === 1
     Map.null afterSecond.pending === True
     length afterSecond.ready === 1
@@ -392,7 +391,7 @@ test_addResolutionsPromotesPending =
           , (TK 2, pendingTask 2 Set.empty False 20)
           ]
       }
-      result = addResolutions (rawResolutions [(1, (ResolvedVal 10, Set.empty)), (2, (ResolvedVal 20, Set.empty))]) state
+      result = evalTraced (addResolutions (rawResolutions [(1, (ResolvedVal 10, Set.empty)), (2, (ResolvedVal 20, Set.empty))]) state)
     pendingKeys result === Set.singleton 2
     readyKeys result === Set.singleton 1
 
@@ -405,7 +404,7 @@ test_recordResultRemovesFromAccepted =
   unitTest "recordResult removes the completed key from accepted" do
     let
       state = emptyState {accepted = Map.singleton (TK 1) testGeneration}
-      result = recordResult (TK 1) (TaskSuccess Nothing) state
+      result = evalTraced (recordResult (TK 1) (TaskSuccess Nothing) state)
     Map.member (TK 1) result.accepted === False
     Map.member (TK 1) result.completed === True
 
@@ -420,13 +419,13 @@ test_classifyTaskCanReactivateAfterCompletion =
   unitTest "classifyTask can re-activate a key after its earlier completion" do
     let
       task = Task {key = TK 1, deps = Set.empty, enabled = True, value = ResolvedVal 10}
-      afterFirst = classifyTask task emptyState
+      afterFirst = evalTraced (classifyTask task emptyState)
       -- Simulate the scheduler loop having already dispatched the sole ready task (as
       -- 'loopSchedule' does by popping the ready list before forking the request), so that only
       -- 'accepted' -- not a stale leftover 'ready' entry -- can account for the key reappearing.
       dispatched = afterFirst {ready = []}
-      afterCompletion = recordResult (TK 1) (TaskSuccess Nothing) dispatched
-      afterSecond = classifyTask task afterCompletion
+      afterCompletion = evalTraced (recordResult (TK 1) (TaskSuccess Nothing) dispatched)
+      afterSecond = evalTraced (classifyTask task afterCompletion)
     readyKeys afterFirst === Set.singleton 1
     readyKeys afterSecond === Set.singleton 1
 
@@ -456,7 +455,7 @@ test_sharedDependencyResolvedOnceAcrossManySiblings =
           pending = Map.fromList ((TK 0, pendingTask 0 Set.empty False 0) : [(TK i, pendingTask i Set.empty True i) | i <- siblings]),
           resolutions
         }
-      submitSibling state i = insertPending (pendingTask i Set.empty True i) state
+      submitSibling state i = evalTraced (insertPending (pendingTask i Set.empty True i) state)
       final = foldl' submitSibling initial siblings
       sharedDepReadyCount = length (filter (\t -> t.key == TK 0) final.ready)
     sharedDepReadyCount === 1
@@ -481,7 +480,7 @@ test_upToDateResolutionDoesNotReactivate =
         completed = Map.singleton (TK 1) testGeneration,
         resolutions = mkResolutions [(1, (ResolvedVal 10, Set.empty))]
       }
-      result = insertPending (pendingTask 1 Set.empty True 10) state
+      result = evalTraced (insertPending (pendingTask 1 Set.empty True 10) state)
     readyKeys result === Set.empty
     unsatisfiedKeys result === Set.empty
     pendingKeys result === Set.singleton 1
@@ -498,7 +497,7 @@ test_staleResolutionReactivatesCompletedKey =
         generation = nextGeneration testGeneration,
         pending = Map.singleton (TK 1) (pendingTask 1 Set.empty True 10)
       }
-      result = addResolutions (rawResolutions [(1, (ResolvedVal 10, Set.empty))]) state
+      result = evalTraced (addResolutions (rawResolutions [(1, (ResolvedVal 10, Set.empty))]) state)
     readyKeys result === Set.singleton 1
     pendingKeys result === Set.empty
 
@@ -513,7 +512,7 @@ test_inFlightKeyIsDedupedRegardlessOfGeneration =
         accepted = Map.singleton (TK 1) initialGeneration,
         resolutions = mkResolutions [(1, (ResolvedVal 10, Set.empty))]
       }
-      result = insertPending (pendingTask 1 Set.empty True 10) state
+      result = evalTraced (insertPending (pendingTask 1 Set.empty True 10) state)
     readyKeys result === Set.empty
     unsatisfiedKeys result === Set.empty
     pendingKeys result === Set.empty
@@ -526,10 +525,10 @@ test_completionUsesActivationGeneration :: TestTree
 test_completionUsesActivationGeneration =
   unitTest "a completion is stamped with the generation it was activated in" do
     let
-      activated = classifyTask (Task {key = TK 1, deps = Set.empty, enabled = True, value = ResolvedVal 10}) emptyState
+      activated = evalTraced (classifyTask (Task {key = TK 1, deps = Set.empty, enabled = True, value = ResolvedVal 10}) emptyState)
       -- A further request arrives while the task is in flight.
-      later = (bumpGeneration activated) {ready = []}
-      result = recordResult (TK 1) (TaskSuccess Nothing) later
+      later = (evalTraced (bumpGeneration activated)) {ready = []}
+      result = evalTraced (recordResult (TK 1) (TaskSuccess Nothing) later)
     Map.lookup (TK 1) result.completed === Just testGeneration
 
 -- ---------------------------------------------------------------------------

@@ -33,7 +33,7 @@ import GhcServer.Data.Unit (ClientModule, Project (..), Unit (..), clientModuleN
 import GhcServer.Log (emitLog)
 import System.OsPath (OsPath)
 import System.OsPath.Extra (fromOsPath)
-import Test.Scheduler (Phase (..), Task (..))
+import Test.Data.Scheduler (Phase (..), Task (..))
 import Types.Api (UnitName (..))
 
 -- | Determine the effective request for each unit, expanding an empty 'ScheduleRequest'

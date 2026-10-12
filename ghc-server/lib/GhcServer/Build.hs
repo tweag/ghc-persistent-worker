@@ -1,4 +1,4 @@
--- | Scheduler orchestration for the standalone GHC server.
+-- | Scheduler orchestration for the GHC server.
 --
 -- This module manages the scheduler lifecycle: creating builds, submitting
 -- batches, awaiting results.  It delegates build-system logic to
@@ -28,32 +28,23 @@ import GHC.Utils.Outputable (text)
 import GhcServer.Build.Classify (BuildResult (..), classifyBuildRequest, collectBuildResult)
 import GhcServer.Build.Diff (commitDigests)
 import GhcServer.Build.Propagate (dispatchTask, propagateCompletion)
-import GhcServer.Build.Schedule (
-  BuildExt (..),
-  ModuleKey (..),
-  TaskKey (..),
-  TaskValue,
-  emptyBuildExt,
-  )
+import GhcServer.Build.Schedule (BuildExt (..), ModuleKey (..), TaskKey (..), TaskValue, emptyBuildExt)
 import GhcServer.Cache (mkBuildCache)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.Request (ScheduleRequest)
-import Test.Scheduler (
+import Internal.State (newState)
+import Prelude hiding (log)
+import Test.Data.Scheduler (
   Handlers (..),
   SchedulerDecision,
   SchedulerEnv (..),
   SchedulerResources (..),
   SchedulerState (..),
-  awaitIdle,
-  newSchedulerState,
-  runScheduler,
-  schedulerInvariantViolations,
-  submitRequest,
   )
-import Internal.State (newState)
-import Prelude hiding (log)
-import Types.Settings (Settings)
+import Test.Scheduler (awaitIdle, newSchedulerState, runScheduler, submitRequest)
+import Test.Scheduler.Invariants (schedulerInvariantViolations)
 import Types.Log (Logger (..))
+import Types.Settings (Settings)
 import Types.State (WorkerState)
 
 -- | Shared state for a build session.
