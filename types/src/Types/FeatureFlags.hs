@@ -34,7 +34,7 @@ defaultFeatureFlags =
   FeatureFlags {
     fixedNodesCache = True,
     flagParser = False,
-    concurrentInitUnits = True,
+    concurrentInitUnits = False,
     instrument = False,
     lazyByteCode = True,
     useIncrModGraph = True
