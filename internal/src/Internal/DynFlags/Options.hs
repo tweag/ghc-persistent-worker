@@ -237,6 +237,10 @@ parseOptionSpec =
     "stubdir" -> arg (\ v d -> d {stubDir = Just v})
     "hiedir" -> arg (\ v d -> d {hieDir = Just v})
     "dumpdir" -> arg (\ v d -> d {dumpDir = Just v})
+#if defined(GBC)
+    "gbcsuf" -> arg (\ v d -> d {bytecodeSuf = Just v})
+    "gbcdir" -> arg (\ v d -> d {bytecodeDir = Just v})
+#endif
     "this-unit-id" -> arg (\ v d -> d {homeUnitId_ = stringToUnitId v})
     "j" -> optSwitch id
     "package-env" -> arg (\ v d -> d {packageEnv = Just v})
