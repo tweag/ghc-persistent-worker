@@ -238,7 +238,7 @@ parseOptionSpec =
     "hiedir" -> arg (\ v d -> d {hieDir = Just v})
     "dumpdir" -> arg (\ v d -> d {dumpDir = Just v})
 #if defined(GBC)
-    "gbcsuf" -> arg (\ v d -> d {bytecodeSuf = Just v})
+    "gbcsuf" -> arg (\ bytecodeSuf d -> d {bytecodeSuf})
     "gbcdir" -> arg (\ v d -> d {bytecodeDir = Just v})
 #endif
     "this-unit-id" -> arg (\ v d -> d {homeUnitId_ = stringToUnitId v})

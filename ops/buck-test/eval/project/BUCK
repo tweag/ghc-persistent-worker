@@ -1,0 +1,47 @@
+load("//haskell:custom.bzl", "haskell_eval")
+
+haskell_eval(
+    name = "eval",
+    srcs = ["M1.hs"],
+    modname = "M1",
+    expr = "result",
+    count_failures = True,
+    deps = ["//haskell:base"],
+)
+
+# An `IO ()` expression: only an exception would fail it.
+haskell_eval(
+    name = "eval_unit",
+    srcs = ["M1.hs"],
+    modname = "M1",
+    expr = "resultUnit",
+    deps = ["//haskell:base"],
+)
+
+# A nonzero failure count fails the test.
+haskell_eval(
+    name = "eval_fail",
+    srcs = ["M1.hs"],
+    modname = "M1",
+    expr = "resultFailing",
+    count_failures = True,
+    deps = ["//haskell:base"],
+)
+
+# Without the flag, the tuple is just a result.
+haskell_eval(
+    name = "eval_plain",
+    srcs = ["M1.hs"],
+    modname = "M1",
+    expr = "resultFailing",
+    deps = ["//haskell:base"],
+)
+
+# An exception counts as a failure.
+haskell_eval(
+    name = "eval_throw",
+    srcs = ["M1.hs"],
+    modname = "M1",
+    expr = "resultThrows",
+    deps = ["//haskell:base"],
+)

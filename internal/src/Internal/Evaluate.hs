@@ -4,66 +4,48 @@ module Internal.Evaluate where
 
 import Control.Concurrent (withMVar)
 import Control.Monad.IO.Class (liftIO)
-import Data.Foldable (for_)
-import Data.Maybe (mapMaybe)
 import GHC (Ghc, getSession, getSessionDynFlags, moduleNameString, runTcInteractive, setInteractiveDynFlags, setSession)
-import GHC.Builtin.Types (boolTy, charTy, doubleTy, floatTy, intTy, integerTy, stringTy)
+import GHC.Builtin.Types (boolTy, charTy, doubleTy, floatTy, intTy, integerTy, mkBoxedTupleTy, stringTy)
 import GHC.Core.TyCo.Compare (eqType)
 import GHC.Core.Type (Type)
-import GHC.Data.Bag (emptyBag)
 import GHC.Driver.Config (initEvalOpts)
 import GHC.Driver.DynFlags (wopt_unset)
-import GHC.Driver.Env (
-  hscInterp,
-  hscSetActiveUnitId,
-  hsc_home_unit,
-  hsc_interp,
-  mkInteractiveHscEnv,
-  runInteractiveHsc,
-  )
+import GHC.Driver.Env (hscInterp, hscSetActiveUnitId, hsc_home_unit, hsc_interp, mkInteractiveHscEnv, runInteractiveHsc)
 import GHC.Driver.Env.Types (HscEnv (hsc_IC))
 import GHC.Driver.Errors.Types (hoistTcRnMessage)
 import GHC.Driver.Flags (WarningFlag (Opt_WarnUnusedLocalBinds))
 import GHC.Driver.Main (hscParseStmtWithLocation, hscParsedStmt, ioMsgMaybe)
 import GHC.Driver.Monad (GhcMonad)
 import GHC.Hs.Extension (GhcPs)
+import GHC.Hs.ImpExp (simpleImportDecl)
 import GHC.Iface.Load (loadSrcInterface)
 import GHC.Runtime.Context (InteractiveContext (..), InteractiveImport (..))
 import GHC.Runtime.Eval (execOptions, exprType, setContext)
-import GHC.Runtime.Eval.Types (ExecOptions (..), IcGlobalRdrEnv (..), SingleStep)
+import GHC.Runtime.Eval.Types (ExecOptions (..), SingleStep)
 import GHC.Runtime.Interpreter (evalStmt, wormhole)
 import GHC.Tc.Module (TcRnExprMode (TM_Inst))
-import GHC.Tc.Utils.Env (lookupGlobal)
 import GHC.Tc.Utils.TcType (tcSplitIOType_maybe)
 import GHC.Types.Avail (AvailInfo (..))
 import GHC.Types.Name (nameOccName)
-import GHC.Types.Name.Occurrence (OccName, mkOccEnv, mkVarOcc)
-import GHC.Types.Name.Reader (
-  GREInfo,
-  GlobalRdrEltX (..),
-  GlobalRdrEnvX,
-  IfGlobalRdrEnv,
-  Parent (NoParent),
-  hydrateGlobalRdrEnv,
-  plusGlobalRdrEnv,
-  )
-import GHC.Types.PkgQual (PkgQual (NoPkgQual, ThisPkg))
-import GHC.Types.TyThing (tyThingGREInfo)
+import GHC.Types.Name.Occurrence (mkVarOcc)
+import GHC.Types.PkgQual (PkgQual (ThisPkg))
 import GHC.Unit (moduleUnitId)
 import GHC.Unit.Finder qualified as Finder
 import GHC.Unit.Finder.Types (FindResult (..))
 import GHC.Unit.Home (homeUnitId)
 import GHC.Unit.Module.ModIface (mi_exports)
 import GHC.Unit.Types (IsBootInterface (..), Module, moduleName)
-import GHC.Utils.Outputable (ppr, text, (<+>))
+import GHC.Utils.Outputable (text)
 import GHCi.Message (EvalResult (..), EvalStatus_ (..))
 import GHCi.RemoteTypes (ForeignHValue, HValueRef)
 import Internal.Cache.Hpt (loadHomeUnit)
 import Internal.Compat.GHC914 (hscSetModuleGraph)
-import Internal.Log (logDebugD, logTimed)
+import Internal.Log (logTimed)
 import Language.Haskell.Syntax.Expr (GhciLStmt)
+import Language.Haskell.Syntax.ImpExp (ImportDecl (ideclQualified), ImportDeclQualifiedStyle (QualifiedPre))
 import Language.Haskell.Syntax.Module.Name (ModuleName (..), mkModuleName)
 import System.OsPath.Extra (toOsPath)
+import Text.Read (readMaybe)
 
 #if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
 
@@ -126,31 +108,33 @@ resolveTargetModule hsc_env modname pkgqual = do
     FoundMultiple _ -> Left ModuleAmbiguous
     NotFound {} -> Left ModuleNotFound
 
-evaluate :: Env -> Maybe String -> ModuleTarget -> [String] -> String -> Ghc Bool
-evaluate env mHomeUnit target imports expr =
-  logTimed env.log "evaluate is called" do
-    setupEvaluationSession env mHomeUnit target >>= \case
-      Nothing -> pure False
-      Just hsc_env -> do
-        let modname = moduleName target.module_
-            pkgqual = ThisPkg (homeUnitId (hsc_home_unit hsc_env))
-        liftIO (resolveTargetModule hsc_env modname pkgqual) >>= \case
-          Left err -> logDebugD env.log (text (renderModuleLookupError modname err)) >> pure False
-          Right () -> do
-            setContext [moduleImport target.module_]
+-- | How an @IO (Int, Int)@ result ('ResultCounts') is interpreted.
+data TupleMode
+  = -- | The pair is @(total, failed)@, and the evaluation fails if @failed /= 0@.
+    TupleFailureCount
+  | -- | The pair is an ordinary showable result, like any other.
+    TuplePlain
+  deriving stock (Eq, Show)
 
-            for_ imports \ imp ->
-              loadImport env (mkModuleName imp) >>= \case
-                Left _ -> pure ()
-                Right rdr_env -> updateGlobalRdrEnv env rdr_env
+-- | Load the target's home unit, resolve the target module and run the continuation in the resulting session.
+-- 'Left' carries a setup failure (no home unit, module not found); see 'executeMain' and 'evaluateExpr'.
+withTargetModule :: String -> Env -> Maybe String -> ModuleTarget -> (HscEnv -> Ghc a) -> Ghc (Either String a)
+withTargetModule label env mHomeUnit target use =
+  setupEvaluationSession env mHomeUnit target >>= \case
+    Nothing -> pure (Left (label ++ ": no home unit configured for execute target"))
+    Just hsc_env -> do
+      let modname = moduleName target.module_
+          pkgqual = ThisPkg (homeUnitId (hsc_home_unit hsc_env))
+      liftIO (resolveTargetModule hsc_env modname pkgqual) >>= \case
+        Left err -> pure (Left (label ++ ": " ++ renderModuleLookupError modname err))
+        Right () -> Right <$> use hsc_env
 
-            evalStmtCustom expr execOptions >>= \case
-              EvalComplete _ (EvalSuccess (fhv : _)) -> do
-                let Just interp = hsc_interp hsc_env
-                hv <- liftIO (wormhole interp fhv)
-                let (_total, failed) = unsafeCoerce hv :: (Int, Int)
-                pure (failed == 0)
-              _ -> pure False
+-- | Evaluate an arbitrary @IO a@ expression in the context of the target module (the worker's @--expr@ mode).
+-- The result is handled exactly like @main@'s in 'executeMain', see 'runExpression'.
+evaluateExpr :: Env -> Maybe String -> ModuleTarget -> TupleMode -> String -> Ghc (Either String (Bool, Maybe String))
+evaluateExpr env mHomeUnit target mode expr =
+  logTimed env.log "evaluateExpr is called" do
+    withTargetModule "evaluateExpr" env mHomeUnit target \ hsc_env -> runExpression mode hsc_env target expr
 
 -- | Classifies a module's @main@ result type for return-value propagation. 'IO a' where @a@ is a stringly or
 -- numeric type has its value surfaced (via 'ResultString'/'ResultShowable', see 'executeMain'); any other result
@@ -162,6 +146,9 @@ data MainResultKind
   | -- | @main :: IO a@ for another stringly/numeric @a@ (currently: 'Int', 'Integer', 'Double', 'Float', 'Char',
     -- 'Bool') -- printed via @print@ (i.e. its 'Show' instance).
     ResultShowable
+  | -- | @IO (Int, Int)@ -- shown like 'ResultShowable', and additionally interpreted as @(total, failed)@ if the
+    -- caller asks for it with 'TupleFailureCount'.
+    ResultCounts
 
 -- | Inspect a type of the shape @IO a@ (as returned by 'GHC.Runtime.Eval.exprType') and classify @a@ per
 -- 'MainResultKind', or 'Nothing' if the type isn't @IO@-shaped at all or @a@ isn't one of the small set of
@@ -174,6 +161,8 @@ classifyMainResultType ty = do
   (_ioTyCon, resTy) <- tcSplitIOType_maybe ty
   if eqType resTy stringTy
     then Just ResultString
+    else if eqType resTy (mkBoxedTupleTy [intTy, intTy])
+      then Just ResultCounts
     else if any (eqType resTy) ([intTy, integerTy, doubleTy, floatTy, charTy, boolTy] :: [Type])
       then Just ResultShowable
       else Nothing
@@ -202,51 +191,65 @@ classifyMainResultType ty = do
 executeMain :: Env -> Maybe String -> ModuleTarget -> Ghc (Either String (Maybe (Bool, Maybe String)))
 executeMain env mHomeUnit target =
   logTimed env.log "executeMain is called" do
-    setupEvaluationSession env mHomeUnit target >>= \case
-      Nothing -> pure (Left "executeMain: no home unit configured for execute target")
-      Just hsc_env -> do
-        let modname = moduleName target.module_
-            pkgqual = ThisPkg (homeUnitId (hsc_home_unit hsc_env))
-        liftIO (resolveTargetModule hsc_env modname pkgqual) >>= \case
-          Left err -> pure (Left ("executeMain: " ++ renderModuleLookupError modname err))
-          Right () -> do
-            hasMain <- liftIO (moduleHasMain hsc_env modname pkgqual)
-            if not hasMain
-              then pure (Right Nothing)
-              else runMain hsc_env
-  where
-    -- Inspect @main@'s result type (post-typecheck, via GHC's own @:type@-style machinery) to decide whether its
-    -- return value can be usefully exfiltrated. Only a small set of wired-in stringly/numeric types is
-    -- recognized (see 'classifyMainResultType'); anything else (in particular the ordinary @main :: IO ()@)
-    -- falls back to running @main@ bare, discarding its result as before. When a result type is recognized, the
-    -- statement text is chosen so that the statement's own bound value already has runtime representation
-    -- 'String' (either @main@ itself, for 'ResultString', or @fmap show main@, for 'ResultShowable' -- 'show' is
-    -- dispatched by GHC's typechecker while type-checking this very statement, not by us), letting the bound
-    -- 'ForeignHValue' be unsafely coerced directly to 'String' rather than printed.
-    runMain hsc_env = do
-      setContext [moduleImport target.module_]
-      mty <- exprType TM_Inst "main"
-      let mkind = classifyMainResultType mty
-          -- A bind statement ('execResult <- ...'), not a bare expression statement: GHC's interactive
-          -- statement typechecker ('GHC.Tc.Module.tcUserStmt') unconditionally attempts to print the result
-          -- of a bare expression statement whenever its type isn't '()', regardless of whether the expression
-          -- itself has type 'IO a' -- so evaluating a bare "main" of type 'IO String' would both exfiltrate
-          -- the result below *and* print it a second time (via GHC's injected 'print') to the real stdout,
-          -- which is captured alongside the module's own output. A bind statement only prints its bound value
-          -- when 'Opt_PrintBindResult' is set, which this driver never sets.
-          stmtText = case mkind of
-            Just ResultShowable -> "execResult <- fmap show main"
-            _ -> "execResult <- main"
-      evalStmtCustom stmtText execOptions >>= \case
-        EvalComplete _ (EvalSuccess (fhv : _)) -> do
-          mResultStr <- case mkind of
-            Nothing -> pure Nothing
-            Just _ -> do
-              let Just interp = hsc_interp hsc_env
-              hv <- liftIO (wormhole interp fhv)
-              pure (Just (unsafeCoerce hv :: String))
-          pure (Right (Just (True, mResultStr)))
-        _ -> pure (Right (Just (False, Nothing)))
+    withTargetModule "executeMain" env mHomeUnit target \ hsc_env -> do
+      let modname = moduleName target.module_
+          pkgqual = ThisPkg (homeUnitId (hsc_home_unit hsc_env))
+      hasMain <- liftIO (moduleHasMain hsc_env modname pkgqual)
+      if hasMain
+        then Just <$> runExpression TuplePlain hsc_env target "main"
+        else pure Nothing
+
+-- | Run an @IO a@ expression in the context of the target module, returning whether evaluation succeeded and the
+-- exfiltrated result if there is one.
+--
+-- Exceptions thrown by the expression are caught by the interpreter and reported as a failed evaluation
+-- (@EvalException@), as is any other outcome than success; with 'TupleFailureCount', a @(total, failed)@ result
+-- with @failed /= 0@ is a failure as well.
+--
+-- The expression's result type (post-typecheck, via GHC's @:type@ machinery) decides whether its value can be
+-- exfiltrated; see 'classifyMainResultType'. Anything unrecognized (in particular @IO ()@) is run with its
+-- result discarded. For recognized types the statement is chosen so that the bound value is a 'String' at
+-- runtime (the expression itself, or @fmap show@ of it, with 'show' dispatched by GHC's typechecker), which
+-- allows coercing the 'ForeignHValue' directly.
+runExpression :: TupleMode -> HscEnv -> ModuleTarget -> String -> Ghc (Bool, Maybe String)
+runExpression mode hsc_env target expr = do
+  setContext [moduleImport target.module_, qualifiedPrelude]
+  mty <- exprType TM_Inst expr
+  let mkind = classifyMainResultType mty
+      -- A bind statement ('execResult <- ...'), not a bare expression statement: GHC's interactive
+      -- statement typechecker ('GHC.Tc.Module.tcUserStmt') unconditionally attempts to print the result
+      -- of a bare expression statement whenever its type isn't '()', so an expression of type 'IO String' would
+      -- both exfiltrate the result below and print it a second time to the real stdout. A bind statement only
+      -- prints its bound value when 'Opt_PrintBindResult' is set, which this driver never sets.
+      stmtText = case mkind of
+        Just ResultShowable -> "execResult <- Prelude.fmap Prelude.show (" ++ expr ++ ")"
+        Just ResultCounts -> "execResult <- Prelude.fmap Prelude.show (" ++ expr ++ ")"
+        _ -> "execResult <- (" ++ expr ++ ")"
+  evalStmtCustom stmtText execOptions >>= \case
+    EvalComplete _ (EvalSuccess (fhv : _)) -> do
+      mResultStr <- case mkind of
+        Nothing -> pure Nothing
+        Just _ -> do
+          let Just interp = hsc_interp hsc_env
+          hv <- liftIO (wormhole interp fhv)
+          pure (Just (unsafeCoerce hv :: String))
+      pure (resultSucceeded mode mkind mResultStr, mResultStr)
+    _ -> pure (False, Nothing)
+
+-- | @import qualified Prelude@, so that the statements generated by 'runExpression' don't depend on the target
+-- module's own scope (a module loaded without its renamer environment only exposes its top-level bindings).
+qualifiedPrelude :: InteractiveImport
+qualifiedPrelude =
+  IIDecl (simpleImportDecl (mkModuleName "Prelude")) {ideclQualified = QualifiedPre}
+
+-- | Whether a completed evaluation counts as a success: always, unless the result is a @(total, failed)@ pair
+-- that is to be interpreted as such. An unparseable pair is a failure.
+resultSucceeded :: TupleMode -> Maybe MainResultKind -> Maybe String -> Bool
+resultSucceeded TupleFailureCount (Just ResultCounts) mResultStr =
+  case mResultStr >>= readMaybe @(Int, Int) of
+    Just (_total, failed) -> failed == 0
+    Nothing -> False
+resultSucceeded _ _ _ = True
 
 -- | Check whether a module's interface exports a binding named @main@.
 moduleHasMain :: HscEnv -> ModuleName -> PkgQual -> IO Bool
@@ -259,57 +262,6 @@ moduleHasMain hsc_env modname pkgqual = do
   where
     isMain (Avail n) = nameOccName n == mkVarOcc "main"
     isMain (AvailTC _ _) = False
-
-loadImport :: Env -> ModuleName -> Ghc (Either String (GlobalRdrEnvX GREInfo))
-loadImport env modname = do
-  hsc_env <- getSession
-  logDebugD env.log ("try to import" <+> ppr modname)
-  liftIO $ Finder.findImportedModule hsc_env modname NoPkgQual >>= \case
-    Found _ _ -> do
-      all_env <-
-            liftIO
-          $ runInteractiveHsc hsc_env
-          $ ioMsgMaybe $ hoistTcRnMessage $ GHC.runTcInteractive hsc_env
-          $ do
-            iface <- loadSrcInterface (text "imported by GHCi") modname NotBoot NoPkgQual
-            let es :: [AvailInfo]
-                es = mi_exports iface
-
-                convert (Avail n) = Just (nameOccName n, [GRE {gre_name = n, gre_par = NoParent, gre_lcl = True, gre_imp = emptyBag, gre_info = ()}])
-                convert (AvailTC _ _) = Nothing
-
-                converted :: [(OccName, [GlobalRdrEltX ()])]
-                converted = mapMaybe convert es
-                exports :: IfGlobalRdrEnv
-                exports = mkOccEnv converted
-
-                get_GRE_info nm = tyThingGREInfo <$> lookupGlobal hsc_env nm
-                exports_env = hydrateGlobalRdrEnv get_GRE_info exports
-            pure exports_env
-      pure (Right all_env)
-    _ -> do
-      logDebugD env.log ("failed to import" <+> ppr modname)
-      pure (Left ("error importing " ++ moduleNameString modname))
-
-updateGlobalRdrEnv :: Env -> GlobalRdrEnvX GREInfo -> Ghc ()
-updateGlobalRdrEnv _env rdr_env = do
-  hsc_env <- getSession
-  let old_ic = hsc_IC hsc_env
-      -- Merges into the existing import environment rather than overwriting it, so that imports accumulated
-      -- across multiple 'loadImport' calls (see 'evaluate') all remain visible.
-      extendImportEnv igre import_env = igre {igre_env = import_env `plusGlobalRdrEnv` igre_env igre}
-      final_gre_cache = ic_gre_cache old_ic `extendImportEnv` rdr_env
-  setSession hsc_env {hsc_IC = old_ic {ic_gre_cache = final_gre_cache}}
-
--- | Dump the current interactive context's global reader environment to the debug log. Not called anywhere in
--- the current codebase; kept as a diagnostic tool for interactively debugging import/scope issues surfaced by
--- 'loadImport'/'updateGlobalRdrEnv'.
-checkGlobalRdrEnv :: Env -> Ghc ()
-checkGlobalRdrEnv env = do
-  hsc_env <- getSession
-  let rdr_env = igre_env (ic_gre_cache (hsc_IC hsc_env))
-  logDebugD env.log (text "==== checkGlobalRdrEnv ====")
-  logDebugD env.log (ppr rdr_env)
 
 -- | Run a statement in the current interactive context.
 evalStmtCustom ::
@@ -328,7 +280,7 @@ evalStmtCustom input exec_opts@ExecOptions{..} = do
 -- | Evaluate a single parsed statement outside of GHCi's full REPL loop. Unlike
 -- 'GHC.Runtime.Eval.execStmt'', this does not update the session's 'InteractiveContext' with the statement's
 -- bound identifiers or fixity declarations afterwards: every caller in this module runs at most one statement
--- per session (either a one-shot test expression in 'evaluate', or a module's @main@ in 'executeMain'), so there
+-- per session (either an expression in 'evaluateExpr', or a module's @main@ in 'executeMain'), so there
 -- is no subsequent statement in the same session that would need to see those bindings.
 evalStmt' :: GhcMonad m => GhciLStmt GhcPs -> String -> ExecOptions -> m (EvalStatus_ [ForeignHValue] [HValueRef])
 evalStmt' stmt _stmt_text ExecOptions{..} = do

@@ -97,12 +97,13 @@ data BuckArgs =
     unitBuckArgsPath :: Maybe String,
     depUnitsPath :: Maybe String,
     -- | Expression to evaluate in "eval mode" (@ModeEval@, see @GhcWorker.GhcHandler.dispatch@), mirroring the
-    -- worker's @--expr@ CLI flag. The evaluated expression must produce a @(total, failed) :: (Int, Int)@ pair.
+    -- worker's @--expr@ CLI flag. Handled like a module's @main@ in the ghc-server (see
+    -- @Internal.Evaluate.runExpression@), so it must be of type @IO a@.
     expr :: Maybe String,
     -- | Name used to tag log output for the eval-mode target (see @Internal.Log.setTarget@); purely cosmetic.
     evalTargetName :: Maybe String,
-    -- | Extra modules to bring into scope (via @:m +@) before evaluating 'expr'.
-    imports :: [String]
+    -- | Interpret an @IO (Int, Int)@ result of 'expr' as @(total, failed)@, failing the evaluation if @failed /= 0@.
+    evalCountFailures :: Bool
   }
   deriving stock (Eq, Show)
 
@@ -144,7 +145,7 @@ emptyBuckArgs env =
     depUnitsPath = Nothing,
     expr = Nothing,
     evalTargetName = Nothing,
-    imports = []
+    evalCountFailures = False
   }
 
 options :: Map String ([String] -> BuckArgs -> Either String ([String], BuckArgs))
@@ -184,7 +185,7 @@ options =
     flag "--interp" \ z -> z {interp = Interpreted},
     withArg "--expr" \ z a -> z {expr = Just a},
     withArg "--eval-target-name" \ z a -> z {evalTargetName = Just a},
-    withArg "--import" \ z a -> z {imports = a : z.imports},
+    flag "--eval-count-failures" \ z -> z {evalCountFailures = True},
     ("-c", \ rest z -> Right (rest, z {mode = Just ModeCompile})),
     ("-M", \ rest z -> Right (rest, z {mode = Just ModeMetadata}))
   ]

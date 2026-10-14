@@ -27,6 +27,7 @@ import Internal.Compile.Make (compileModuleWithDepsInHpt)
 import Internal.Debug (debugSocketPath)
 #endif
 import Internal.DynFlags (modifyGlobalFlags)
+import Data.Foldable (for_)
 import qualified Internal.Evaluate
 import Internal.Log (newLogger)
 import Internal.Metadata (computeMetadata)
@@ -98,10 +99,12 @@ dispatch hooks env args =
         Just modTarget -> do
           case args.expr of
             Just expr -> do
-              result <- eval args.evalTargetName modTarget expr args.imports
+              result <- eval args.evalTargetName modTarget expr
               case result of
-                Nothing -> pure (1, Just (TargetUnknown "test"))
-                Just isSuccessful ->
+                Left err -> do
+                  env.log.info ("error: " ++ err)
+                  pure (1, Just (TargetUnknown "test"))
+                Right isSuccessful ->
                   pure (if isSuccessful then 0 else 1, Just (TargetUnknown "test"))
             Nothing -> do
               _ <- error "worker: no expr"
@@ -125,19 +128,22 @@ dispatch hooks env args =
 
     compileHpt = compileAndReadAbiHash CompManager (compileModuleWithDepsInHpt env.log hooks.events) hooks args
 
-    eval mname modTarget stmt imports = do
+    eval mname modTarget expr = do
       case mname of
         Nothing -> pure ()
         Just name -> env.log.setTarget (TargetUnknown name)
+      let mode = if args.evalCountFailures then Internal.Evaluate.TupleFailureCount else Internal.Evaluate.TuplePlain
       (res_stdout, r) <-
         hCapture [stdout] $
           withGhcMakeModule Interpreted modTarget env Nothing
-            (\_ -> do
-              isSuccessful <- Internal.Evaluate.evaluate env (fromOsPath <$> args.homeUnit) modTarget imports stmt
-              pure (Just isSuccessful)
-            )
+            (\_ -> Just <$> Internal.Evaluate.evaluateExpr env (fromOsPath <$> args.homeUnit) modTarget mode expr)
       env.log.infoD (text res_stdout)
-      pure r
+      case r of
+        Nothing -> pure (Left "worker: eval session failed")
+        Just (Left err) -> pure (Left err)
+        Just (Right (ok, mResult)) -> do
+          for_ mResult env.log.info
+          pure (Right ok)
 
     withTarget f (target :: TargetSpec) =
       reifyGhc $ \session -> do

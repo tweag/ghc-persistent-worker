@@ -135,6 +135,7 @@ entryForType ty =
     Nothing -> PlanEntry EntryIO
     Just ResultString -> PlanEntry EntryString
     Just ResultShowable -> ModuleEntry "main's result is shown with its Show instance"
+    Just ResultCounts -> ModuleEntry "main's result is shown with its Show instance"
 
 -- | The options of the executor's session: the package databases the unit is compiled against, including the
 -- external dependency store if the unit uses it.
