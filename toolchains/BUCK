@@ -12,7 +12,7 @@ default_nix_toolchains()
 
 default_flake_attrs()
 
-env = read_root_config("ghc-worker", "env", "mwb-26-07-linkables")
+env = read_root_config("ghc-worker", "env", "ghc914-gbc")
 
 ################################################################################
 

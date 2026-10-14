@@ -1,6 +1,6 @@
 {lib, ...}: let
 
-  buckCompilers = ["mwb-26-07" "mwb-26-07-linkables" "profiled-linkables" "ghc914"];
+  buckCompilers = ["mercury-ghc9101" "mercury-ghc9141" "ghc914-gbc"];
 in {
 
   options = {

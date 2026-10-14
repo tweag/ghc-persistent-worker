@@ -16,7 +16,7 @@ buck = none
 
 [external_cells]
 prelude = bundled
-buck2-haskell = git
+# buck2-haskell = git
 
 [external_cell_buck2-haskell]
 git_origin = https://github.com/tek/buck2-haskell.git
