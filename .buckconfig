@@ -41,3 +41,7 @@ execution_platforms = root//platforms:host-persistent-worker
 
 [ghc-worker]
 enable = true
+
+[haskell]
+# Must be true for envs whose GHC has the .gbc backport (ghc914-gbc), see buck2-haskell/compile.bzl
+gbc = true
