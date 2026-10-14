@@ -126,6 +126,7 @@ library
                       hashable,
                       text,
                       time,
+                      timestats,
                       transformers
     default-language: GHC2021
     default-extensions:

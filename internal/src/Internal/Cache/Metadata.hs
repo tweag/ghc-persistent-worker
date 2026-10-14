@@ -81,6 +81,10 @@ import System.OsPath.Extra (splitExtension)
 
 #endif
 
+import GHC.Conc (pseq)
+import Debug.TimeStats as TimeStats
+import System.Environment (setEnv)
+
 -- | Add a fresh 'HomeUnitEnv' to the home unit graph using the supplied unit state and dependencies.
 insertHomeUnit ::
   UnitId ->
@@ -114,8 +118,11 @@ initUnitsAndPlatform ::
   Set UnitId ->
   IO (DynFlags, [UnitDatabase UnitId], UnitState, HomeUnit)
 initUnitsAndPlatform hsc_env dflags0 allUnitIds = do
-  (dbs, unit_state, home_unit, mconstants) <- initUnits hsc_env dflags0 allUnitIds
-  dflags1 <- updatePlatformConstants dflags0 mconstants
+  (dbs, unit_state, home_unit, mconstants) <-
+    TimeStats.measureM "initUnits" $ initUnits hsc_env dflags0 allUnitIds
+  dflags1 <-
+    TimeStats.measureM "updatePlatformConstants" $
+      updatePlatformConstants dflags0 mconstants
   pure (dflags1, dbs, unit_state, home_unit)
 
 -- | Create a new home unit using the supplied 'DynFlags'.
@@ -326,10 +333,15 @@ loadCachedBuildPlan ::
   CachedBuildPlan ->
   IO (Maybe PreparedUnit)
 loadCachedBuildPlan hsc_env1 dflags0 features allUnitIds CachedBuildPlan {name = JsonFs unitId, build_plan} = do
-  cachedUnit@CachedUnit {unit_args} <- decodeJsonBuildPlan build_plan
+  cachedUnit@CachedUnit {unit_args} <-
+      TimeStats.measureM "decodeJsonBuildPlan" $
+        decodeJsonBuildPlan build_plan
   for unit_args \ argsFile -> do
-    dflags1 <- readParseGHCArgs features.flagParser hsc_env1 dflags0 argsFile
-    (dflags2, dbs, unitState, homeUnit) <- initUnitsAndPlatform hsc_env1 dflags1 allUnitIds
+    dflags1 <- TimeStats.measureM "readParseGHCArgs" $
+                  readParseGHCArgs features.flagParser hsc_env1 dflags0 argsFile
+    (dflags2, dbs, unitState, homeUnit) <-
+        TimeStats.measureM "initUnitsAndPlatform" $
+          initUnitsAndPlatform hsc_env1 dflags1 allUnitIds
     let moduleEntries = Map.toList (fold (cachedUnit.cache <|> cachedUnit.build_plan))
     pure PreparedUnit {
       unitId,
@@ -385,10 +397,19 @@ loadCachedDepUnits ::
   IO (WorkerState, HscEnv)
 loadCachedDepUnits logger dflags0 (CachedBuildPlans buildPlans) features (state0, hsc_env0) = do
   let hsc_env1 = Make.loadState hsc_env0 state0.make
+  setEnv "DEBUG_TIMESTATS_ENABLE" "1"
+  TimeStats.reset
   logTimed logger "Loading cached dep units" $ fmap swap do
     let (total, missing) = compareUnits hsc_env1 buildPlans
-    prepared <- catMaybes <$> traverser (loadCachedBuildPlan hsc_env1 dflags0 features total) missing
-    (hsc_env2, state1) <- runStateT (foldM (insertPreparedUnit logger features) hsc_env1 prepared) state0
+    prepared <-
+      pseq (length missing) $
+      logTimed logger "loadCachedBuildPlan" $
+        catMaybes <$> traverser (loadCachedBuildPlan hsc_env1 dflags0 features total) missing
+    (hsc_env2, state1) <-
+      logTimed logger "foldM insertPreparedUnit" $
+        runStateT (foldM (insertPreparedUnit logger features) hsc_env1 prepared) state0
+    ts <- TimeStats.collect
+    logDebugD logger (text $ Text.unpack $ TimeStats.asText ts)
     pure (hsc_env2, updateMakeState (Make.rebuildModuleGraph features.useIncrModGraph) state1)
   where
     traverser = if features.concurrentInitUnits then processConcurrent else traverse

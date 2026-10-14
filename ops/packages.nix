@@ -190,6 +190,7 @@
           "hashable"
           "text"
           "time"
+          "timestats"
           "transformers"
         ];
         source-dirs = "src";
