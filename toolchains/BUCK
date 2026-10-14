@@ -14,6 +14,15 @@ default_flake_attrs()
 
 env = read_root_config("ghc-worker", "env", "ghc914-gbc")
 
+# GHC version of each env, used for library file names (e.g. libHS<unit>-ghc9.14.1.so).
+compiler_versions = {
+    "ghc914-gbc": "9.14.1",
+    "mercury-ghc9141": "9.14.1",
+    "mercury-ghc9101": "9.10.1",
+}
+
+compiler_version = read_root_config("ghc-worker", "compiler_version", compiler_versions.get(env, "9.10.1"))
+
 ################################################################################
 
 nix_build(
@@ -59,6 +68,7 @@ nix_haskell_toolchain(
     exec_compatible_with = exec_compatible_with,
     flake = "root//:nix_overlays",
     env = env,
+    compiler_version = compiler_version,
     visibility = ["PUBLIC"],
 #     worker = ":impure_ghc_worker",
 #     worker_proxy = ":impure_buck_proxy",

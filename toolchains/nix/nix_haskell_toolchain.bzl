@@ -273,8 +273,7 @@ def _nix_haskell_toolchain_impl(ctx: AnalysisContext) -> list[Provider]:
             # (and the file that actually got created was called ghc-9.10.1)
             #
             # Messing this up will be caught by toolchains//tests/ghc_version_check.
-            compiler_major_version = "9.10.1",  # @moss-disable
-            # @moss-enable[end= ]: compiler_major_version = "9.10.3",
+            compiler_major_version = ctx.attrs.compiler_version,
             compiler_flags = ctx.attrs.compiler_flags,
             linker_flags = ctx.attrs.linker_flags,
             script_template_processor = ctx.attrs._script_template_processor,
@@ -323,6 +322,9 @@ nix_haskell_toolchain = rule(
         ),
         "flake": attrs.source(allow_directory = True),
         "env": attrs.option(attrs.string(), default = None),
+        # Must match the GHC's version, since it determines the library file names used by the linker.
+        # Mismatches result in errors like: ld.gold: error: cannot find -lHS<unit>-ghc9.14.1
+        "compiler_version": attrs.string(default = "9.10.1"),
     },
     is_toolchain_rule = True,
 )
