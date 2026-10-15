@@ -343,7 +343,7 @@ executeCommand handler req = do
   pure $
     defMessage
       & Fields.exitCode .~ exitCode
-      & Fields.stderr .~ Text.unlines (Text.pack <$> output)
+      & Fields.stderr .~ Text.intercalate "\n" (Text.pack <$> output)
   where
     argv = Text.unpack . decodeUtf8Lenient <$> req.argv
 

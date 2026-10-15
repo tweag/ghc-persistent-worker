@@ -76,7 +76,7 @@ execute handler req = do
       & Fields.exitCode
       .~ exitCode
       & Fields.stderr
-      .~ Text.unlines (Text.pack <$> output)
+      .~ Text.intercalate "\n" (Text.pack <$> output)
   where
     argv = Text.unpack . decodeUtf8Lenient <$> req.argv
 
@@ -132,11 +132,7 @@ forwardRequest ::
 forwardRequest connection req =
   withRPC connection def (Proxy @(Protobuf Worker "execute")) \ call -> do
     sendFinalInput call req
-    resp <- recvNextOutput call
-    pure $
-      resp
-        & Fields.stderr
-        %~ ("gRPC client error: " <>)
+    recvNextOutput call
 
 -- | Attempt to connect and send a gRPC message to the server at the given socket path.
 -- Retries up to 30 times with 100ms delay (3 seconds total).
