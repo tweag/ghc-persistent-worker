@@ -89,6 +89,7 @@ library
     GhcServer.GbcTransport
     GhcServer.Cache
     GhcServer.GenProject
+    GhcServer.GenProject.BuckTests
     GhcServer.GenProject.Run
     GhcServer.Grpc
     GhcServer.Handler

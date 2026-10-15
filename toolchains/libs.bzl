@@ -108,6 +108,7 @@ toolchain_libraries = [
     "hashable",
     "primitive",
     "process",
+    "random",
     "require-callstack",
     "template-haskell",
     "uuid",

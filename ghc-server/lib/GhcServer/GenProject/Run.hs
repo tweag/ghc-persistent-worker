@@ -12,6 +12,7 @@ import GhcServer.GenProject (
   writeTestsProject,
   writeWideProject,
   )
+import GhcServer.GenProject.BuckTests (BuckTestsShape (..), defaultBuckTestsShape, writeBuckTestsProject)
 import Options.Applicative (
   Parser,
   ParserInfo,
@@ -25,9 +26,12 @@ import Options.Applicative (
   helper,
   hsubparser,
   info,
+  long,
   metavar,
+  option,
   progDesc,
   str,
+  value,
   (<**>),
   )
 import System.Directory.OsPath (createDirectoryIfMissing)
@@ -47,6 +51,8 @@ data GenCommand =
   Production {dir :: OsPath, depth :: Int, bigMods :: Int}
   |
   Tests {dir :: OsPath, shape :: TestsShape}
+  |
+  BuckTests {dir :: OsPath, buckShape :: BuckTestsShape}
   deriving stock (Show)
 
 deepParser :: Parser GenCommand
@@ -84,6 +90,19 @@ testsParser =
       <*> argument auto (metavar "MODULES" <> help "Modules per unit, including tests")
       <*> argument auto (metavar "TESTS" <> help "Test modules per unit (< MODULES)"))
 
+buckTestsParser :: Parser GenCommand
+buckTestsParser =
+  BuckTests
+    <$> argument (toOsPath <$> str) (metavar "DIRECTORY" <> help "Output directory")
+    <*> (BuckTestsShape
+      <$> count "u1" "Units with tests" defaultBuckTestsShape.u1
+      <*> count "u2" "Dependency units" defaultBuckTestsShape.u2
+      <*> count "mt" "Test modules per test unit" defaultBuckTestsShape.mt
+      <*> count "m1" "Library modules per test unit" defaultBuckTestsShape.m1
+      <*> count "m2" "Library modules per dependency unit" defaultBuckTestsShape.m2)
+  where
+    count name description def = option auto (long name <> metavar "NUM" <> help description <> value def)
+
 genCommandParser :: Parser GenCommand
 genCommandParser =
   hsubparser
@@ -91,6 +110,7 @@ genCommandParser =
     <> command "wide" (info wideParser (progDesc "Binary tree of units, 2^depth-1 units"))
     <> command "flat" (info flatParser (progDesc "Single unit, module 0 imports all others"))
     <> command "tests" (info testsParser (progDesc "Chain of units, each with library modules and test modules defining main"))
+    <> command "buck-tests" (info buckTestsParser (progDesc "Buck project with haskell_eval test targets for the worker"))
     )
 
 genParserInfo :: ParserInfo GenCommand
@@ -174,6 +194,13 @@ executeCommand extDeps = \case
       putStrLn ("  total modules:  " ++ show (shape.units * shape.modules))
       putStrLn ("  total tests:    " ++ show (shape.units * shape.tests))
       putStrLn ("  ext deps: " ++ extDepsInfo extDeps)
+
+  BuckTests {dir, buckShape} -> do
+    writeBuckTestsProject dir buckShape
+    putStrLn ("Generated Buck tests project in " ++ fromOsPath dir)
+    putStrLn ("  test units:     " ++ show buckShape.u1)
+    putStrLn ("  dep units:      " ++ show buckShape.u2)
+    putStrLn ("  total tests:    " ++ show (buckShape.u1 * buckShape.mt))
 
 extDepsInfo :: Maybe ExtDepsConfig -> String
 extDepsInfo =
