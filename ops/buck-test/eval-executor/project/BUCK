@@ -1,0 +1,28 @@
+load("//haskell:custom.bzl", "haskell_eval", "haskell_lib")
+
+# Each unit is a library with state and two tests that run in the same executor subprocess, which is shared by the
+# targets with the same `executor`.
+[
+    [
+        haskell_lib(
+            name = unit.lower(),
+            srcs = ["{}.hs".format(unit)],
+            deps = ["//haskell:base"],
+        ),
+        [
+            haskell_eval(
+                name = "{}_{}".format(unit.lower(), test),
+                srcs = ["{}{}.hs".format(unit, number)],
+                modname = "{}{}".format(unit, number),
+                expr = "test",
+                executor = unit.lower(),
+                deps = [
+                    ":{}".format(unit.lower()),
+                    "//haskell:base",
+                ],
+            )
+            for number, test in [("1", "one"), ("2", "two")]
+        ],
+    ]
+    for unit in ["A", "B", "C"]
+]
