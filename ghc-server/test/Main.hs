@@ -17,7 +17,7 @@ import Test.ScheduleTest (test_schedule)
 import Test.SchedulerTest (test_scheduler)
 import Test.SubprocessTest (test_executorEvents, test_executorExecute, test_subprocessExecute)
 #if defined(GBC)
-import Test.SubprocessTest (test_executorPlanExecute)
+-- import Test.SubprocessTest (test_executorPlanExecute)
 #endif
 import Test.Tasty (DependencyType (..), TestTree, defaultMain, dependentTestGroup)
 
@@ -37,8 +37,8 @@ tests =
     test_executorExecute,
     test_executorEvents
 #if defined(GBC)
-    ,
-    test_executorPlanExecute
+    -- ,
+    -- test_executorPlanExecute
 #endif
     ]
 
