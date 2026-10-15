@@ -10,7 +10,7 @@
 -- This is a testbed for a future GHC API that loads bytecode from memory without decoding it into the heap; for now,
 -- the child still deserializes the bytes.
 -- The segment is never compacted, so it grows with every distinct payload until the server exits.
-module GhcServer.Build.PayloadArena where
+module Internal.Executor.PayloadArena where
 
 import qualified Data.ByteString as ByteString
 import Data.ByteString (ByteString)

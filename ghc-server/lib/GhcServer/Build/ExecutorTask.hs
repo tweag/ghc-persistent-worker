@@ -2,7 +2,7 @@
 
 -- | Execute tasks dispatched to persistent executors.
 --
--- With the GBC backport, the parent sends a bytecode plan ('GhcServer.Build.ExecutorPlan') to an interface-free
+-- With the GBC backport, the parent sends a bytecode plan ('GhcWorker.Executor.Plan') to an interface-free
 -- executor session, so that the child only links the modules it doesn't have yet.
 -- Modules whose @main@ can't be run from a plan (a result type that needs a 'Show' dictionary, or no bytecode
 -- available for the closure) and builds without GBC use the executor's module mode instead, which restores the unit
@@ -37,11 +37,12 @@ import GHC.Unit.Home.ModInfo (HomeModInfo (..))
 import GHC.Unit.Module.ModDetails (ModDetails (..))
 import GHC.Unit.Module.ModIface (mi_exports)
 import GhcServer.Build.Executor (respawnExecutor)
-import GhcServer.Build.ExecutorPlan (PlanError (..), displayPlanError, executePlanned)
+import GhcWorker.Executor.Plan (PlanError (..), displayPlanError, executePlanned)
 import GhcServer.Build.Process (outputTaskResult)
-import GhcServer.Build.PayloadArena (payloadSegmentPath)
-import GhcServer.Data.ExecutorPlan (EntryKind (..), ExecutorPlan, PayloadTransport (..), describePlan)
-import GhcServer.Data.ProcessEval (EvalOutcome (..), ProcessEvalOutput (..), ProcessEvalResult (..))
+import Internal.Executor.PayloadArena (payloadSegmentPath)
+import Types.ExecutorPlan (EntryKind (..), ExecutorPlan, PayloadTransport (..), describePlan)
+import GhcServer.Data.ProcessEval (ExecutorCall (..))
+import Types.ProcessEval (EvalOutcome (..), ProcessEvalOutput (..), ProcessEvalResult (..))
 import GhcServer.Data.Unit (Unit (..), unitId)
 import GhcServer.Log (instrumentLogger)
 import Internal.Evaluate (MainResultKind (..), classifyMainResultType)
@@ -89,7 +90,7 @@ executeModuleTaskExecutor env executorId unit modName =
     runPlanned kind = do
       options <- executorGhcOptions env unit
       transport <- payloadTransport env
-      withRespawn env executorId (executePlanned transport env.stateVar executorId options root "main" kind)
+      withRespawn env executorId (executePlanned ExecutePlan transport env.stateVar executorId options root "main" kind)
 
     logger = instrumentLogger env.instrChan logCategory env.log
 

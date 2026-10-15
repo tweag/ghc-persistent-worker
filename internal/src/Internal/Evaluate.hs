@@ -4,14 +4,21 @@ module Internal.Evaluate where
 
 import Control.Concurrent (withMVar)
 import Control.Monad.IO.Class (liftIO)
-import GHC (Ghc, getSession, getSessionDynFlags, moduleNameString, runTcInteractive, setInteractiveDynFlags, setSession)
+import Data.List (nub)
+import qualified Data.Map.Strict as Map
+import GHC (DynFlags (..), Ghc, getSession, getSessionDynFlags, moduleNameString, runTcInteractive, setInteractiveDynFlags, setSession)
+import GHC.Driver.DynFlags (PackageDBFlag (..), PkgDbRef (..))
+import GHC.Unit.Env (HomeUnitEnv (..), UnitEnv (..))
+import GHC.Unit.Home.Graph (UnitEnvGraph (..))
+import System.OsPath.Extra (fromOsPath)
+import Types.ExecutorPlan (EntryKind (..))
 import GHC.Builtin.Types (boolTy, charTy, doubleTy, floatTy, intTy, integerTy, mkBoxedTupleTy, stringTy)
 import GHC.Core.TyCo.Compare (eqType)
 import GHC.Core.Type (Type)
 import GHC.Driver.Config (initEvalOpts)
 import GHC.Driver.DynFlags (wopt_unset)
 import GHC.Driver.Env (hscInterp, hscSetActiveUnitId, hsc_home_unit, hsc_interp, mkInteractiveHscEnv, runInteractiveHsc)
-import GHC.Driver.Env.Types (HscEnv (hsc_IC))
+import GHC.Driver.Env.Types (HscEnv (hsc_IC, hsc_unit_env))
 import GHC.Driver.Errors.Types (hoistTcRnMessage)
 import GHC.Driver.Flags (WarningFlag (Opt_WarnUnusedLocalBinds))
 import GHC.Driver.Main (hscParseStmtWithLocation, hscParsedStmt, ioMsgMaybe)
@@ -128,6 +135,47 @@ withTargetModule label env mHomeUnit target use =
       liftIO (resolveTargetModule hsc_env modname pkgqual) >>= \case
         Left err -> pure (Left (label ++ ": " ++ renderModuleLookupError modname err))
         Right () -> Right <$> use hsc_env
+
+-- | How an expression is run in a persistent executor, determined in the evaluation session.
+data ExecutorEntry =
+  ExecutorEntry {
+    -- | 'Nothing' if the expression's result can't be handled by an executor (see 'exprEntryKind').
+    entryKind :: Maybe EntryKind,
+    -- | The package databases of all home units, which the executor's session needs to find package units.
+    packageDbs :: [FilePath]
+  }
+
+-- | The kind of entry for an expression of the given type: @IO String@ has its result printed, other @IO@ types are
+-- run for their effects like in 'runExpression'.
+-- Results that 'runExpression' shows (numbers, counts) aren't supported by executors.
+exprEntryKind :: Type -> Maybe EntryKind
+exprEntryKind ty = do
+  _ <- tcSplitIOType_maybe ty
+  case classifyMainResultType ty of
+    Nothing -> Just EntryIO
+    Just ResultString -> Just EntryString
+    Just _ -> Nothing
+
+-- | The package database paths in the flags of all home units, without duplicates.
+homePackageDbs :: HscEnv -> [FilePath]
+homePackageDbs hsc_env =
+  nub [path | env <- Map.elems hug, PackageDB (PkgDbPath ref) <- packageDBFlags (homeUnitEnv_dflags env), let path = dbPath ref]
+  where
+    UnitEnvGraph hug = ue_home_unit_graph (hsc_unit_env hsc_env)
+
+#if defined(MWB) || defined(GBC)
+    dbPath = fromOsPath
+#else
+    dbPath = id
+#endif
+
+-- | Inspect the expression in the target module's session to determine how an executor can run it.
+prepareExecutorEntry :: Env -> Maybe String -> ModuleTarget -> String -> Ghc (Either String ExecutorEntry)
+prepareExecutorEntry env mHomeUnit target expr =
+  withTargetModule "prepareExecutorEntry" env mHomeUnit target \ hsc_env -> do
+    setContext [moduleImport target.module_, qualifiedPrelude]
+    ty <- exprType TM_Inst expr
+    pure ExecutorEntry {entryKind = exprEntryKind ty, packageDbs = homePackageDbs hsc_env}
 
 -- | Evaluate an arbitrary @IO a@ expression in the context of the target module (the worker's @--expr@ mode).
 -- The result is handled exactly like @main@'s in 'executeMain', see 'runExpression'.

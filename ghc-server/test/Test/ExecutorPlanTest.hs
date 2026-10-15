@@ -1,10 +1,10 @@
--- | Tests for the parent-side executor bytecode planning in 'GhcServer.Build.ExecutorPlan'.
+-- | Tests for the parent-side executor bytecode planning in 'GhcWorker.Executor.Plan'.
 module Test.ExecutorPlanTest where
 
 import GHC.Fingerprint (Fingerprint, fingerprintString)
 import GHC.Unit.Types (stringToUnitId)
-import GhcServer.Build.ExecutorPlan (applyDelta, dependencyOrder, planDelta, showHomeModuleId)
-import GhcServer.Data.ExecutorPlan (Payload (..), PlanDelta (..), PlannedModule (..))
+import GhcWorker.Executor.Plan (applyDelta, dependencyOrder, planDelta, showHomeModuleId)
+import Types.ExecutorPlan (Payload (..), PlanDelta (..), PlannedModule (..))
 import Hedgehog ((===))
 import Language.Haskell.Syntax.Module.Name (mkModuleName)
 import Test.Run (unitTest)

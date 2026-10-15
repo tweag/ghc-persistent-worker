@@ -1,6 +1,6 @@
 -- | Types for the bytecode plans that the parent sends to interface-free persistent executors.
--- See 'GhcServer.Build.ExecutorPlan'.
-module GhcServer.Data.ExecutorPlan where
+-- See 'GhcWorker.Executor.Plan'.
+module Types.ExecutorPlan where
 
 import Data.Aeson (FromJSON, ToJSON)
 import GHC.Fingerprint (Fingerprint)
@@ -26,7 +26,7 @@ data Payload =
   -- | A @.gbc@ file.
   PayloadFile FilePath
   |
-  -- | A range in a shared payload segment (see 'GhcServer.Build.PayloadArena').
+  -- | A range in a shared payload segment (see 'Internal.Executor.PayloadArena').
   PayloadShared SegmentSlice
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
@@ -41,7 +41,7 @@ data PayloadTransport =
   deriving stock (Eq, Show)
 
 -- | The modules an executor has to load (and reload) for an execution, as determined by
--- 'GhcServer.Build.ExecutorPlan.planDelta'.
+-- 'GhcWorker.Executor.Plan.planDelta'.
 data PlanDelta =
   PlanDelta {
     -- | Modules to link, dependencies first: those the executor doesn't have, those whose hash changed, and those

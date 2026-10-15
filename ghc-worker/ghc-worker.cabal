@@ -69,6 +69,10 @@ library
   hs-source-dirs: lib
   exposed-modules:
     GhcWorker.CompileResult
+    GhcWorker.Eval.Executor
+    GhcWorker.Executor.Child
+    GhcWorker.Executor.Client
+    GhcWorker.Executor.Plan
     GhcWorker.GhcHandler
     GhcWorker.Grpc
     GhcWorker.Instrumentation
@@ -87,8 +91,10 @@ library
     deepseq,
     directory,
     file-io,
+    filepath,
     ghc,
     grapesy >=1.0.1,
+    mmap,
     optparse-applicative,
     os-string,
     process,
@@ -96,6 +102,7 @@ library
     stm,
     temporary,
     text,
+    time,
     unix
   if (flag(ghc-debug))
     build-depends:
@@ -114,6 +121,7 @@ executable ghc-worker
   else
       ghc-options: -O2 -threaded "-with-rtsopts=-K512M -I5 -A128M -T -N"
   build-depends:
+    buck-worker-types,
     ghc-worker
 
 test-suite ghc-worker-test

@@ -1,6 +1,6 @@
 {-# LANGUAGE CPP #-}
 
--- | Child side of the bytecode plan protocol for persistent executors (see 'GhcServer.Build.ExecutorPlan' for the
+-- | Child side of the bytecode plan protocol for persistent executors (see 'GhcWorker.Executor.Plan' for the
 -- parent side and the project note @task-executor-bytecode-transport@).
 --
 -- The executor keeps one interface-free GHC session for its lifetime, in a dedicated thread (so that the session's
@@ -8,12 +8,12 @@
 -- For each 'PlanRequest', it decodes the GBC payloads, links them through a 'Linkables' hook that returns exactly
 -- the plan (bypassing @getLinkDeps@, which would need interfaces), looks up the entry in the name cache and runs it.
 -- The loader state persists in the session's interpreter, so modules sent by earlier requests stay linked.
-module GhcServer.Build.ExecutorLoad where
+module Internal.Executor.Load where
 
 import Data.IORef (IORef, newIORef)
 import Data.Text (Text)
-import GhcServer.Data.ExecutorPlan (PlanRequest (..))
-import GhcServer.Data.ProcessEval (EvalOutcome (..))
+import Types.ExecutorPlan (PlanRequest (..))
+import Types.ProcessEval (EvalOutcome (..))
 
 #if defined(GBC)
 
@@ -39,9 +39,9 @@ import GHC.Runtime.Interpreter (evalIO, evalString)
 import GHC.Types.Name.Occurrence (mkVarOcc)
 import GHC.Types.Unique.DSet (emptyUniqDSet)
 import GHC.Unit.Types (UnitId, mkModule, stringToUnit, stringToUnitId)
-import GhcServer.Build.GbcBuffer (decodeByteCode)
-import GhcServer.Build.PayloadArena (SegmentMappings, newSegmentMappings, sliceBytes)
-import GhcServer.Data.ExecutorPlan (EntryKind (..), ExtraLib (..), Payload (..))
+import Internal.Executor.GbcBuffer (decodeByteCode)
+import Internal.Executor.PayloadArena (SegmentMappings, newSegmentMappings, sliceBytes)
+import Types.ExecutorPlan (EntryKind (..), ExtraLib (..), Payload (..))
 import Internal.Session (simpleSessionWithDebugLog)
 import Internal.State (newState)
 import Internal.State.Linkables (loadDLL_)

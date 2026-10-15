@@ -27,11 +27,10 @@ import GhcServer.Build.Executor (callExecutor, ensureExecutor, respawnExecutor, 
 import GhcServer.Build.Metadata (runMetadata)
 import GhcServer.Build.Process (spawnProcessEval)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
+import Types.ProcessEval (EvalOutcome (..), ProcessEvalOutput (..), ProcessEvalResult (..))
 import GhcServer.Data.ProcessEval (
-  EvalOutcome (..),
+  ExecutorCall (..),
   ProcessEvalConfig (..),
-  ProcessEvalOutput (..),
-  ProcessEvalResult (..),
   )
 import GhcServer.Data.Unit (Project (..))
 import GhcServer.Data.UnitConfig (UnitConfig (..))
@@ -63,9 +62,9 @@ import Control.Concurrent.MVar (readMVar)
 import Data.Maybe (isJust)
 
 #if defined(GBC)
-import GhcServer.Build.ExecutorPlan (executePlanned, showHomeModuleId)
+import GhcWorker.Executor.Plan (executePlanned, showHomeModuleId)
 import GhcServer.Build.ExecutorTask (executorGhcOptions, payloadTransport)
-import GhcServer.Data.ExecutorPlan (EntryKind (..), ExecutorPlan (..), PlannedModule (..))
+import Types.ExecutorPlan (EntryKind (..), ExecutorPlan (..), PlannedModule (..))
 import GhcServer.Data.Unit (Unit (..), unitId)
 #endif
 
@@ -236,7 +235,7 @@ test_executorPlanExecute =
               _ <- ensureExecutor buildEnv executorId
               options <- executorGhcOptions buildEnv cfg.unit
               transport <- payloadTransport buildEnv
-              executePlanned transport buildEnv.stateVar executorId options root "main" EntryString
+              executePlanned ExecutePlan transport buildEnv.stateVar executorId options root "main" EntryString
             planned = either (fail . show) pure
             sentModules plan = showHomeModuleId . (.home) <$> plan.modules
             check (plan, output) = do

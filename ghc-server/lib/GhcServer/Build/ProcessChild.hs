@@ -30,12 +30,12 @@ import GhcServer.Cache (loadCachedUnit, loadCachedUnitAt, loadDepUnitPlans)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (newBuildEvents)
 import GhcServer.Data.ProcessEval (
-  EvalOutcome (..),
   ProcessEvalConfig (..),
   ProcessEvalOptions (..),
-  ProcessEvalResult (..),
   )
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitCache)
+import Types.ProcessEval (EvalOutcome (..), ProcessEvalResult (..))
+import GhcWorker.Executor.Child (finishResult)
 import GhcServer.Path (outputDirName, tmpDirName)
 import Internal.State (newState, updateMakeStateVar)
 import Prelude hiding (log)
@@ -182,27 +182,6 @@ configInvalidResult :: String -> IO ProcessEvalResult
 configInvalidResult err = do
   (logger, _) <- newTestLog
   finishResult logger "" "" (EvalConfigInvalid (pack err))
-
-finishResult :: Logger -> Text -> Text -> EvalOutcome -> IO ProcessEvalResult
-finishResult logger evalStdout evalStderr outcome = do
-  logger.debug ("Evaluation result: " <> show outcome)
-  logMessages <- fmap pack <$> logger.flush
-  -- 'max_mem_in_use_bytes'/'max_live_bytes' are only updated when a GC actually runs; a short-lived subprocess
-  -- task can otherwise exit without ever triggering one, reporting all-zero stats despite '-T' being enabled
-  -- (see the '-with-rtsopts' flags on the executable). Force one last GC so the reported peak reflects reality.
-  -- In a persistent executor, these are peaks over the executor's entire lifetime, not just this call.
-  performMajorGC
-  rtsStats <- getRTSStats
-  pure ProcessEvalResult {
-    evalStdout,
-    evalStderr,
-    logMessages,
-    outcome,
-    stats = ProcessStats {
-      maxMemInUseBytes = rtsStats.max_mem_in_use_bytes,
-      maxLiveBytes = rtsStats.max_live_bytes
-    }
-  }
 
 -- | Run in the one-shot child process: evaluate the config read from a file or stdin against a fresh
 -- 'Types.State.WorkerState' and write the single JSON-encoded 'ProcessEvalResult' to the restored stdout.

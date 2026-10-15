@@ -33,7 +33,7 @@ data Feature =
   FeatureSharedMemory
   |
   -- | Transfer the bytecode payloads of executor plans through an append-only segment in shared memory instead of
-  -- @.gbc@ files (see 'GhcServer.Build.PayloadArena'). Only effective with the GBC backport.
+  -- @.gbc@ files (see 'Internal.Executor.PayloadArena'). Only effective with the GBC backport.
   FeatureSharedPayloads
   deriving stock (Eq, Show, Ord, Enum, Bounded, Generic)
   deriving anyclass (Binary, FromJSON, ToJSON)

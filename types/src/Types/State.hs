@@ -35,7 +35,7 @@ data WorkerState =
     executors :: Map ExecutorId ExecutorHandle,
 
     -- | Bytecode payloads prepared for executors, shared by all of them.
-    -- See 'GhcServer.Build.ExecutorPlan'.
+    -- See 'GhcWorker.Executor.Plan'.
     payloads :: PayloadCache
   }
 

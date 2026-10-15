@@ -3,7 +3,7 @@
 -- | In-memory variants of GHC's GBC serialization ('GHC.ByteCode.Serialize.writeBinByteCode' and
 -- 'GHC.ByteCode.Serialize.readBinByteCode'), which only operate on files.
 -- The format, including the header, is identical, so buffers and @.gbc@ files are interchangeable.
-module GhcServer.Build.GbcBuffer where
+module Internal.Executor.GbcBuffer where
 
 #if defined(GBC)
 

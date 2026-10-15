@@ -31,19 +31,24 @@
           "deepseq"
           "directory"
           "file-io"
+          "filepath"
           "ghc"
           "ghc-debug-stub"
           "grapesy"
+          "mmap"
           "optparse-applicative"
           "os-string"
           "process"
           "silently"
           "text"
+          "time"
+          "unix"
         ];
       };
 
       executables.ghc-worker = {
         source-dirs = "app/ghc-worker";
+        dependencies = ["buck-worker-types"];
       };
 
       tests.ghc-worker-test = {
@@ -203,9 +208,11 @@
           "ghci"
           "ghc-boot"
           "hashable"
+          "mmap"
           "text"
           "time"
           "transformers"
+          "unix"
         ];
         source-dirs = "src";
         ghc-options = ["-O2"];

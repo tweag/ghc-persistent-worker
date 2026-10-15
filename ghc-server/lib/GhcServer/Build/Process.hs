@@ -31,12 +31,10 @@ import GHC (moduleNameString)
 import GhcServer.Build.SharedBytecode (cleanupSharedBytecode, collectBytecode, exportSharedBytecode)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.ProcessEval (
-  EvalOutcome (..),
   ProcessEvalConfig (..),
-  ProcessEvalOutput (..),
-  ProcessEvalResult (..),
   )
 import GhcServer.Data.Unit (Unit (..))
+import Types.ProcessEval (EvalOutcome (..), ProcessEvalOutput (..), ProcessEvalResult (..))
 import GhcServer.Log (instrumentLogger)
 import Internal.State (dynamicFeatureOn)
 import System.Environment (getExecutablePath)

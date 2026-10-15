@@ -103,7 +103,10 @@ data BuckArgs =
     -- | Name used to tag log output for the eval-mode target (see @Internal.Log.setTarget@); purely cosmetic.
     evalTargetName :: Maybe String,
     -- | Interpret an @IO (Int, Int)@ result of 'expr' as @(total, failed)@, failing the evaluation if @failed /= 0@.
-    evalCountFailures :: Bool
+    evalCountFailures :: Bool,
+    -- | Identifier of a persistent executor subprocess in which eval mode runs the expression, shared by all eval
+    -- targets that specify the same id (see @GhcWorker.Eval.Executor@). Without it, the worker evaluates in-process.
+    evalExecutor :: Maybe String
   }
   deriving stock (Eq, Show)
 
@@ -145,7 +148,8 @@ emptyBuckArgs env =
     depUnitsPath = Nothing,
     expr = Nothing,
     evalTargetName = Nothing,
-    evalCountFailures = False
+    evalCountFailures = False,
+    evalExecutor = Nothing
   }
 
 options :: Map String ([String] -> BuckArgs -> Either String ([String], BuckArgs))
@@ -186,6 +190,7 @@ options =
     withArg "--expr" \ z a -> z {expr = Just a},
     withArg "--eval-target-name" \ z a -> z {evalTargetName = Just a},
     flag "--eval-count-failures" \ z -> z {evalCountFailures = True},
+    withArg "--eval-executor" \ z a -> z {evalExecutor = Just a},
     ("-c", \ rest z -> Right (rest, z {mode = Just ModeCompile})),
     ("-M", \ rest z -> Right (rest, z {mode = Just ModeMetadata}))
   ]

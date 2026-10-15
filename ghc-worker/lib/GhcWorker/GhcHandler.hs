@@ -45,6 +45,23 @@ import Types.Log (Logger (..), TraceId, newLog)
 import Types.State (WorkerState (..))
 import Types.Target (TargetSpec (..))
 
+#if defined(GBC)
+
+import Data.Char (isAlphaNum, isLower)
+import qualified Data.Text as Text
+import GHC.Unit.Types (moduleName, moduleUnitId)
+import GhcWorker.Eval.Executor (runInExecutor)
+import Types.Api (ExecutorId (..))
+import Types.Target (ModuleTarget (..))
+
+-- | Whether the expression is a plain, unqualified variable name, which is what executors can run as an entry.
+isIdentifier :: String -> Bool
+isIdentifier = \case
+  c : cs -> (isLower c || c == '_') && all (\ x -> isAlphaNum x || x `elem` ("_'" :: String)) cs
+  [] -> False
+
+#endif
+
 #if __DEBUG__
 
 import Internal.State (dumpState)
@@ -132,6 +149,34 @@ dispatch hooks env args =
       case mname of
         Nothing -> pure ()
         Just name -> env.log.setTarget (TargetUnknown name)
+#if defined(GBC)
+      case args.evalExecutor of
+        Just executor | isIdentifier expr -> evalInExecutor (ExecutorId (Text.pack executor)) modTarget expr
+        _ -> evalInProcess modTarget expr
+#else
+      evalInProcess modTarget expr
+#endif
+
+#if defined(GBC)
+    -- Run the expression in the persistent executor with the given id, if its type is supported by executors, which
+    -- is determined in the evaluation session. Otherwise, fall back to in-process evaluation.
+    evalInExecutor executorId modTarget expr = do
+      prepared <-
+        withGhcMakeModule Interpreted modTarget env Nothing
+          (\_ -> Just <$> Internal.Evaluate.prepareExecutorEntry env (fromOsPath <$> args.homeUnit) modTarget expr)
+      case prepared of
+        Nothing -> pure (Left "worker: eval session failed")
+        Just (Left err) -> pure (Left err)
+        Just (Right Internal.Evaluate.ExecutorEntry {entryKind = Nothing}) -> do
+          env.log.info ("Expression type is not supported by executors, evaluating in-process: " ++ expr)
+          evalInProcess modTarget expr
+        Just (Right Internal.Evaluate.ExecutorEntry {entryKind = Just kind, packageDbs}) ->
+          -- The session has ended, so the worker state contains its loaded modules.
+          runInExecutor env.log env.state executorId (concatMap (\ db -> ["-package-db", db]) packageDbs)
+            (moduleUnitId modTarget.module_, moduleName modTarget.module_) expr kind
+#endif
+
+    evalInProcess modTarget expr = do
       let mode = if args.evalCountFailures then Internal.Evaluate.TupleFailureCount else Internal.Evaluate.TuplePlain
       (res_stdout, r) <-
         hCapture [stdout] $

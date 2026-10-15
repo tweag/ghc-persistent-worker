@@ -103,6 +103,9 @@ library
                       Internal.Env
                       Internal.Error
                       Internal.Evaluate
+                      Internal.Executor.GbcBuffer
+                      Internal.Executor.Load
+                      Internal.Executor.PayloadArena
                       Internal.Json
                       Internal.Log
                       Internal.Metadata
@@ -132,9 +135,11 @@ library
                       ghc-boot,
                       ghci,
                       hashable,
+                      mmap,
                       text,
                       time,
-                      transformers
+                      transformers,
+                      unix
     default-language: GHC2021
     default-extensions:
       BlockArguments,

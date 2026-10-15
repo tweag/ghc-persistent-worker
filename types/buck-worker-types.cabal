@@ -52,12 +52,14 @@ library
     Types.CachedDeps
     Types.Compat.GHC914
     Types.Env
+    Types.ExecutorPlan
     Types.FeatureFlags
     Types.BuildPlan.Incremental
     Types.Grpc
     Types.Api
     Types.Log
     Types.Orchestration
+    Types.ProcessEval
     Types.Settings
     Types.State
     Types.State.Executor

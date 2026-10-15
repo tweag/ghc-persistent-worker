@@ -7,7 +7,7 @@
 -- writes @.gbc@ files, and stores the resulting home unit graph and module graph in its 'Types.State.WorkerState'
 -- like the build server would.
 -- It then spawns the given executable as a persistent executor ('GhcServer.Build.ExecutorChild') and runs the entry
--- via 'GhcServer.Build.ExecutorPlan.executePlanned' in several rounds that exercise the delta planning:
+-- via 'GhcWorker.Executor.Plan.executePlanned' in several rounds that exercise the delta planning:
 --
 -- 1. Fresh executor: the whole closure is sent (@Fat@, @Ffi@ with a foreign stub, @Entry@ importing @containers@).
 -- 2. Same request: nothing is sent.
@@ -79,11 +79,12 @@ import GhcServer.Build.BytecodeMirror (
   rehydrateLinkable,
   )
 import GhcServer.Build.Executor (awaitExecutor, rtsArgs, spawnExecutorWith, stopExecutor)
-import GhcServer.Build.ExecutorLoad (planLinkables)
-import GhcServer.Build.ExecutorPlan (displayPlanError, executePlanned, showHomeModuleId)
-import GhcServer.Build.PayloadArena (payloadSegmentPath, removeSegment)
-import GhcServer.Data.ExecutorPlan (EntryKind (..), ExecutorPlan (..), PayloadTransport (..), PlannedModule (..))
-import GhcServer.Data.ProcessEval (ProcessEvalOutput (..), ProcessEvalResult (..), EvalOutcome (..))
+import Internal.Executor.Load (planLinkables)
+import GhcWorker.Executor.Plan (displayPlanError, executePlanned, showHomeModuleId)
+import Internal.Executor.PayloadArena (payloadSegmentPath, removeSegment)
+import Types.ExecutorPlan (EntryKind (..), ExecutorPlan (..), PayloadTransport (..), PlannedModule (..))
+import GhcServer.Data.ProcessEval (ExecutorCall (..))
+import Types.ProcessEval (EvalOutcome (..), ProcessEvalOutput (..), ProcessEvalResult (..))
 import Internal.Session (simpleSessionWithDebugLog)
 import Internal.State (newState)
 import Internal.State.Make (storeModuleGraphNodes)
@@ -312,7 +313,7 @@ spawnRegistered stateVar options = do
 -- | Run one round and check its result and the number of sent modules, returning whether both match.
 round_ :: MVar WorkerState -> GbcTransportOptions -> PayloadTransport -> String -> Int -> Int -> IO Bool
 round_ stateVar options transport label offset expectedSent = do
-  (result, seconds) <- timed (executePlanned transport stateVar executorId transportOptions root "entry" EntryString)
+  (result, seconds) <- timed (executePlanned ExecutePlan transport stateVar executorId transportOptions root "entry" EntryString)
   putStrLn ("[" ++ label ++ "] seconds: " ++ show seconds)
   case result of
     Left err -> False <$ putStrLn ("[" ++ label ++ "] failed: " ++ displayPlanError err)

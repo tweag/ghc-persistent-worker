@@ -12,13 +12,13 @@
 -- referring to the closures of the replaced version.
 -- Therefore a module is resent if its payload hash changed or if one of its dependencies is resent, and loaded
 -- modules outside the closure that depend on a replaced module are dropped from the loaded set.
-module GhcServer.Build.ExecutorPlan where
+module GhcWorker.Executor.Plan where
 
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import GHC.Unit.Types (unitIdString)
-import GhcServer.Data.ExecutorPlan (PlanDelta (..), PlannedModule (..))
+import Types.ExecutorPlan (PlanDelta (..), PlannedModule (..))
 import Language.Haskell.Syntax.Module.Name (moduleNameString)
 import Types.State.Executor (ExecutorLoaded (..), HomeModuleId, LoadedModule (..))
 
@@ -27,6 +27,7 @@ import Types.State.Executor (ExecutorLoaded (..), HomeModuleId, LoadedModule (..
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, readMVar, withMVar)
 import Control.Exception (IOException, SomeException, displayException, try)
 import Control.Monad (unless)
+import Data.Aeson (ToJSON)
 import Data.List (nub)
 import qualified Data.ByteString as ByteString
 import Data.ByteString (ByteString)
@@ -42,10 +43,10 @@ import GHC.Unit.Module.Location (ModLocation (..))
 import GHC.Unit.Module.ModIface (mi_deps)
 import GHC.Unit.Module.ModNodeKey (ModNodeKeyWithUid (..))
 import GHC.Unit.Types (GenWithIsBoot (..), IsBootInterface (..), UnitId)
-import GhcServer.Build.Executor (callExecutorWith)
-import GhcServer.Build.GbcBuffer (encodeByteCode)
-import GhcServer.Build.PayloadArena (appendPayload, ensureArena)
-import GhcServer.Data.ExecutorPlan (
+import GhcWorker.Executor.Client (callExecutorJson)
+import Internal.Executor.GbcBuffer (encodeByteCode)
+import Internal.Executor.PayloadArena (appendPayload, ensureArena)
+import Types.ExecutorPlan (
   EntryKind,
   ExecutorPlan (..),
   ExtraLib (..),
@@ -53,7 +54,7 @@ import GhcServer.Data.ExecutorPlan (
   PayloadTransport (..),
   PlanRequest (..),
   )
-import GhcServer.Data.ProcessEval (EvalOutcome (..), ExecutorCall (..), ProcessEvalOutput (..), ProcessEvalResult (..))
+import Types.ProcessEval (EvalOutcome (..), ProcessEvalOutput (..), ProcessEvalResult (..))
 import System.Directory (createDirectoryIfMissing, getFileSize, getModificationTime)
 import System.FilePath ((</>))
 import Types.Api (ExecutorId)
@@ -391,6 +392,9 @@ displayPlanError = \case
 -- Planning and sending are serialized per executor with the handle's @calls@ lock, since a plan only contains the
 -- modules missing from the loaded set recorded by earlier plans, which the executor must have received beforehand.
 executePlanned ::
+  ToJSON call =>
+  -- | Wraps the request in the payload type that the executor decodes.
+  (PlanRequest -> call) ->
   PayloadTransport ->
   MVar WorkerState ->
   ExecutorId ->
@@ -399,7 +403,7 @@ executePlanned ::
   String ->
   EntryKind ->
   IO (Either PlanError (ExecutorPlan, ProcessEvalOutput))
-executePlanned transport stateVar executorId ghcOptions root entry kind =
+executePlanned wrap transport stateVar executorId ghcOptions root entry kind =
   lookupCalls >>= \case
     Nothing -> pure (Left (PlanUnavailable ("Executor not registered: " ++ show executorId)))
     Just calls -> withMVar calls \ () -> planAndCall
@@ -410,7 +414,7 @@ executePlanned transport stateVar executorId ghcOptions root entry kind =
       prepareExecution transport stateVar executorId root >>= \case
         Left err -> pure (Left (PlanUnavailable err))
         Right (handle, plan) ->
-          try @SomeException (callExecutorWith handle (ExecutePlan (planRequest ghcOptions root entry kind plan))) >>= \case
+          try @SomeException (callExecutorJson handle (wrap (planRequest ghcOptions root entry kind plan))) >>= \case
             Left err -> Left (ExecutorUnreachable (displayException err)) <$ resetLoaded stateVar executorId
             Right output -> do
               unless (planApplied output) (resetLoaded stateVar executorId)

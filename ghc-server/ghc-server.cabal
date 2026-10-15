@@ -60,14 +60,10 @@ library
     GhcServer.Build.Execute
     GhcServer.Build.Executor
       GhcServer.Build.ExecutorChild
-      GhcServer.Build.ExecutorLoad
-      GhcServer.Build.ExecutorPlan
       GhcServer.Build.ExecutorTask
-    GhcServer.Build.GbcBuffer
     GhcServer.Build.Metadata
                     GhcServer.Build.Process
                     GhcServer.Build.ProcessChild
-    GhcServer.Build.PayloadArena
     GhcServer.Build.Propagate
     GhcServer.Build.Schedule
     GhcServer.Build.BytecodeMirror
@@ -81,7 +77,6 @@ library
     GhcServer.Data.BuildEvent
     GhcServer.Data.BuildSystem
     GhcServer.Data.Config
-    GhcServer.Data.ExecutorPlan
     GhcServer.Data.ProcessEval
     GhcServer.Data.Request
     GhcServer.Data.Unit
