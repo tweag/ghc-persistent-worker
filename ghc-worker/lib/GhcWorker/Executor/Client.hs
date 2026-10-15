@@ -6,18 +6,20 @@
 module GhcWorker.Executor.Client where
 
 import BuckWorkerProto ()
-import Control.Concurrent (threadDelay)
-import Control.Concurrent.MVar (newMVar)
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.MVar (MVar, newMVar, readMVar)
 import Control.Exception (SomeException, throwIO, try)
-import Control.Monad (void)
+import Control.Monad (unless, void, when)
 import Data.Aeson (ToJSON)
 import qualified Data.Aeson as Aeson
 import Data.Bifunctor (first)
 import Data.ByteString (toStrict)
+import Data.Foldable (traverse_)
+import qualified Data.Map.Strict as Map
 import Data.Text (pack)
 import Network.GRPC.Client (Server (..), rpc, withConnection)
-import Network.GRPC.Client.StreamType.IO (nonStreaming)
-import Network.GRPC.Common (def)
+import Network.GRPC.Client.StreamType.IO (nonStreaming, serverStreaming)
+import Network.GRPC.Common (NextElem (..), def)
 import Network.GRPC.Common.Protobuf (Protobuf, defMessage, (&), (.~))
 import Proto.Executor (Executor)
 import qualified Proto.Executor_Fields as Fields
@@ -28,12 +30,15 @@ import System.Process (
   CreateProcess (..),
   StdStream (..),
   createProcess,
+  getPid,
   getProcessExitCode,
   proc,
   terminateProcess,
   waitForProcess,
   )
+import Types.Api (Event (..), ExecutorId)
 import Types.ProcessEval (ProcessEvalOutput (..))
+import Types.State (WorkerState (..))
 import Types.State.Executor (ExecutorHandle (..), emptyExecutorLoaded)
 
 -- | Wrap RTS options in @+RTS ... -RTS@, or nothing if there are none.
@@ -97,3 +102,41 @@ stopExecutor handle = do
   terminateProcess handle.process
   void (waitForProcess handle.process)
   removeIfExists handle.socket
+
+-- | Forward the status snapshots an executor publishes via its @Events@ RPC as 'ExecutorUpdate' events, and publish
+-- 'ExecutorGone' when the stream ends, unless a newer process has been registered for the id in the meantime.
+--
+-- The watcher is never cancelled: stopping the process ends the stream, which ends the watcher.
+-- (Cancelling a thread blocked in a gRPC read would block until the connection drops.)
+watchExecutor :: (Event -> IO ()) -> MVar WorkerState -> ExecutorId -> ExecutorHandle -> IO ()
+watchExecutor emit stateVar executorId handle =
+  void $ forkIO do
+    pid <- fmap fromIntegral <$> getPid handle.process
+    subscribe pid (20 :: Int)
+    announceGone
+  where
+    -- The socket file exists slightly before the child accepts connections, so connecting is retried.
+    subscribe pid retries =
+      try @SomeException (streamStatus pid) >>= \case
+        Left _ | retries > 0 -> do
+          running <- isRunning handle
+          when running (threadDelay 100_000 >> subscribe pid (retries - 1))
+        _ -> pure ()
+
+    streamStatus pid =
+      withConnection def (ServerUnix (fromOsPath handle.socket)) \ connection ->
+        serverStreaming connection (rpc @(Protobuf Executor "events")) defMessage (receiveAll pid)
+
+    receiveAll pid recv =
+      recv >>= \case
+        NextElem message -> do
+          traverse_ (publish pid) (Aeson.decodeStrict' message.payload)
+          receiveAll pid recv
+        NoNextElem -> pure ()
+
+    publish pid status = emit ExecutorUpdate {executor = executorId, pid, status}
+
+    announceGone = do
+      current <- Map.lookup executorId . (.executors) <$> readMVar stateVar
+      unless (any (\ newer -> newer.incarnation > handle.incarnation) current) $
+        emit ExecutorGone {executor = executorId}

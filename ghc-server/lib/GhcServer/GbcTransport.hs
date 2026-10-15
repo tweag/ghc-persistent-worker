@@ -78,7 +78,7 @@ import GhcServer.Build.BytecodeMirror (
   mirrorSourceFor,
   rehydrateLinkable,
   )
-import GhcServer.Build.Executor (awaitExecutor, rtsArgs, spawnExecutorWith, stopExecutor)
+import GhcWorker.Executor.Client (awaitExecutor, rtsArgs, spawnExecutorWith, stopExecutor)
 import Internal.Executor.Load (planLinkables)
 import GhcWorker.Executor.Plan (displayPlanError, executePlanned, showHomeModuleId)
 import Internal.Executor.PayloadArena (payloadSegmentPath, removeSegment)

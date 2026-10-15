@@ -1,3 +1,5 @@
+{-# LANGUAGE ApplicativeDo #-}
+
 -- | The client's @listen@ command: stream instrumentation events from a running server and print them to stdout.
 module GhcClient.Listen where
 
@@ -38,6 +40,7 @@ import Types.Api (
   ProcessStats (..),
   RequestId (..),
   TrackedBytecode,
+  UnitName (..),
   UnitSummary (..),
   renderTarget,
   )

@@ -76,6 +76,7 @@ library
     GhcWorker.GhcHandler
     GhcWorker.Grpc
     GhcWorker.Instrumentation
+    GhcWorker.LogEvents
     GhcWorker.Orchestration
     GhcWorker.Run
   build-depends:

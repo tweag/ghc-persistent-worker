@@ -11,6 +11,7 @@ import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Coerce (coerce)
 import Data.Functor ((<&>))
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Int (Int32)
 #ifdef GHC_DEBUG
 import GHC.Debug.Stub (withGhcDebugUnix)
@@ -20,7 +21,7 @@ import GHC.Driver.DynFlags (GhcMode (..))
 import GHC.Driver.Monad (reflectGhc, reifyGhc)
 import GHC.Utils.Outputable (text)
 import GhcWorker.CompileResult (CompileResult (..), usedDepFiles, writeResult)
-import GhcWorker.Instrumentation (Hooks (..), InstrumentedHandler (..))
+import GhcWorker.Instrumentation (EvalReport (..), Hooks (..), InstrumentedHandler (..), failedEval, publishEvent, reportEval)
 import Internal.AbiHash (AbiHash (..), showAbiHash)
 import Internal.Compile.Make (compileModuleWithDepsInHpt)
 #ifdef GHC_DEBUG
@@ -43,7 +44,8 @@ import Types.Env (Env (..))
 import Types.Grpc (RequestArgs (..))
 import Types.Log (Logger (..), TraceId, newLog)
 import Types.State (WorkerState (..))
-import Types.Target (TargetSpec (..))
+import Types.Api (targetFromWorkerSpec)
+import Types.Target (TargetSpec (..), renderTargetSpec)
 
 #if defined(GBC)
 
@@ -103,7 +105,7 @@ dispatch hooks env args =
   case args.mode of
     Just ModeCompile -> do
       compile >>= \case
-        Nothing -> pure (1, Nothing)
+        Nothing -> pure (1, failedTarget)
         Just (CompileResult {abiHash, depFiles}, target) -> do
           writeResult args abiHash depFiles
           pure (0, Just target)
@@ -116,8 +118,8 @@ dispatch hooks env args =
         Just modTarget -> do
           case args.expr of
             Just expr -> do
-              result <- eval args.evalTargetName modTarget expr
-              case result of
+              report <- eval args.evalTargetName modTarget expr
+              case report.outcome of
                 Left err -> do
                   env.log.info ("error: " ++ err)
                   pure (1, Just (TargetUnknown "test"))
@@ -132,6 +134,10 @@ dispatch hooks env args =
     Just m -> error ("worker: mode not implemented: " ++ show m)
     Nothing -> error "worker: no mode specified"
   where
+    -- The target of a failed compilation, so that the failure can be reported.
+    failedTarget =
+      (if args.interp == Interpreted then TargetModuleInterp else TargetModule) <$> env.args.moduleTarget
+
     compile = case env.args.moduleTarget of
       Just target -> do
         if args.interp == Interpreted
@@ -152,10 +158,16 @@ dispatch hooks env args =
 #if defined(GBC)
       case args.evalExecutor of
         Just executor | isIdentifier expr -> evalInExecutor (ExecutorId (Text.pack executor)) modTarget expr
-        _ -> evalInProcess modTarget expr
+        _ -> reported modTarget False (evalInProcess modTarget expr)
 #else
-      evalInProcess modTarget expr
+      reported modTarget False (evalInProcess modTarget expr)
 #endif
+
+    -- Publish events for the evaluation of the module's target.
+    reported modTarget process run =
+      case targetFromWorkerSpec (TargetModule modTarget) of
+        Just target -> reportEval hooks target process run
+        Nothing -> run
 
 #if defined(GBC)
     -- Run the expression in the persistent executor with the given id, if its type is supported by executors, which
@@ -165,15 +177,17 @@ dispatch hooks env args =
         withGhcMakeModule Interpreted modTarget env Nothing
           (\_ -> Just <$> Internal.Evaluate.prepareExecutorEntry env (fromOsPath <$> args.homeUnit) modTarget expr)
       case prepared of
-        Nothing -> pure (Left "worker: eval session failed")
-        Just (Left err) -> pure (Left err)
+        Nothing -> reported modTarget False (pure (failedEval "worker: eval session failed"))
+        Just (Left err) -> reported modTarget False (pure (failedEval err))
         Just (Right Internal.Evaluate.ExecutorEntry {entryKind = Nothing}) -> do
           env.log.info ("Expression type is not supported by executors, evaluating in-process: " ++ expr)
-          evalInProcess modTarget expr
+          reported modTarget False (evalInProcess modTarget expr)
         Just (Right Internal.Evaluate.ExecutorEntry {entryKind = Just kind, packageDbs}) ->
           -- The session has ended, so the worker state contains its loaded modules.
-          runInExecutor env.log env.state executorId (concatMap (\ db -> ["-package-db", db]) packageDbs)
-            (moduleUnitId modTarget.module_, moduleName modTarget.module_) expr kind
+          reported modTarget True $
+            runInExecutor (publishEvent hooks) env.log env.state executorId
+              (concatMap (\ db -> ["-package-db", db]) packageDbs)
+              (moduleUnitId modTarget.module_, moduleName modTarget.module_) expr kind
 #endif
 
     evalInProcess modTarget expr = do
@@ -184,11 +198,11 @@ dispatch hooks env args =
             (\_ -> Just <$> Internal.Evaluate.evaluateExpr env (fromOsPath <$> args.homeUnit) modTarget mode expr)
       env.log.infoD (text res_stdout)
       case r of
-        Nothing -> pure (Left "worker: eval session failed")
-        Just (Left err) -> pure (Left err)
+        Nothing -> pure (failedEval "worker: eval session failed")
+        Just (Left err) -> pure (failedEval err)
         Just (Right (ok, mResult)) -> do
           for_ mResult env.log.info
-          pure (Right ok)
+          pure EvalReport {outcome = Right ok, result = mResult, stats = Nothing}
 
     withTarget f (target :: TargetSpec) =
       reifyGhc $ \session -> do
@@ -216,10 +230,7 @@ processResult hooks logger _stateVar result = do
   hooks.compileFinish (hookPayload output)
   pure (output, exitCode)
   where
-    hookPayload output =
-      if exitCode == 0
-      then Just (target, output, exitCode)
-      else Nothing
+    hookPayload output = Just (target, output, exitCode)
 
     ((exitCode, target), _exception) = case result of
       Right out -> (out, Nothing)
@@ -240,7 +251,11 @@ ghcHandler ::
   InstrumentedHandler
 ghcHandler state traceId =
   InstrumentedHandler \ hooks -> GrpcHandler \ commandEnv argv -> do
-    log <- newLogger <$> newLog traceId
+    rawLog <- newLogger <$> newLog traceId
+    category <- newIORef "worker"
+    let log = hooks.instrumentLogger (readIORef category) rawLog {
+          setTarget = \ spec -> rawLog.setTarget spec *> writeIORef category (renderTargetSpec spec)
+        }
     result <- try do
       buckArgs <- either parseError pure (parseBuckArgs commandEnv argv)
       settings <- (.settings) <$> readMVar state

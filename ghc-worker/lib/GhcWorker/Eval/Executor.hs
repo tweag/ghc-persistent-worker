@@ -17,19 +17,28 @@ module GhcWorker.Eval.Executor where
 #if defined(GBC)
 
 import Control.Concurrent.MVar (MVar, modifyMVar, readMVar, withMVar)
+import Control.Monad (when)
 import Data.Char (isAlphaNum)
 import Data.Foldable (for_, traverse_)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as Text
 import GHC.Utils.Outputable (text)
-import GhcWorker.Executor.Client (awaitExecutor, isRunning, rtsArgs, spawnExecutorWith, stopExecutor)
+import GhcWorker.Executor.Client (
+  awaitExecutor,
+  isRunning,
+  rtsArgs,
+  spawnExecutorWith,
+  stopExecutor,
+  watchExecutor,
+  )
 import GhcWorker.Executor.Plan (PlanError (..), displayPlanError, executePlanned)
+import GhcWorker.Instrumentation (EvalReport (..), failedEval)
 import System.Directory (getTemporaryDirectory)
 import System.Environment (getExecutablePath)
 import System.FilePath ((</>))
 import System.OsPath.Extra (toOsPath)
 import System.Posix.Process (getProcessID)
-import Types.Api (ExecutorId (..))
+import Types.Api (Event, ExecutorId (..))
 import Types.ExecutorPlan (EntryKind, ExecutorPlan)
 import Types.Log (Logger (..))
 import Types.ProcessEval (EvalOutcome (..), ProcessEvalOutput (..), ProcessEvalResult (..))
@@ -72,20 +81,27 @@ spawnExecutor executorId = do
 
 -- | Return the registered executor if the predicate accepts it, otherwise stop it and register a new one, and wait
 -- until it serves its socket.
-acquireExecutor :: (ExecutorHandle -> IO Bool) -> MVar WorkerState -> ExecutorId -> IO ExecutorHandle
-acquireExecutor reuse stateVar executorId = do
-  handle <- modifyMVar stateVar \ state -> do
+-- A new process is observed for status events, which are published with the given action.
+acquireExecutor ::
+  (Event -> IO ()) ->
+  (ExecutorHandle -> IO Bool) ->
+  MVar WorkerState ->
+  ExecutorId ->
+  IO ExecutorHandle
+acquireExecutor emit reuse stateVar executorId = do
+  (handle, spawned) <- modifyMVar stateVar \ state -> do
     let existing = Map.lookup executorId state.executors
     reusable <- maybe (pure False) reuse existing
     case existing of
-      Just handle | reusable -> pure (state, handle)
+      Just handle | reusable -> pure (state, (handle, False))
       _ -> do
         traverse_ stopExecutor existing
         spawned <- spawnExecutor executorId
         -- Keep the call lock, so that callers still holding it stay serialized with the new process.
         let handle = maybe spawned (\ old -> spawned {calls = old.calls, incarnation = old.incarnation + 1}) existing
-        pure (state {executors = Map.insert executorId handle state.executors}, handle)
+        pure (state {executors = Map.insert executorId handle state.executors}, (handle, True))
   awaitExecutor handle
+  when spawned (watchExecutor emit stateVar executorId handle)
   pure handle
 
 -- | Replace the executor after a failed call.
@@ -93,13 +109,13 @@ acquireExecutor reuse stateVar executorId = do
 -- The incarnation is that of the handle the caller saw failing. If the registered executor is a newer, running one,
 -- another target has replaced it already and it is kept, since stopping it would kill that target's calls.
 -- Waits for calls in flight on the old process before stopping it.
-respawnExecutor :: MVar WorkerState -> ExecutorId -> Int -> IO ExecutorHandle
-respawnExecutor stateVar executorId failed =
+respawnExecutor :: (Event -> IO ()) -> MVar WorkerState -> ExecutorId -> Int -> IO ExecutorHandle
+respawnExecutor emit stateVar executorId failed =
   (Map.lookup executorId . (.executors) <$> readMVar stateVar) >>= \case
     Just handle -> withMVar handle.calls \ () -> replace
     Nothing -> replace
   where
-    replace = acquireExecutor replaced stateVar executorId
+    replace = acquireExecutor emit replaced stateVar executorId
     replaced handle
       | handle.incarnation == failed = pure False
       | otherwise = isRunning handle
@@ -116,7 +132,9 @@ needsRespawn = \case
 -- | Run the entry of a module in the executor, starting or restarting it if necessary, forward the output and
 -- determine whether the evaluation succeeded.
 -- 'Left' is an error message for a failure to evaluate, as opposed to a successful evaluation of a failing test.
+-- Status events of new executor processes are published with the given action.
 runInExecutor ::
+  (Event -> IO ()) ->
   Logger ->
   MVar WorkerState ->
   ExecutorId ->
@@ -124,34 +142,37 @@ runInExecutor ::
   HomeModuleId ->
   String ->
   EntryKind ->
-  IO (Either String Bool)
-runInExecutor logger stateVar executorId options root entry kind = do
+  IO EvalReport
+runInExecutor emit logger stateVar executorId options root entry kind = do
   transport <- payloadTransport
   let execute = executePlanned id transport stateVar executorId options root entry kind
-  seen <- acquireExecutor isRunning stateVar executorId
+  seen <- acquireExecutor emit isRunning stateVar executorId
   first <- execute
   result <-
     if needsRespawn first
-    then respawnExecutor stateVar executorId seen.incarnation *> execute
+    then respawnExecutor emit stateVar executorId seen.incarnation *> execute
     else pure first
   reportResult logger result
 
 -- | Forward the executor's output to the logger and convert the outcome.
-reportResult :: Logger -> PlannedOutput -> IO (Either String Bool)
+reportResult :: Logger -> PlannedOutput -> IO EvalReport
 reportResult logger = \case
-  Left err -> pure (Left (displayPlanError err))
+  Left err -> pure (failedEval (displayPlanError err))
   Right (_, output) -> case output.result of
-    Left err -> pure (Left (Text.unpack err))
+    Left err -> pure (failedEval (Text.unpack err))
     Right result -> do
       logger.infoD (text (Text.unpack result.evalStdout))
       logger.infoD (text (Text.unpack result.evalStderr))
       for_ result.logMessages (logger.info . Text.unpack)
-      outcomeResult logger result.outcome
+      report <- outcomeResult logger result.outcome
+      pure EvalReport {outcome = report.outcome, result = report.result, stats = Just result.stats}
 
-outcomeResult :: Logger -> EvalOutcome -> IO (Either String Bool)
+outcomeResult :: Logger -> EvalOutcome -> IO EvalReport
 outcomeResult logger = \case
-  EvalSuccess mResult -> Right True <$ for_ mResult (logger.info . Text.unpack)
-  EvalExecuteFailed err -> pure (Left (Text.unpack err))
-  other -> pure (Left ("Executor failed: " ++ show other))
+  EvalSuccess mResult -> do
+    for_ mResult (logger.info . Text.unpack)
+    pure EvalReport {outcome = Right True, result = Text.unpack <$> mResult, stats = Nothing}
+  EvalExecuteFailed err -> pure (failedEval (Text.unpack err))
+  other -> pure (failedEval ("Executor failed: " ++ show other))
 
 #endif

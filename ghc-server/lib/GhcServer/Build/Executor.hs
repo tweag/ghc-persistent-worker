@@ -12,8 +12,7 @@ import BuckWorkerProto ()
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (modifyMVar, modifyMVar_, readMVar, withMVar)
 import Control.Exception (SomeException, try)
-import Control.Monad (unless, void, when)
-import qualified Data.Aeson as Aeson
+import Control.Monad (when)
 import Data.Char (isAlphaNum)
 import Data.Foldable (traverse_)
 import qualified Data.Map.Strict as Map
@@ -23,20 +22,24 @@ import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.ProcessEval (ExecutorCall (..), ProcessEvalConfig)
 import GhcServer.Log (emitEvent)
 import GhcServer.Path (socketDirName)
-import GhcWorker.Executor.Client (awaitExecutor, callExecutorJson, isRunning, rtsArgs, spawnExecutorWith, stopExecutor)
-import Network.GRPC.Client (Server (..), rpc, withConnection)
-import Network.GRPC.Client.StreamType.IO (serverStreaming)
-import Network.GRPC.Common (NextElem (..), def)
-import Network.GRPC.Common.Protobuf (Protobuf, defMessage)
-import Proto.Executor (Executor)
+import GhcWorker.Executor.Client (
+  awaitExecutor,
+  callExecutorJson,
+  isRunning,
+  rtsArgs,
+  spawnExecutorWith,
+  stopExecutor,
+  watchExecutor,
+  )
 import System.Directory.OsPath (createDirectoryIfMissing)
 import System.Environment (getExecutablePath)
-import System.OsPath.Extra (OsPath, fromOsPath, toOsPath, (</>))
-import System.Process (getPid)
-import Types.Api (Event (..), ExecutorId (..), ProcessStats (..))
+import System.OsPath.Extra (OsPath, toOsPath, (</>))
+import Types.Api (ExecutorId (..), ProcessStats (..))
 import Types.ProcessEval (ProcessEvalOutput (..))
 import Types.State (WorkerState (..))
 import Types.State.Executor (ExecutorHandle (..))
+
+-- | The socket of the executor with the given id.
 executorSocket :: BuildEnv -> ExecutorId -> OsPath
 executorSocket env executorId =
   env.projectRoot </> socketDirName </> toOsPath ("executor-" ++ sanitized ++ ".sock")
@@ -88,46 +91,8 @@ acquireExecutor reuse env executorId = do
         let handle = maybe spawned (\ old -> spawned {calls = old.calls, incarnation = old.incarnation + 1}) existing
         pure (state {executors = Map.insert executorId handle state.executors}, (handle, True))
   awaitExecutor handle
-  when spawned (watchExecutor env executorId handle)
+  when spawned (watchExecutor (emitEvent env.instrChan) env.stateVar executorId handle)
   pure handle
-
--- | Forward the status snapshots an executor publishes via its @Events@ RPC as 'ExecutorUpdate' events, and emit
--- 'ExecutorGone' when the stream ends, unless a newer process has been registered for the id in the meantime.
---
--- The watcher is never cancelled: stopping the process ends the stream, which ends the watcher.
--- (Cancelling a thread blocked in a gRPC read would block until the connection drops.)
-watchExecutor :: BuildEnv -> ExecutorId -> ExecutorHandle -> IO ()
-watchExecutor env executorId handle =
-  void $ forkIO do
-    pid <- fmap fromIntegral <$> getPid handle.process
-    subscribe pid (20 :: Int)
-    announceGone
-  where
-    -- The socket file exists slightly before the child accepts connections, so connecting is retried.
-    subscribe pid retries =
-      try @SomeException (streamStatus pid) >>= \case
-        Left _ | retries > 0 -> do
-          running <- isRunning handle
-          when running (threadDelay 100_000 >> subscribe pid (retries - 1))
-        _ -> pure ()
-
-    streamStatus pid =
-      withConnection def (ServerUnix (fromOsPath handle.socket)) \ connection ->
-        serverStreaming connection (rpc @(Protobuf Executor "events")) defMessage (receiveAll pid)
-
-    receiveAll pid recv =
-      recv >>= \case
-        NextElem message -> do
-          traverse_ (publish pid) (Aeson.decodeStrict' message.payload)
-          receiveAll pid recv
-        NoNextElem -> pure ()
-
-    publish pid status = emitEvent env.instrChan ExecutorUpdate {executor = executorId, pid, status}
-
-    announceGone = do
-      current <- Map.lookup executorId . (.executors) <$> readMVar env.stateVar
-      unless (any (\ newer -> newer.incarnation > handle.incarnation) current) $
-        emitEvent env.instrChan ExecutorGone {executor = executorId}
 
 -- | Send one evaluation to an executor via its @Execute@ RPC.
 callExecutor :: ExecutorHandle -> ProcessEvalConfig -> IO ProcessEvalOutput

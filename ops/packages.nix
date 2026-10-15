@@ -402,6 +402,7 @@
           "ghc"
           "ghc-compact"
           "ghc-server"
+          "ghc-worker"
           "ghc-worker-test-common"
           "hedgehog"
           "process"
