@@ -10,6 +10,7 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT, runExceptT, throwE)
 import Data.Text qualified as Text
 import Data.Text.Encoding (encodeUtf8)
+import GhcClient.Listen (ListenConfig, listen, listenParser)
 import GhcServer.Data.Config (ClientConfig (..))
 import GhcServer.Data.Request (ExecutorSelection (..))
 import Types.Api (ExecutorId (..))
@@ -27,8 +28,10 @@ import Options.Applicative (
   flag,
   fullDesc,
   header,
+  command,
   help,
   helper,
+  hsubparser,
   info,
   long,
   many,
@@ -75,9 +78,21 @@ executorParser =
       "unit" -> Right ExecutorPerUnit
       other -> Left ("Invalid executor scheme: " ++ other ++ " (supported: unit)")
 
-clientParserInfo :: ParserInfo ClientConfig
+data Command =
+  Build ClientConfig
+  |
+  Listen ListenConfig
+
+-- | The @listen@ subcommand streams events; without a subcommand, targets are scheduled for building.
+commandParser :: Parser Command
+commandParser =
+  hsubparser (command "listen" (info (Listen <$> listenParser) (progDesc "Print events streamed by the server")))
+  <|>
+  Build <$> clientConfigParser
+
+clientParserInfo :: ParserInfo Command
 clientParserInfo =
-  info (clientConfigParser <**> helper) (fullDesc <> progDesc desc <> header "CLI for ghc-server")
+  info (commandParser <**> helper) (fullDesc <> progDesc desc <> header "CLI for ghc-server")
   where
     desc = "Send build commands to ghc-server"
 
@@ -143,4 +158,6 @@ runClient = do
   hSetBuffering stdout LineBuffering
   hSetBuffering stderr LineBuffering
   config <- execParser clientParserInfo
-  either die pure =<< runExceptT (client config)
+  case config of
+    Build clientConfig -> either die pure =<< runExceptT (client clientConfig)
+    Listen listenConfig -> listen listenConfig
