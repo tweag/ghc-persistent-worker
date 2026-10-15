@@ -35,7 +35,7 @@ import GHC.Utils.Outputable (ppr, showPprUnsafe, text, (<+>))
 import GHC.Utils.Panic (throwGhcExceptionIO)
 import GHC.Utils.TmpFs (TmpFs, cleanCurrentModuleTempFiles, keepCurrentModuleTempFiles)
 import Internal.Compat.GHC914 (hscModuleGraph)
-import Internal.Compile.Phase (withPhaseEvents)
+import Internal.Compile.Phase (withPhaseEvents, withTaskEvents)
 import Internal.Compile.TopEnv (patchTopEnv, withCaptureTopEnv)
 import Internal.Debug (pprModuleFull)
 import Internal.Error (eitherMessagesIO, noteGhc)
@@ -140,7 +140,7 @@ compileModuleWithDepsInHpt logger events target =
   logTimedD logger "Compiling" do
     initializeSessionPlugins
     hsc_env <- getSession
-    hmi <- liftIO do
+    hmi <- liftIO $ withTaskEvents logger events target do
       summary <- ensureSummary logger hsc_env target
       (hsc_env', captured) <- prepareCapture hsc_env
       result <- compileOne (withPhaseEvents events target hsc_env') (forceRecomp summary) 1 100000 Nothing (HomeModLinkable Nothing Nothing)

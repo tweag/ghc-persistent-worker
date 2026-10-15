@@ -327,6 +327,17 @@ eventsNoop =
     publish = \ _ -> pure ()
   }
 
+-- | Drop the 'CompileStart' and 'CompileEnd' events, for callers that report task boundaries themselves.
+eventsWithoutTasks :: Events -> Events
+eventsWithoutTasks events =
+  Events {
+    publish = \ event ->
+      case event (RequestId 0) of
+        CompileStart {} -> pure ()
+        CompileEnd {} -> pure ()
+        _ -> events.publish event
+  }
+
 eventsForRequest :: RequestId -> (Event -> IO ()) -> Events
 eventsForRequest requestId publish =
   Events {

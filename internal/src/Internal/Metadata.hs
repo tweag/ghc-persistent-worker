@@ -6,7 +6,8 @@ import Control.Concurrent (modifyMVar, readMVar)
 import Control.Monad (unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Maybe (MaybeT (..))
-import Data.Foldable (for_)
+import Data.Foldable (for_, traverse_)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.List.NonEmpty (toList)
 import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Set as Set
@@ -40,6 +41,7 @@ import Internal.State.UnitIndex (restoreUnitIndex)
 import System.Directory (createDirectoryIfMissing)
 import qualified System.File.OsPath as OsPath
 import System.OsPath.Extra (toOsPath)
+import Types.Api (Event (..), Events (..), targetFromWorkerSpec)
 import Types.Args (Args (..), buildPlanAll)
 import Types.BuildPlan (BuildPlan (..))
 import Types.BuildPlan.Incremental (BuildPlanPath (..))
@@ -178,8 +180,9 @@ writeMetadata settings args@Args {buildPlan = path, sourceHashes, incrementalSta
 --
 -- Before downsweep, we also create a fresh @Finder@ to prevent 'doMkDependHS' from polluting the cache with entries
 -- with different compilation ways and restore the previous unit env so dependencies are visible.
-computeMetadata :: Env -> IO (Bool, Maybe TargetSpec)
-computeMetadata env = do
+computeMetadata :: Events -> Env -> IO (Bool, Maybe TargetSpec)
+computeMetadata events env = do
+  started <- newIORef Nothing
   res <- runMaybeT do
     () <- MaybeT $ runSession env \ _ -> do
       dflags <- getSessionDynFlags
@@ -192,6 +195,10 @@ computeMetadata env = do
         (unit, staticUnits) <- prepareSession dflags
         let target = TargetUnit (UnitTarget unit)
         liftIO $ env.log.setTarget target
+        liftIO do
+          writeIORef started (Just target)
+          for_ (targetFromWorkerSpec target) \ uiTarget ->
+            events.publish \ requestId -> CompileStart {target = uiTarget, debuggable = False, process = False, requestId}
         module_graph <- do
           settings <- dynamicSettings env.state
           writeMetadata settings env.args env.log staticUnits (fst <$> srcs)
@@ -203,6 +210,19 @@ computeMetadata env = do
             env.log.debug ("Creating stubdir: " ++ stubdir)
             createDirectoryIfMissing False stubdir
         pure (Just target)
+  readIORef started >>= traverse_ \ spec -> do
+    logged <- env.log.peek
+    for_ (targetFromWorkerSpec spec) \ uiTarget ->
+      events.publish \ requestId ->
+        CompileEnd {
+          target = uiTarget,
+          exitCode = if isJust res then 0 else 1,
+          stderr = unlines logged,
+          result = Nothing,
+          processStats = Nothing,
+          noMain = False,
+          requestId
+        }
   logMemStats "after metadata" env.log
   pure (isJust res, res)
   where

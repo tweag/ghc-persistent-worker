@@ -91,7 +91,7 @@ runMetadata env mkArgs unit = do
   for_ args.buildPlan \ (BuildPlanPath bp) ->
     createDirectoryIfMissing True (takeDirectory bp)
   runBuildTask env "metadata" (unitTmpDir unit.key) [] \ taskEnv -> do
-    fst <$> computeMetadata taskEnv {args = args {ghcOptions = args.ghcOptions ++ srcFiles}}
+    fst <$> computeMetadata eventsNoop taskEnv {args = args {ghcOptions = args.ghcOptions ++ srcFiles}}
 
 compileTarget :: ModuleKey -> ModuleTarget
 compileTarget key =

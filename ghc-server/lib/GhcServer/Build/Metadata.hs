@@ -16,7 +16,7 @@ import Internal.Metadata (computeMetadata)
 import Prelude hiding (log)
 import System.OsPath (OsPath, osp, (</>))
 import System.OsPath.Extra (fromOsPath, toOsPath)
-import Types.Api (UnitName (..))
+import Types.Api (UnitName (..), eventsNoop)
 import Types.Args (Args (..))
 import Types.BuildPlan.Incremental (BuckHashesPath (..), BuildPlanPath (..), IncrementalStatePath (..))
 import Types.CachedDeps (CachedBuildPlans)
@@ -108,7 +108,7 @@ runMetadata buildEnv unit0 = do
             state = buildEnv.stateVar,
             args = args {ghcOptions = args.ghcOptions ++ sourcePaths}
           }
-      ifM (fst <$> computeMetadata env) (success unit (Just cachedPlans) args logger) (failure logger)
+      ifM (fst <$> computeMetadata eventsNoop env) (success unit (Just cachedPlans) args logger) (failure logger)
 
     -- Feed the Phase 0 source digests to the core's incremental metadata path.  Without a diff
     -- entry (e.g. metadata triggered outside a classified batch), no hashes are passed and the

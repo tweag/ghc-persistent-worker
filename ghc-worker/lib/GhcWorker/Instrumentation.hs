@@ -4,26 +4,13 @@ import Common.Grpc (GrpcHandler (..))
 import Control.Concurrent (MVar, modifyMVar, modifyMVar_, readMVar)
 import Control.Concurrent.Chan (Chan, writeChan)
 import Control.Exception (bracket_)
-import Data.Foldable (for_, traverse_)
-import Data.Int (Int32)
 import GhcWorker.Grpc (mkStats, pushBytecodeState)
 import GhcWorker.LogEvents (instrumentLoggerWith)
 import Internal.Log (dbg)
 import Prelude hiding (log)
-import Types.Api (
-  Event (..),
-  Events (..),
-  ProcessStats,
-  RequestId,
-  Target,
-  eventsForRequest,
-  eventsNoop,
-  targetFromWorkerSpec,
-  )
-import Types.BuckArgs (BuckArgs (..))
+import Types.Api (Event (..), Events (..), ProcessStats, RequestId, Target, eventsForRequest, eventsNoop)
 import Types.Log (Logger)
 import Types.State (WorkerState)
-import Types.Target (TargetSpec)
 
 -- | Rudimentary dummy state for instrumentation, counting concurrently compiling sessions.
 data WorkerStatus =
@@ -42,15 +29,6 @@ startRequest var =
 -- | Callbacks passed to GHC request handlers that trigger instrumentation events.
 data Hooks =
   Hooks {
-    -- | A module compilation is started.
-    -- If it can be determined at this point, the argument contains the file name.
-    -- This is not available in multiplexer mode.
-    compileStart :: BuckArgs -> Maybe TargetSpec -> IO (),
-
-    -- | A module compilation has finished.
-    -- If the job was successful, the argument contains 'Just' the stderr lines and the exit code, otherwise 'Nothing'.
-    compileFinish :: Maybe (Maybe TargetSpec, [String], Int32) -> IO (),
-
     -- | Hook for publishing instrumentation events.
     events :: Events,
 
@@ -63,8 +41,6 @@ data Hooks =
 hooksNoop :: Hooks
 hooksNoop =
   Hooks {
-    compileStart = const (const (pure ())),
-    compileFinish = const (pure ()),
     events = eventsNoop,
     instrumentLogger = const id
   }
@@ -132,29 +108,6 @@ finishJob var = do
     dbg ("Finishing job, now " ++ show new ++ " active")
     pure ws {active = new}
 
--- | Construct a grapesy message for a "compilation started" event.
-messageCompileStart :: BuckArgs -> Target -> RequestId -> Event
-messageCompileStart _args target requestId =
-  CompileStart {
-    target,
-    debuggable = True,
-    process = False,
-    requestId
-  }
-
--- | Construct a grapesy message for a "compilation finished" event.
-messageCompileEnd :: Target -> Int32 -> [String] -> RequestId -> Event
-messageCompileEnd target exitCode output requestId =
-  CompileEnd {
-    target,
-    exitCode = fromIntegral exitCode,
-    stderr = unlines output,
-    result = Nothing,
-    processStats = Nothing,
-    noMain = False,
-    requestId
-  }
-
 -- | Run a 'GrpcHandler' with instrumentation enabled.
 --
 -- This consists of adapting the active job count and sending messages to the gRPC client running the instrumentation
@@ -172,8 +125,6 @@ withInstrumentation instrChan status stateVar handler =
     bracket_ (startJob status) (finishJob status) do
       requestId <- startRequest status
       let hooks = Hooks {
-            compileStart = compileStart requestId,
-            compileFinish = compileFinish requestId,
             events = eventsForRequest requestId (writeChan instrChan),
             instrumentLogger = instrumentLoggerWith (writeChan instrChan)
           }
@@ -183,16 +134,6 @@ withInstrumentation instrChan status stateVar handler =
       writeChan instrChan stats
       pushBytecodeState stateVar instrChan
       pure result
-  where
-    compileStart requestId =
-      \ args -> traverse_ \ spec ->
-        for_ (targetFromWorkerSpec spec) \ target ->
-          writeChan instrChan $ messageCompileStart args target requestId
-
-    compileFinish requestId =
-      traverse_ \ (spec, output, exitCode) -> do
-        for_ (targetFromWorkerSpec =<< spec) \ target ->
-          writeChan instrChan $ messageCompileEnd target exitCode output requestId
 
 -- | Construct a 'GrpcHandler' by passing functioning 'Hooks' to an 'InstrumentedHandler' if the third argument contains
 -- 'Just' a message channel, or passing no-op 'Hooks' otherwise.

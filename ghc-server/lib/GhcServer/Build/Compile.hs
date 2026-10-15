@@ -13,7 +13,7 @@ import Prelude hiding (log)
 import System.Directory.OsPath (createDirectoryIfMissing)
 import System.OsPath ((</>))
 import System.OsPath.Extra (toOsPath)
-import Types.Api (RequestId, UnitName (..), eventsForRequest)
+import Types.Api (RequestId, UnitName (..), eventsForRequest, eventsWithoutTasks)
 import Types.Args (Args (..))
 import Types.BuckArgs (IsInterpreted (..))
 import Types.CachedDeps (CachedDeps)
@@ -85,7 +85,7 @@ compileSingleModule buildEnv unit modName cachedDeps requestId = do
     withGhcMakeModule Compiled target env Nothing \ _targetSpec ->
       compileModuleWithDepsInHpt
         logger
-        (eventsForRequest requestId (emitEvent buildEnv.instrChan))
+        (eventsWithoutTasks (eventsForRequest requestId (emitEvent buildEnv.instrChan)))
         (TargetModule target)
   pure $ case result of
     Just _ -> ([], captured)

@@ -21,14 +21,21 @@ import GHC.Driver.DynFlags (GhcMode (..))
 import GHC.Driver.Monad (reflectGhc, reifyGhc)
 import GHC.Utils.Outputable (text)
 import GhcWorker.CompileResult (CompileResult (..), usedDepFiles, writeResult)
-import GhcWorker.Instrumentation (EvalReport (..), Hooks (..), InstrumentedHandler (..), failedEval, publishEvent, reportEval)
+import GhcWorker.Instrumentation (
+  EvalReport (..),
+  Hooks (..),
+  InstrumentedHandler (..),
+  failedEval,
+  publishEvent,
+  reportEval,
+  )
 import Internal.AbiHash (AbiHash (..), showAbiHash)
 import Internal.Compile.Make (compileModuleWithDepsInHpt)
 #ifdef GHC_DEBUG
 import Internal.Debug (debugSocketPath)
 #endif
-import Internal.DynFlags (modifyGlobalFlags)
 import Data.Foldable (for_)
+import Internal.DynFlags (modifyGlobalFlags)
 import qualified Internal.Evaluate
 import Internal.Log (newLogger)
 import Internal.Metadata (computeMetadata)
@@ -37,6 +44,7 @@ import Prelude hiding (log)
 import System.IO (stdout)
 import System.IO.Silently (hCapture)
 import System.OsPath.Extra (fromOsPath)
+import Types.Api (targetFromWorkerSpec)
 import Types.Args (Args (..))
 import qualified Types.BuckArgs
 import Types.BuckArgs (BuckArgs, IsInterpreted (..), Mode (..), checkModuleTarget, parseBuckArgs, toGhcArgs)
@@ -44,7 +52,6 @@ import Types.Env (Env (..))
 import Types.Grpc (RequestArgs (..))
 import Types.Log (Logger (..), TraceId, newLog)
 import Types.State (WorkerState (..))
-import Types.Api (targetFromWorkerSpec)
 import Types.Target (TargetSpec (..), renderTargetSpec)
 
 #if defined(GBC)
@@ -76,12 +83,10 @@ import Internal.State (dumpState)
 compileAndReadAbiHash ::
   GhcMode ->
   (TargetSpec -> Ghc (Maybe ModIface)) ->
-  Hooks ->
   BuckArgs ->
   TargetSpec ->
   Ghc (Maybe CompileResult)
-compileAndReadAbiHash ghcMode compile hooks args target = do
-  liftIO $ hooks.compileStart args (Just target)
+compileAndReadAbiHash ghcMode compile args target = do
   modifyGlobalFlags \ d -> d {ghcMode}
   compile target >>= traverse \ iface -> do
     hsc_env <- getSession
@@ -110,7 +115,7 @@ dispatch hooks env args =
           writeResult args abiHash depFiles
           pure (0, Just target)
     Just ModeMetadata -> do
-      (success, target) <- computeMetadata env
+      (success, target) <- computeMetadata hooks.events env
       pure (if success then 0 else 1, target)
     Just ModeEval -> do
       mModTarget <- checkModuleTarget args
@@ -149,7 +154,7 @@ dispatch hooks env args =
       Nothing ->
         withGhcMakeSource env (withTarget compileHpt . TargetSource)
 
-    compileHpt = compileAndReadAbiHash CompManager (compileModuleWithDepsInHpt env.log hooks.events) hooks args
+    compileHpt = compileAndReadAbiHash CompManager (compileModuleWithDepsInHpt env.log hooks.events) args
 
     eval mname modTarget expr = do
       case mname of
@@ -216,23 +221,19 @@ dispatch hooks env args =
 #endif
 
 processResult ::
-  Hooks ->
   Logger ->
   MVar WorkerState ->
   Either IOError (Int32, Maybe TargetSpec) ->
   IO ([String], Int32)
-processResult hooks logger _stateVar result = do
+processResult logger _stateVar result = do
 #if __DEBUG__
   when (exitCode /= 0) do
     dumpState logger _stateVar _exception
 #endif
   output <- logger.flush
-  hooks.compileFinish (hookPayload output)
   pure (output, exitCode)
   where
-    hookPayload output = Just (target, output, exitCode)
-
-    ((exitCode, target), _exception) = case result of
+    ((exitCode, _target), _exception) = case result of
       Right out -> (out, Nothing)
       Left err -> ((1, Nothing), Just ("Exception: " ++ show err))
 
@@ -263,7 +264,7 @@ ghcHandler state traceId =
       log.debug (unlines (coerce argv))
       let env = Env {log, state, args = args}
       dispatch hooks env buckArgs
-    processResult hooks log state result
+    processResult log state result
   where
     parseError msg =
       throwIO (userError ("Parsing Buck args failed: " ++ msg))
