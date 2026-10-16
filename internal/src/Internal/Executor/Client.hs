@@ -8,13 +8,13 @@ module Internal.Executor.Client where
 import BuckWorkerProto ()
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (MVar, newMVar, readMVar)
-import Control.Exception (SomeException, throwIO, try)
+import Control.Exception (SomeException, displayException, throwIO, try)
 import Control.Monad (unless, void, when)
-import Data.Aeson (ToJSON)
 import qualified Data.Aeson as Aeson
 import Data.Bifunctor (first)
 import Data.ByteString (toStrict)
 import Data.Foldable (traverse_)
+import Data.Functor ((<&>))
 import qualified Data.Map.Strict as Map
 import Data.Text (pack)
 import Network.GRPC.Client (Server (..), rpc, withConnection)
@@ -37,7 +37,7 @@ import System.Process (
   waitForProcess,
   )
 import Types.Api (Event (..), ExecutorId)
-import Types.ProcessEval (ProcessEvalOutput (..))
+import Types.Executor.Protocol (CallError (..), CallResult, ExecutorCall)
 import Types.State (WorkerState (..))
 import Types.State.Executor (ExecutorHandle (..), emptyExecutorLoaded)
 
@@ -80,19 +80,18 @@ awaitExecutor handle =
             True -> pure ()
             False -> threadDelay 100_000 >> check (n - 1)
 
--- | Send one JSON-encoded call to an executor via its @Execute@ RPC.
-callExecutorJson :: ToJSON a => ExecutorHandle -> a -> IO ProcessEvalOutput
+-- | Send one call to an executor via its @Execute@ RPC, as JSON.
+callExecutorJson :: ExecutorHandle -> ExecutorCall -> IO (Either CallError CallResult)
 callExecutorJson handle call =
-  withConnection def (ServerUnix (fromOsPath handle.socket)) \ connection -> do
-    output <- nonStreaming connection (rpc @(Protobuf Executor "execute")) message
-    pure ProcessEvalOutput {
-      result = first decodeError (Aeson.eitherDecodeStrict' output.payload),
-      processStderr = ""
-    }
+  try @SomeException exchange <&> \case
+    Left err -> Left (Unreachable (pack (displayException err)))
+    Right result -> first (Undecodable . pack) result
   where
-    message = defMessage & Fields.payload .~ toStrict (Aeson.encode call)
+    exchange =
+      withConnection def (ServerUnix (fromOsPath handle.socket)) \ connection ->
+        Aeson.eitherDecodeStrict' . (.payload) <$> nonStreaming connection (rpc @(Protobuf Executor "execute")) message
 
-    decodeError err = "Could not decode the executor result: " <> pack err
+    message = defMessage & Fields.payload .~ toStrict (Aeson.encode call)
 
 -- | Close the executor's stdin (which makes it exit on its own), terminate it for good measure, reap it and remove
 -- its socket.

@@ -26,12 +26,12 @@ import GhcServer.Build.Compile (compileSingleModule)
 import GhcServer.Build.Executor (callExecutor, ensureExecutor, respawnExecutor, terminateExecutor)
 import GhcServer.Build.Metadata (runMetadata)
 import GhcServer.Build.Process (spawnProcessEval)
+import Internal.Log (newLogger)
+import Types.Log (newLog)
+import Types.Executor.Protocol (displayCallError)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
-import Types.ProcessEval (EvalOutcome (..), ProcessEvalOutput (..), ProcessEvalResult (..))
-import GhcServer.Data.ProcessEval (
-  ExecutorCall (..),
-  ProcessEvalConfig (..),
-  )
+import Types.Executor.Protocol (CallError, CallResult (..), Captured (..), EvalOutcome (..))
+import GhcServer.Data.ProcessEval (ProcessEvalConfig (..))
 import GhcServer.Data.Unit (Project (..))
 import GhcServer.Data.UnitConfig (UnitConfig (..))
 import Hedgehog (TestT, annotate, assert, property, test, withTests, (===))
@@ -107,10 +107,8 @@ test_subprocessExecute =
       then annotate ("skipping: running under ghcid/ghci (executable is " ++ selfPath ++ ", not ghc-server-test)")
       else do
         (_, cfg) <- compiledProject "ghc-server-subprocess"
-        output <- liftIO (spawnProcessEval (toOsPath selfPath) cfg)
-        annotate ("subprocess stderr: " ++ Text.unpack output.processStderr)
-        output.processStderr === ""
-        checkOutput output
+        logger <- liftIO (newLogger <$> newLog Nothing)
+        checkOutput =<< liftIO (spawnProcessEval (toOsPath selfPath) logger cfg)
   where
     testName = "execute module in a fresh subprocess restoring cached state" :: TestName
 
@@ -135,13 +133,13 @@ compiledProject tempName = do
   unless (null mainErrs) (fail ("Main compile failed: " ++ show mainErrs))
   pure (buildEnv, ProcessEvalConfig {projectRoot = toOsPath tp.root, unit, moduleName = "Main", sharedBytecodePath = Nothing})
 
-checkOutput :: ProcessEvalOutput -> TestT IO ()
+checkOutput :: Either CallError CallResult -> TestT IO ()
 checkOutput output = do
-  result <- either (fail . Text.unpack) pure output.result
+  result <- either (fail . displayCallError) pure output
   annotate ("subprocess log: " ++ show result.logMessages)
-  annotate ("eval stdout: " ++ Text.unpack result.evalStdout)
-  annotate ("eval stderr: " ++ Text.unpack result.evalStderr)
-  result.outcome === EvalSuccess (Just "hello from subprocess")
+  annotate ("eval stdout: " ++ Text.unpack result.captured.stdout)
+  annotate ("eval stderr: " ++ Text.unpack result.captured.stderr)
+  result.outcome === Right (EvalSucceeded (Just "hello from subprocess"))
 
 -- | Spawn a persistent executor, run the same module in it twice, check that the second call reuses the same
 -- process, and terminate it. Like 'test_subprocessExecute', this relaunches the test binary (in @executor@ mode, see
@@ -235,12 +233,12 @@ test_executorPlanExecute =
               _ <- ensureExecutor buildEnv executorId
               options <- executorGhcOptions buildEnv cfg.unit
               transport <- payloadTransport buildEnv
-              executePlanned ExecutePlan transport buildEnv.stateVar executorId options [] root "main" EntryString
-            planned = either (fail . show) pure
+              executePlanned transport buildEnv.stateVar executorId options [] root "main" EntryString
+            planned = either (fail . displayCallError) pure
             sentModules plan = showHomeModuleId . (.home) <$> plan.modules
-            check (plan, output) = do
+            check (plan, result) = do
               annotate ("plan: " ++ show (sentModules plan))
-              checkOutput output
+              checkOutput (Right result)
         first <- planned =<< liftIO run
         check first
         length (sentModules (fst first)) === 2

@@ -20,7 +20,7 @@ import Control.Concurrent.MVar (MVar, readMVar)
 import Data.Foldable (for_)
 import qualified Data.Text as Text
 import GHC.Utils.Outputable (text)
-import GhcWorker.Executor.Plan (PlanError (..), displayPlanError, executePlanned)
+import GhcWorker.Executor.Plan (executePlanned, needsRespawn)
 import GhcWorker.Instrumentation (EvalReport (..), failedEval)
 import Internal.Executor.Client (rtsArgs, spawnExecutorWith)
 import Internal.Executor.Lifecycle (ExecutorEnv (..), executorSocketName)
@@ -34,7 +34,14 @@ import Types.Api (Event, ExecutorId (..))
 import Types.ExecutorPlan (EntryKind, ExecutorPlan)
 import Types.Log (Logger (..))
 import Types.Settings (Settings (..))
-import Types.ProcessEval (EvalOutcome (..), ProcessEvalOutput (..), ProcessEvalResult (..))
+import Types.Executor.Protocol (
+  CallError,
+  CallResult (..),
+  Captured (..),
+  EvalOutcome (..),
+  SetupError,
+  displayCallError,
+  )
 import Types.State (WorkerState (..))
 import Types.State.Executor (ExecutorHandle (..), HomeModuleId)
 import Types.ExecutorPlan (PayloadTransport (..))
@@ -78,14 +85,7 @@ executorEnv emit stateVar = do
   rts <- (.settings.executorRts) <$> readMVar stateVar
   pure ExecutorEnv {stateVar, emit, spawn = spawnExecutor rts}
 
-type PlannedOutput = Either PlanError (ExecutorPlan, ProcessEvalOutput)
-
--- | Whether the executor couldn't be reached or its session has incompatible options.
-needsRespawn :: PlannedOutput -> Bool
-needsRespawn = \case
-  Left (ExecutorUnreachable _) -> True
-  Right (_, ProcessEvalOutput {result = Right ProcessEvalResult {outcome = EvalOptionsMismatch _}}) -> True
-  _ -> False
+type PlannedOutput = Either CallError (ExecutorPlan, CallResult)
 
 -- | Run the entry of a module in the executor, starting or restarting it if necessary, forward the output and
 -- determine whether the evaluation succeeded.
@@ -104,7 +104,7 @@ runInExecutor ::
   IO EvalReport
 runInExecutor emit logger stateVar executorId options env root entry kind = do
   transport <- payloadTransport
-  let execute = executePlanned id transport stateVar executorId options env root entry kind
+  let execute = executePlanned transport stateVar executorId options env root entry kind
   executorEnv_ <- executorEnv emit stateVar
   seen <- Lifecycle.ensureExecutor executorEnv_ executorId
   first <- execute
@@ -117,22 +117,20 @@ runInExecutor emit logger stateVar executorId options env root entry kind = do
 -- | Forward the executor's output to the logger and convert the outcome.
 reportResult :: Logger -> PlannedOutput -> IO EvalReport
 reportResult logger = \case
-  Left err -> pure (failedEval (displayPlanError err))
-  Right (_, output) -> case output.result of
-    Left err -> pure (failedEval (Text.unpack err))
-    Right result -> do
-      logger.infoD (text (Text.unpack result.evalStdout))
-      logger.infoD (text (Text.unpack result.evalStderr))
-      for_ result.logMessages (logger.info . Text.unpack)
-      report <- outcomeResult logger result.outcome
-      pure EvalReport {outcome = report.outcome, result = report.result, stats = Just result.stats}
+  Left err -> pure (failedEval (displayCallError err))
+  Right (_, result) -> do
+    logger.infoD (text (Text.unpack result.captured.stdout))
+    logger.infoD (text (Text.unpack result.captured.stderr))
+    for_ result.logMessages (logger.info . Text.unpack)
+    report <- outcomeResult logger result.outcome
+    pure EvalReport {outcome = report.outcome, result = report.result, stats = Just result.stats}
 
-outcomeResult :: Logger -> EvalOutcome -> IO EvalReport
+outcomeResult :: Logger -> Either SetupError EvalOutcome -> IO EvalReport
 outcomeResult logger = \case
-  EvalSuccess mResult -> do
+  Right (EvalSucceeded mResult) -> do
     for_ mResult (logger.info . Text.unpack)
     pure EvalReport {outcome = Right True, result = Text.unpack <$> mResult, stats = Nothing}
-  EvalExecuteFailed err -> pure (failedEval (Text.unpack err))
+  Right (EvalFailed err) -> pure (failedEval (Text.unpack err))
   other -> pure (failedEval ("Executor failed: " ++ show other))
 
 #endif

@@ -24,10 +24,10 @@ import Types.State.Executor (ExecutorLoaded (..), HomeModuleId, LoadedModule (..
 
 #if defined(GBC)
 
+import Data.Text (pack)
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, readMVar, withMVar)
-import Control.Exception (IOException, SomeException, displayException, try)
+import Control.Exception (IOException, try)
 import Control.Monad (unless)
-import Data.Aeson (ToJSON)
 import Data.List (nub)
 import qualified Data.ByteString as ByteString
 import Data.ByteString (ByteString)
@@ -47,6 +47,7 @@ import Internal.Executor.Client (callExecutorJson)
 import Internal.Executor.GbcBuffer (encodeByteCode)
 import Internal.Executor.PayloadArena (appendPayload, ensureArena)
 import Types.ExecutorPlan (
+  Entry (..),
   EntryKind,
   ExecutorPlan (..),
   ExtraLib (..),
@@ -54,7 +55,12 @@ import Types.ExecutorPlan (
   PayloadTransport (..),
   PlanRequest (..),
   )
-import Types.ProcessEval (EvalOutcome (..), ProcessEvalOutput (..), ProcessEvalResult (..))
+import Types.Executor.Protocol (
+  CallError (..),
+  CallResult (..),
+  ExecutorCall (..),
+  SetupError (..),
+  )
 import System.Directory (createDirectoryIfMissing, getFileSize, getModificationTime)
 import System.FilePath ((</>))
 import Types.Api (ExecutorId)
@@ -348,54 +354,41 @@ resetLoaded stateVar executorId =
 
 -- | The wire request for a plan.
 planRequest :: [String] -> [(String, String)] -> HomeModuleId -> String -> EntryKind -> ExecutorPlan -> PlanRequest
-planRequest ghcOptions env (unit, name) entry entryKind plan =
+planRequest ghcOptions env (unit, name) binding kind plan =
   PlanRequest {
     ghcOptions,
     units = unitIdString <$> plan.units,
     payloads = (.payload) <$> plan.modules,
     generation = plan.generation,
     extraLibs = plan.extraLibs,
-    entryUnit = unitIdString unit,
-    entryModule = moduleNameString name,
-    entry,
-    entryKind,
+    entry = Entry {unit = unitIdString unit, module_ = moduleNameString name, name = binding, kind},
     env
   }
 
 -- | Whether the executor's loaded state is still what the parent recorded after a call.
-planApplied :: ProcessEvalOutput -> Bool
-planApplied output =
-  case output.result of
-    Right ProcessEvalResult {outcome = EvalLoadFailed _} -> False
-    Right ProcessEvalResult {outcome = EvalOptionsMismatch _} -> False
-    Right ProcessEvalResult {outcome = EvalConfigInvalid _} -> False
-    Right _ -> True
-    Left _ -> False
+planApplied :: CallResult -> Bool
+planApplied result =
+  case result.outcome of
+    Left (LoadFailed _) -> False
+    Left (OptionsMismatch _) -> False
+    Left (InvalidCall _) -> False
+    _ -> True
 
--- | Why 'executePlanned' produced no executor output.
-data PlanError =
-  -- | The plan couldn't be computed, e.g. because a module has no bytecode. Nothing was sent.
-  PlanUnavailable String
-  |
-  -- | The call failed, e.g. because the executor died.
-  ExecutorUnreachable String
-  deriving stock (Eq, Show)
-
-displayPlanError :: PlanError -> String
-displayPlanError = \case
-  PlanUnavailable err -> "No bytecode plan: " ++ err
-  ExecutorUnreachable err -> "Executor unreachable: " ++ err
+-- | Whether the executor couldn't be reached or its session has incompatible options, so that it has to be
+-- respawned.
+needsRespawn :: Either CallError (ExecutorPlan, CallResult) -> Bool
+needsRespawn = \case
+  Left (Unreachable _) -> True
+  Right (_, CallResult {outcome = Left (OptionsMismatch _)}) -> True
+  _ -> False
 
 -- | Plan an execution of the root module's entry on the registered executor, send it and return the plan with the
--- executor's output.
+-- executor's result.
 -- If the executor fails to link the plan (or can't be reached), the recorded loaded set is reset with
 -- 'resetLoaded', so that the next execution resends the whole closure with newer linkable times.
 -- Planning and sending are serialized per executor with the handle's @calls@ lock, since a plan only contains the
 -- modules missing from the loaded set recorded by earlier plans, which the executor must have received beforehand.
 executePlanned ::
-  ToJSON call =>
-  -- | Wraps the request in the payload type that the executor decodes.
-  (PlanRequest -> call) ->
   PayloadTransport ->
   MVar WorkerState ->
   ExecutorId ->
@@ -405,22 +398,22 @@ executePlanned ::
   HomeModuleId ->
   String ->
   EntryKind ->
-  IO (Either PlanError (ExecutorPlan, ProcessEvalOutput))
-executePlanned wrap transport stateVar executorId ghcOptions env root entry kind =
+  IO (Either CallError (ExecutorPlan, CallResult))
+executePlanned transport stateVar executorId ghcOptions env root entry kind =
   lookupCalls >>= \case
-    Nothing -> pure (Left (PlanUnavailable ("Executor not registered: " ++ show executorId)))
+    Nothing -> pure (Left (PlanUnavailable ("Executor not registered: " <> pack (show executorId))))
     Just calls -> withMVar calls \ () -> planAndCall
   where
     lookupCalls = fmap (.calls) . Map.lookup executorId . (.executors) <$> readMVar stateVar
 
     planAndCall =
       prepareExecution transport stateVar executorId root >>= \case
-        Left err -> pure (Left (PlanUnavailable err))
+        Left err -> pure (Left (PlanUnavailable (pack err)))
         Right (handle, plan) ->
-          try @SomeException (callExecutorJson handle (wrap (planRequest ghcOptions env root entry kind plan))) >>= \case
-            Left err -> Left (ExecutorUnreachable (displayException err)) <$ resetLoaded stateVar executorId
-            Right output -> do
-              unless (planApplied output) (resetLoaded stateVar executorId)
-              pure (Right (plan, output))
+          callExecutorJson handle (CallPlan (planRequest ghcOptions env root entry kind plan)) >>= \case
+            Left err -> Left err <$ resetLoaded stateVar executorId
+            Right result -> do
+              unless (planApplied result) (resetLoaded stateVar executorId)
+              pure (Right (plan, result))
 
 #endif

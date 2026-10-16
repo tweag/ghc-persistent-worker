@@ -38,11 +38,11 @@ import System.OsPath.Extra (OsPath)
 import Types.Api (ExecutorStatus (..), ProcessStats (..))
 import Types.ExecutorPlan (PlanRequest)
 import Types.Log (Logger (..), newLog)
-import Types.ProcessEval (EvalOutcome (..), ProcessEvalResult (..))
+import Types.Executor.Protocol (CallResult (..), Captured (..), EvalOutcome, ExecutorCall (..), SetupError (..))
 
 -- | Assemble the result of a call: the captured output, the log messages and the executor's RTS stats.
-finishResult :: Logger -> Text -> Text -> EvalOutcome -> IO ProcessEvalResult
-finishResult logger evalStdout evalStderr outcome = do
+finishResult :: Logger -> Captured -> Either SetupError EvalOutcome -> IO CallResult
+finishResult logger captured outcome = do
   logger.debug ("Evaluation result: " <> show outcome)
   logMessages <- fmap pack <$> logger.flush
   -- 'max_mem_in_use_bytes'/'max_live_bytes' are only updated when a GC actually runs; a short-lived subprocess
@@ -51,9 +51,8 @@ finishResult logger evalStdout evalStderr outcome = do
   -- In a persistent executor, these are peaks over the executor's entire lifetime, not just this call.
   performMajorGC
   rtsStats <- getRTSStats
-  pure ProcessEvalResult {
-    evalStdout,
-    evalStderr,
+  pure CallResult {
+    captured,
     logMessages,
     outcome,
     stats = ProcessStats {
@@ -62,18 +61,18 @@ finishResult logger evalStdout evalStderr outcome = do
     }
   }
 
--- | The result for a payload that could not be decoded.
-payloadInvalidResult :: String -> IO ProcessEvalResult
-payloadInvalidResult err = do
+-- | The result for a call that could not be run.
+setupFailure :: SetupError -> IO CallResult
+setupFailure err = do
   logger <- newLogger <$> newLog Nothing
-  finishResult logger "" "" (EvalConfigInvalid (pack err))
+  finishResult logger Captured {stdout = "", stderr = ""} (Left err)
 
 -- | Run a bytecode plan, capturing stdout and stderr.
-planResult :: PlanSessionVar -> PlanRequest -> IO ProcessEvalResult
+planResult :: PlanSessionVar -> PlanRequest -> IO CallResult
 planResult planVar plan = do
   logger <- newLogger <$> newLog Nothing
-  (evalStderr, (evalStdout, outcome)) <- hCapture [IO.stderr] (capture (executePlan planVar plan))
-  finishResult logger (pack evalStdout) (pack evalStderr) outcome
+  (stderr, (stdout, outcome)) <- hCapture [IO.stderr] (capture (executePlan planVar plan))
+  finishResult logger Captured {stdout = pack stdout, stderr = pack stderr} outcome
 
 -- | Interval between two status snapshots published by 'statusEvents', in microseconds.
 statusIntervalUs :: Int
@@ -101,7 +100,7 @@ statusEvents active _ callback =
     threadDelay statusIntervalUs
 
 -- | Handle one @Execute@ call: pass the payload to the handler while holding the lock and encode the result.
-executeCall :: IORef Int -> MVar () -> (ByteString -> IO ProcessEvalResult) -> Proto Encoded -> IO (Proto Encoded)
+executeCall :: IORef Int -> MVar () -> (ByteString -> IO CallResult) -> Proto Encoded -> IO (Proto Encoded)
 executeCall active lock handler request = do
   -- Counted outside the lock, so that calls waiting for it are included.
   result <- bracket_ (bump 1) (bump (-1)) (withMVar lock \ () -> handler request.payload)
@@ -118,7 +117,7 @@ awaitStdinEof =
 
 -- | Serve the @Executor@ service on the given socket with a handler for the payloads of @Execute@ calls, until stdin
 -- closes.
-serveExecutor :: OsPath -> (ByteString -> IO ProcessEvalResult) -> IO ()
+serveExecutor :: OsPath -> (ByteString -> IO CallResult) -> IO ()
 serveExecutor socket handler = do
   lock <- newMVar ()
   active <- newIORef 0
@@ -128,16 +127,21 @@ serveExecutor socket handler = do
 executorMethods ::
   IORef Int ->
   MVar () ->
-  (ByteString -> IO ProcessEvalResult) ->
+  (ByteString -> IO CallResult) ->
   Methods IO (ProtobufMethodsOf Executor)
 executorMethods active lock handler =
   simpleMethods
     (mkServerStreaming (statusEvents active))
     (mkNonStreaming (executeCall active lock handler))
 
--- | Entry point of the worker's @executor@ CLI mode: serve JSON-encoded 'PlanRequest's.
+-- | Entry point of the worker's @executor@ CLI mode: serve JSON-encoded 'ExecutorCall's.
+-- Module calls are only supported by the @ghc-server@'s executors.
 runPlanExecutor :: OsPath -> IO ()
 runPlanExecutor socket = do
   planVar <- newPlanSessionVar
   serveExecutor socket \ payload ->
-    either payloadInvalidResult (planResult planVar) (Aeson.eitherDecodeStrict' payload)
+    either (setupFailure . InvalidCall . pack) (dispatch planVar) (Aeson.eitherDecodeStrict' payload)
+  where
+    dispatch planVar = \case
+      CallPlan plan -> planResult planVar plan
+      CallModule _ -> setupFailure (Unsupported "The worker's executors only run bytecode plans")

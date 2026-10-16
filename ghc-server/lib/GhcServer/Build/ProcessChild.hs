@@ -5,7 +5,7 @@
 -- Everything in this module runs only in the child: it decodes the 'ProcessEvalConfig' passed on argv,
 -- rebuilds a minimal 'GhcServer.Data.BuildEnv.BuildEnv' from scratch around the one unit being executed,
 -- restores that unit's module map from the on-disk cache the parent's compile step already wrote, runs
--- 'GhcServer.Build.Execute.executeModuleTask', and writes exactly one JSON-encoded 'ProcessEvalResult' to
+-- 'GhcServer.Build.Execute.executeModuleTask', and writes exactly one JSON-encoded 'CallResult' to
 -- stdout before exiting. It never prints operational messages to the real stdout\/stderr; those are captured
 -- and folded into the result instead.
 module GhcServer.Build.ProcessChild where
@@ -34,9 +34,10 @@ import GhcServer.Data.ProcessEval (
   ProcessEvalOptions (..),
   )
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitCache)
-import Types.ProcessEval (EvalOutcome (..), ProcessEvalResult (..))
-import GhcWorker.Executor.Child (finishResult)
+import Types.Executor.Protocol (CallResult, Captured (..), EvalOutcome (..), SetupError (..))
+import GhcWorker.Executor.Child (finishResult, setupFailure)
 import GhcServer.Path (outputDirName, tmpDirName)
+import Internal.Log (newLogger)
 import Internal.State (newState, updateMakeStateVar)
 import Prelude hiding (log)
 import System.Directory.OsPath (createDirectoryIfMissing)
@@ -44,13 +45,12 @@ import qualified System.IO as IO
 import System.IO.Silently (capture, hCapture)
 import System.Mem (performMajorGC)
 import System.OsPath.Extra (OsPath, fromOsPath, (</>))
-import Test.Log (newTestLog)
 import Test.Data.Scheduler (TaskResult (..))
-import Types.Api (ModuleName (..), ProcessStats (..), UnitName (..), toGhcModuleName)
+import Types.Api (ModuleName (..), UnitName (..), toGhcModuleName)
 import qualified Types.Args as Args
 import Types.Args (emptyArgs)
 import Types.CachedDeps (CachedBuildPlan (..), CachedBuildPlans (..), CachedUnit (..), JsonFs (..))
-import Types.Log (Logger (..), debugT)
+import Types.Log (Logger (..), debugT, newLog)
 import Types.Settings (defaultSettings)
 import Types.State (WorkerState)
 import Types.State.Make (MakeState (..))
@@ -97,17 +97,17 @@ loadTransitiveModuleMap outputDir name unitCache =
 -- cross-unit imports resolve to cached interfaces instead of leaving the HPT missing them -- see
 -- 'loadTransitiveModuleMap'), and run 'GhcServer.Build.Execute.executeModuleTask'. All progress reporting goes
 -- to the given logger; the outcome is returned rather than written anywhere.
-runEval :: Logger -> MVar WorkerState -> ProcessEvalConfig -> IO EvalOutcome
+runEval :: Logger -> MVar WorkerState -> ProcessEvalConfig -> IO (Either SetupError EvalOutcome)
 runEval logger stateVar ProcessEvalConfig {projectRoot, unit, moduleName, sharedBytecodePath} = do
   debugT logger ("Evaluating " <> moduleName.text <> " in unit " <> unit.name.text)
   runExceptT (loadTransitiveModuleMap outputDir unit.name unit.cache) >>= \case
-    Left err -> pure (EvalCacheUnreadable err)
-    Right Nothing -> pure EvalCacheMissing
+    Left err -> pure (Left (CacheUnreadable err))
+    Right Nothing -> pure (Left CacheMissing)
     Right (Just moduleMap) -> do
       buildEnv <- childBuildEnv
       let ext = emptyBuildExt {moduleMap}
       traverse_ (installBytecodeImport buildEnv) sharedBytecodePath
-      outcome <$> executeModuleTask buildEnv ext unit (toGhcModuleName moduleName) 0 Nothing
+      Right . outcome <$> executeModuleTask buildEnv ext unit (toGhcModuleName moduleName) 0 Nothing
   where
     -- Restore mirrored bytecode from shared memory (if any was exported by the parent) into
     -- 'Types.State.Make.MakeState.bytecodeImport', so 'Internal.State.Linkables.addLazyByteCode' can rehydrate it
@@ -125,9 +125,9 @@ runEval logger stateVar ProcessEvalConfig {projectRoot, unit, moduleName, shared
           debugT logger "Could not restore bytecode from shared memory; falling back to cached interfaces"
 
     outcome = \case
-      Just (TaskSuccess payload) -> EvalSuccess payload
-      Just (TaskFailed msg) -> EvalExecuteFailed (pack msg)
-      Nothing -> EvalNoMain
+      Just (TaskSuccess payload) -> EvalSucceeded payload
+      Just (TaskFailed msg) -> EvalFailed (pack msg)
+      Nothing -> EvalNoEntry
 
     outputDir = projectRoot </> outputDirName
     tmpDir = projectRoot </> tmpDirName
@@ -170,21 +170,20 @@ resolveConfig = \case
     Aeson.eitherDecodeStrict' <$> ByteString.getContents
 
 -- | Run one evaluation against the given 'Types.State.WorkerState' with a fresh in-memory logger, capturing the
--- stdout and stderr of everything it does, and assemble the 'ProcessEvalResult'.
-evalResult :: MVar WorkerState -> ProcessEvalConfig -> IO ProcessEvalResult
+-- stdout and stderr of everything it does, and assemble the 'CallResult'.
+evalResult :: MVar WorkerState -> ProcessEvalConfig -> IO CallResult
 evalResult stateVar config = do
-  (logger, _) <- newTestLog
-  (evalStderr, (evalStdout, outcome)) <- hCapture [IO.stderr] (capture (runEval logger stateVar config))
-  finishResult logger (pack evalStdout) (pack evalStderr) outcome
+  logger <- newLogger <$> newLog Nothing
+  (stderr, (stdout, outcome)) <- hCapture [IO.stderr] (capture (runEval logger stateVar config))
+  finishResult logger Captured {stdout = pack stdout, stderr = pack stderr} outcome
 
--- | The result for a config that could not be decoded.
-configInvalidResult :: String -> IO ProcessEvalResult
-configInvalidResult err = do
-  (logger, _) <- newTestLog
-  finishResult logger "" "" (EvalConfigInvalid (pack err))
+-- | The result for a call whose config could not be decoded.
+configInvalidResult :: String -> IO CallResult
+configInvalidResult =
+  setupFailure . InvalidCall . pack
 
 -- | Run in the one-shot child process: evaluate the config read from a file or stdin against a fresh
--- 'Types.State.WorkerState' and write the single JSON-encoded 'ProcessEvalResult' to the restored stdout.
+-- 'Types.State.WorkerState' and write the single JSON-encoded 'CallResult' to the restored stdout.
 --
 -- The exit code is deliberately not part of the protocol: the child always exits successfully once it has
 -- emitted a result, so a nonzero exit code unambiguously means it crashed before doing so.

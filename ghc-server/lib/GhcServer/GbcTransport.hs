@@ -80,11 +80,10 @@ import GhcServer.Build.BytecodeMirror (
   )
 import Internal.Executor.Client (awaitExecutor, rtsArgs, spawnExecutorWith, stopExecutor)
 import Internal.Executor.Load (planLinkables)
-import GhcWorker.Executor.Plan (displayPlanError, executePlanned, showHomeModuleId)
+import GhcWorker.Executor.Plan (executePlanned, showHomeModuleId)
 import Internal.Executor.PayloadArena (payloadSegmentPath, removeSegment)
 import Types.ExecutorPlan (EntryKind (..), ExecutorPlan (..), PayloadTransport (..), PlannedModule (..))
-import GhcServer.Data.ProcessEval (ExecutorCall (..))
-import Types.ProcessEval (EvalOutcome (..), ProcessEvalOutput (..), ProcessEvalResult (..))
+import Types.Executor.Protocol (CallResult (..), Captured (..), EvalOutcome (..), displayCallError)
 import Internal.Session (simpleSessionWithDebugLog)
 import Internal.State (newState)
 import Internal.State.Make (storeModuleGraphNodes)
@@ -313,17 +312,17 @@ spawnRegistered stateVar options = do
 -- | Run one round and check its result and the number of sent modules, returning whether both match.
 round_ :: MVar WorkerState -> GbcTransportOptions -> PayloadTransport -> String -> Int -> Int -> IO Bool
 round_ stateVar options transport label offset expectedSent = do
-  (result, seconds) <- timed (executePlanned ExecutePlan transport stateVar executorId transportOptions [] root "entry" EntryString)
+  (result, seconds) <- timed (executePlanned transport stateVar executorId transportOptions [] root "entry" EntryString)
   putStrLn ("[" ++ label ++ "] seconds: " ++ show seconds)
   case result of
-    Left err -> False <$ putStrLn ("[" ++ label ++ "] failed: " ++ displayPlanError err)
+    Left err -> False <$ putStrLn ("[" ++ label ++ "] failed: " ++ displayCallError err)
     Right (plan, output) -> do
       let sent = showHomeModuleId . (.home) <$> plan.modules
-          value = either ("undecodable: " ++) outcomeValue (describe output)
+          value = outcomeValue output
       putStrLn ("[" ++ label ++ "] generation " ++ show plan.generation ++ ", sent: " ++ show sent)
       putStrLn ("[" ++ label ++ "] result: " ++ value)
       traverse_ (putStrLn . (("[" ++ label ++ "] child stderr: ") ++)) (childStderr output)
-      traverse_ (putStrLn . ((("[" ++ label ++ "] child heap: ") ++) . describeStats) . (.stats)) output.result
+      putStrLn ("[" ++ label ++ "] child heap: " ++ describeStats output.stats)
       childRss stateVar >>= traverse_ (putStrLn . ((("[" ++ label ++ "] child ") ++)))
       childMappings stateVar >>= traverse_ (putStrLn . ((("[" ++ label ++ "] map ") ++)))
       let ok = value == show (expectedEntry options.functions offset) && length sent == expectedSent
@@ -333,17 +332,13 @@ round_ stateVar options transport label offset expectedSent = do
   where
     root = (stringToUnitId "unit1", mkModuleName "Entry")
 
-    describe output = either (Left . unpack) Right output.result
-
     outcomeValue r =
       case r.outcome of
-        EvalSuccess (Just v) -> unpack v
+        Right (EvalSucceeded (Just v)) -> unpack v
         other -> show other
 
-    childStderr output =
-      case output.result of
-        Right r | not (Text.null r.evalStderr) -> Just (unpack r.evalStderr)
-        _ -> Nothing
+    childStderr r =
+      if Text.null r.captured.stderr then Nothing else Just (unpack r.captured.stderr)
 
 describeStats :: ProcessStats -> String
 describeStats s =

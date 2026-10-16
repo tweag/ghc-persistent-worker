@@ -12,8 +12,8 @@ module Internal.Executor.Load where
 
 import Data.IORef (IORef, newIORef)
 import Data.Text (Text)
-import Types.ExecutorPlan (PlanRequest (..))
-import Types.ProcessEval (EvalOutcome (..))
+import Types.Executor.Protocol (EvalOutcome (..), SetupError (..))
+import Types.ExecutorPlan (Entry (..), PlanRequest (..))
 
 #if defined(GBC)
 
@@ -107,18 +107,18 @@ runInSession session job = do
   either (Left . pack . displayException) Right <$> takeMVar result
 
 -- | The session for the request's options, started on first use.
--- A session can't change its options, so a request with different ones is answered with 'EvalOptionsMismatch',
+-- A session can't change its options, so a request with different ones is answered with 'OptionsMismatch',
 -- upon which the parent respawns the executor.
-ensurePlanSession :: PlanSessionVar -> [String] -> IO (Either EvalOutcome PlanSession)
+ensurePlanSession :: PlanSessionVar -> [String] -> IO (Either SetupError PlanSession)
 ensurePlanSession var options =
   readIORef var >>= \case
     Just session
       | session.options == options -> pure (Right session)
-      | otherwise -> pure (Left (EvalOptionsMismatch "The executor's session was started with different GHC options"))
+      | otherwise -> pure (Left (OptionsMismatch "The executor's session was started with different GHC options"))
     Nothing ->
       startPlanSession options >>= \case
         Right session -> Right session <$ writeIORef var (Just session)
-        Left err -> pure (Left (EvalLoadFailed err))
+        Left err -> pure (Left (LoadFailed err))
 
 -- | Load the native libraries the session hasn't loaded yet.
 loadExtraLibs :: PlanSession -> HscEnv -> [ExtraLib] -> IO ()
@@ -166,17 +166,17 @@ runPlan session env0 request =
       loadExtraLibs session env0 request.extraLibs
       linkables <- decodePayloads session env0 request
       let env = env0 {hsc_linkables = \ _ _ -> pure (planLinkables linkables (stringToUnitId <$> request.units))}
-      name <- lookupNameCache env.hsc_NC entryModule (mkVarOcc request.entry)
+      name <- lookupNameCache env.hsc_NC entryModule (mkVarOcc request.entry.name)
       (fhv, _, _) <- loadName interp env name
       pure (env, fhv)
 
     runEntry fhv = do
       for_ request.env (uncurry setEnv)
-      either (EvalExecuteFailed . pack . displayException) id <$> try @SomeException case request.entryKind of
-        EntryIO -> EvalSuccess Nothing <$ evalIO interp fhv
-        EntryString -> EvalSuccess . Just . pack <$> evalString interp fhv
+      either (EvalFailed . pack . displayException) id <$> try @SomeException case request.entry.kind of
+        EntryIO -> EvalSucceeded Nothing <$ evalIO interp fhv
+        EntryString -> EvalSucceeded . Just . pack <$> evalString interp fhv
 
-    entryModule = mkModule (stringToUnit request.entryUnit) (mkModuleName request.entryModule)
+    entryModule = mkModule (stringToUnit request.entry.unit) (mkModuleName request.entry.module_)
 
     interp = hscInterp env0
 
@@ -191,20 +191,20 @@ flushInterpHandles env =
     (fhv, _, _) <- loadName (hscInterp env) env name
     evalIO (hscInterp env) fhv
 -- | Serve a plan request in the executor's session.
-executePlan :: PlanSessionVar -> PlanRequest -> IO EvalOutcome
+executePlan :: PlanSessionVar -> PlanRequest -> IO (Either SetupError EvalOutcome)
 executePlan var request =
   ensurePlanSession var request.ghcOptions >>= \case
-    Left outcome -> pure outcome
+    Left err -> pure (Left err)
     Right session ->
       runInSession session (\ env -> runPlan session env request) >>= \case
-        Left err -> pure (EvalLoadFailed err)
-        Right (Left err) -> pure (EvalLoadFailed err)
-        Right (Right outcome) -> pure outcome
+        Left err -> pure (Left (LoadFailed err))
+        Right (Left err) -> pure (Left (LoadFailed err))
+        Right (Right outcome) -> pure (Right outcome)
 
 #else
 
-executePlan :: PlanSessionVar -> PlanRequest -> IO EvalOutcome
+executePlan :: PlanSessionVar -> PlanRequest -> IO (Either SetupError EvalOutcome)
 executePlan _ _ =
-  pure (EvalLoadFailed ("Bytecode plans require a GHC with the GBC backport" :: Text))
+  pure (Left (LoadFailed ("Bytecode plans require a GHC with the GBC backport" :: Text)))
 
 #endif

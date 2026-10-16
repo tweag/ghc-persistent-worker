@@ -9,7 +9,7 @@
 --
 -- The child's stdio follows a strict protocol: it captures everything the evaluated module writes to stdout and
 -- stderr with 'hCapture', routes its own operational messages into an in-memory logger, and writes exactly one
--- JSON-encoded 'ProcessEvalResult' to stdout before exiting. The parent therefore parses the child's entire
+-- JSON-encoded 'CallResult' to stdout before exiting. The parent therefore parses the child's entire
 -- stdout as a single JSON document and treats any child stderr output as unexpected.
 --
 -- Originally prototyped as a self-contained test (@Test.SubprocessTest@, 'test_subprocessExecute'); this module
@@ -21,8 +21,8 @@ import Control.Exception (SomeException, bracket, displayException, try)
 import Control.Monad (unless)
 import qualified Data.Aeson as Aeson
 import Data.Bifunctor (first)
+import qualified Data.ByteString.Lazy as Lazy.ByteString
 import Data.Foldable (traverse_)
-import Data.Functor ((<&>))
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as Text
 import Data.Text (pack)
@@ -34,7 +34,14 @@ import GhcServer.Data.ProcessEval (
   ProcessEvalConfig (..),
   )
 import GhcServer.Data.Unit (Unit (..))
-import Types.ProcessEval (EvalOutcome (..), ProcessEvalOutput (..), ProcessEvalResult (..))
+import Types.Executor.Protocol (
+  CallError (..),
+  CallResult (..),
+  Captured (..),
+  EvalOutcome (..),
+  SetupError (..),
+  displayCallError,
+  )
 import GhcServer.Log (instrumentLogger)
 import Internal.State (dynamicFeatureOn)
 import System.Environment (getExecutablePath)
@@ -48,36 +55,38 @@ import Types.Log (Logger (..), debugT)
 import Types.State (WorkerState (..))
 import Types.State.Make (MakeState (..))
 
+-- | Runs one module evaluation in some child process, forwarding unexpected output of the child to the logger.
+type ChildRunner = Logger -> ProcessEvalConfig -> IO (Either CallError CallResult)
+
 -- | Spawn a fresh child process (a relaunch of @selfPath@, typically the current @ghc-server@ executable's own
--- path via 'System.Environment.getExecutablePath') with 'evalProcessFlag' and the JSON-encoded config, and
--- decode its entire stdout as the child's 'ProcessEvalResult'.
-spawnProcessEval :: OsPath -> ProcessEvalConfig -> IO ProcessEvalOutput
-spawnProcessEval selfPath config = do
-  readProcess processConfig <&> \ (_, out, err) ->
-    ProcessEvalOutput {
-      result = first (decodeError out) (Aeson.eitherDecode out),
-      processStderr = fromUtf8Lazy err
-    }
+-- path via 'System.Environment.getExecutablePath') with the JSON-encoded config on stdin, and decode its entire
+-- stdout as the child's 'CallResult'.
+spawnProcessEval :: OsPath -> ChildRunner
+spawnProcessEval selfPath logger config = do
+  (_, out, err) <- readProcess processConfig
+  unless (Lazy.ByteString.null err) do
+    logger.info ("Unexpected subprocess stderr: " ++ Text.unpack (fromUtf8Lazy err))
+  pure (first (decodeError out) (Aeson.eitherDecode out))
   where
     processConfig = setStdin (byteStringInput (Aeson.encode config)) (proc (fromOsPath selfPath) ["eval"])
 
     decodeError out err =
-      "Could not decode the subprocess result: " <> pack err <> "\nstdout: " <> fromUtf8Lazy out
+      Undecodable (pack err <> "\nstdout: " <> fromUtf8Lazy out)
 
 -- | Parent-side entry point used by 'GhcServer.Build.Propagate.dispatchTask' in place of a direct
 -- 'GhcServer.Build.Execute.executeModuleTask' call, when the unit's execute tasks were requested with
 -- @--process@. Spawns a fresh @ghc-server@ subprocess (via 'getExecutablePath', i.e. the currently running
 -- executable) to run exactly this one module's execute task, forwards everything the child recorded to the
 -- parent's logger, and converts the child's 'EvalOutcome' back into a 'TaskResult', alongside the RTS stats
--- the child reported (see 'GhcServer.Data.ProcessEval.ProcessEvalResult'), if the child got far enough to
+-- the child reported (see 'Types.Executor.Protocol.CallResult'), if the child got far enough to
 -- report a result at all.
 executeModuleTaskProcess :: BuildEnv -> Unit -> GHC.ModuleName -> IO (Maybe (TaskResult String), Maybe ProcessStats)
 executeModuleTaskProcess buildEnv =
   executeModuleTaskWith runChild buildEnv
   where
-    runChild config = do
+    runChild logger config = do
       self <- toOsPath <$> getExecutablePath
-      spawnProcessEval self config
+      spawnProcessEval self logger config
 
 -- | Run a module's execute task out of process via the given transport, which sends a 'ProcessEvalConfig' to some
 -- child process and returns its output: either a fresh one-shot subprocess ('executeModuleTaskProcess') or a
@@ -86,7 +95,7 @@ executeModuleTaskProcess buildEnv =
 -- Exports the parent's bytecode to shared memory for the duration of the call, forwards everything the child
 -- recorded to the parent's logger, and converts the child's 'EvalOutcome' into a 'TaskResult'.
 executeModuleTaskWith ::
-  (ProcessEvalConfig -> IO ProcessEvalOutput) ->
+  ChildRunner ->
   BuildEnv ->
   Unit ->
   GHC.ModuleName ->
@@ -126,7 +135,7 @@ executeModuleTaskWith runChild buildEnv unit modName = do
           pure Nothing
 
     spawnProcessEval' sharedBytecodePath =
-      runChild (cfg sharedBytecodePath) >>= outputTaskResult logger
+      runChild logger (cfg sharedBytecodePath) >>= outputTaskResult logger
 
     -- A crash here (process spawn failure, the child being killed, or any other exception thrown by
     -- 'spawnProcessEval') must never escape uncaught: this runs on the scheduler's own thread, and an
@@ -147,38 +156,36 @@ executeModuleTaskWith runChild buildEnv unit modName = do
 
 -- | Forward everything a child recorded to the logger and convert its outcome into a 'TaskResult', alongside the
 -- stats it reported.
-outputTaskResult :: Logger -> ProcessEvalOutput -> IO (Maybe (TaskResult String), Maybe ProcessStats)
-outputTaskResult logger output = do
-  unless (Text.null output.processStderr) do
-    logger.info ("Unexpected subprocess stderr: " ++ Text.unpack output.processStderr)
-  case output.result of
-    Left err -> pure (Just (TaskFailed (Text.unpack err)), Nothing)
-    Right result -> do
-      traverse_ (debugT logger) result.logMessages
-      traverse_ (debugT logger) (capturedOutput result)
-      pure (outcomeTaskResult result, Just result.stats)
+outputTaskResult :: Logger -> Either CallError CallResult -> IO (Maybe (TaskResult String), Maybe ProcessStats)
+outputTaskResult logger = \case
+  Left err -> pure (Just (TaskFailed (displayCallError err)), Nothing)
+  Right result -> do
+    traverse_ (debugT logger) result.logMessages
+    traverse_ (debugT logger) (capturedOutput result)
+    pure (outcomeTaskResult result, Just result.stats)
 
-outcomeTaskResult :: ProcessEvalResult -> Maybe (TaskResult String)
+outcomeTaskResult :: CallResult -> Maybe (TaskResult String)
 outcomeTaskResult result =
   case result.outcome of
-    EvalSuccess payload -> Just (TaskSuccess payload)
-    EvalNoMain -> Nothing
-    EvalExecuteFailed msg -> failed msg
-    EvalConfigInvalid msg -> failed ("Invalid subprocess config: " <> msg)
-    EvalCacheUnreadable msg -> failed ("Could not load the cached unit: " <> msg)
-    EvalCacheMissing -> failed "No cached unit on disk"
-    EvalLoadFailed msg -> failed ("Could not load the bytecode plan: " <> msg)
-    EvalOptionsMismatch msg -> failed ("Executor session mismatch: " <> msg)
+    Right (EvalSucceeded payload) -> Just (TaskSuccess payload)
+    Right EvalNoEntry -> Nothing
+    Right (EvalFailed msg) -> failed msg
+    Left (InvalidCall msg) -> failed ("Invalid subprocess call: " <> msg)
+    Left (CacheUnreadable msg) -> failed ("Could not load the cached unit: " <> msg)
+    Left CacheMissing -> failed "No cached unit on disk"
+    Left (LoadFailed msg) -> failed ("Could not load the bytecode plan: " <> msg)
+    Left (OptionsMismatch msg) -> failed ("Executor session mismatch: " <> msg)
+    Left (Unsupported msg) -> failed ("Unsupported call: " <> msg)
   where
     failed msg =
       Just (TaskFailed (Text.unpack (Text.unlines (msg : capturedOutput result))))
 
 -- | The evaluated module's output, as labeled blocks, omitting the streams that stayed empty.
-capturedOutput :: ProcessEvalResult -> [Text.Text]
+capturedOutput :: CallResult -> [Text.Text]
 capturedOutput result =
   [
     label <> ":\n" <> text
-    | (label, text) <- [("Subprocess stdout", result.evalStdout), ("Subprocess stderr", result.evalStderr)]
+    | (label, text) <- [("Subprocess stdout", result.captured.stdout), ("Subprocess stderr", result.captured.stderr)]
     , not (Text.null text)
   ]
 

@@ -11,23 +11,27 @@ import Control.Concurrent.MVar (MVar)
 import qualified Data.Aeson as Aeson
 import Data.ByteString (ByteString)
 import GhcServer.Build.ProcessChild (configInvalidResult, evalResult)
-import GhcServer.Data.ProcessEval (ExecutorCall (..))
 import GhcWorker.Executor.Child (planResult, serveExecutor)
 import Internal.Executor.Load (PlanSessionVar, newPlanSessionVar)
 import Internal.State (newState)
 import System.OsPath.Extra (OsPath)
-import Types.ProcessEval (ProcessEvalResult)
+import Types.Executor.Protocol (CallResult, ExecutorCall (..))
 import Types.Settings (defaultSettings)
 import Types.State (WorkerState)
 
 -- | Evaluate one encoded 'ExecutorCall' against the executor's persistent state.
-dispatchCall :: MVar WorkerState -> PlanSessionVar -> ByteString -> IO ProcessEvalResult
+dispatchCall :: MVar WorkerState -> PlanSessionVar -> ByteString -> IO CallResult
 dispatchCall stateVar planVar payload =
   either configInvalidResult dispatch (Aeson.eitherDecodeStrict' payload)
   where
     dispatch = \case
-      ExecuteModule config -> evalResult stateVar config
-      ExecutePlan plan -> planResult planVar plan
+      CallModule value -> either configInvalidResult (evalResult stateVar) (decodeConfig value)
+      CallPlan plan -> planResult planVar plan
+
+    decodeConfig value =
+      case Aeson.fromJSON value of
+        Aeson.Error err -> Left err
+        Aeson.Success config -> Right config
 
 -- | Entry point of the @executor@ CLI mode: serve the @Executor@ service on the given socket until stdin closes.
 runExecutor :: OsPath -> IO ()

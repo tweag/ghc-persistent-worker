@@ -102,6 +102,18 @@ data EntryKind =
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
+-- | The binding that an executor runs after linking a plan.
+data Entry =
+  Entry {
+    unit :: String,
+    module_ :: String,
+    -- | The unqualified name of the binding.
+    name :: String,
+    kind :: EntryKind
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
 -- | The wire form of an 'ExecutorPlan' plus the entry point, sent to a persistent executor.
 -- The child needs neither hashes nor dependencies, since the parent orders the payloads and tracks what is loaded.
 data PlanRequest =
@@ -116,10 +128,7 @@ data PlanRequest =
     generation :: Int,
     -- | Native libraries to load before linking; the child skips those it loaded before.
     extraLibs :: [ExtraLib],
-    entryUnit :: String,
-    entryModule :: String,
-    entry :: String,
-    entryKind :: EntryKind,
+    entry :: Entry,
     -- | Environment variables to set in the child process before running the entry.
     env :: [(String, String)]
   }

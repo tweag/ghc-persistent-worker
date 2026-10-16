@@ -126,7 +126,7 @@ targetFromWorkerSpec = \case
   _ -> Nothing
 
 -- | RTS memory-usage stats reported by a subprocess execute task's child process (see
--- 'GhcServer.Data.ProcessEval.ProcessEvalResult'), taken from 'GHC.Stats.RTSStats' right before the child
+-- 'Types.Executor.Protocol.CallResult'), taken from 'GHC.Stats.RTSStats' right before the child
 -- exits.
 data ProcessStats =
   ProcessStats {

@@ -10,12 +10,13 @@ module GhcServer.Build.Executor where
 
 import BuckWorkerProto ()
 import Control.Concurrent.MVar (modifyMVar, modifyMVar_, readMVar)
+import qualified Data.Aeson as Aeson
 import Data.Foldable (traverse_)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (isJust)
 import qualified Data.Text as Text
 import GhcServer.Data.BuildEnv (BuildEnv (..))
-import GhcServer.Data.ProcessEval (ExecutorCall (..), ProcessEvalConfig)
+import GhcServer.Data.ProcessEval (ProcessEvalConfig)
 import GhcServer.Log (emitEvent)
 import GhcServer.Path (socketDirName)
 import Internal.Executor.Client (callExecutorJson, rtsArgs, spawnExecutorWith, stopExecutor)
@@ -25,7 +26,7 @@ import System.Directory.OsPath (createDirectoryIfMissing)
 import System.Environment (getExecutablePath)
 import System.OsPath.Extra (OsPath, toOsPath, (</>))
 import Types.Api (ExecutorId (..), ProcessStats (..))
-import Types.ProcessEval (ProcessEvalOutput (..))
+import Types.Executor.Protocol (CallError, CallResult, ExecutorCall (..))
 import Types.State (WorkerState (..))
 import Types.State.Executor (ExecutorHandle (..))
 
@@ -58,13 +59,9 @@ respawnExecutor =
   Lifecycle.respawnExecutor . executorEnv
 
 -- | Send one evaluation to an executor via its @Execute@ RPC.
-callExecutor :: ExecutorHandle -> ProcessEvalConfig -> IO ProcessEvalOutput
+callExecutor :: ExecutorHandle -> ProcessEvalConfig -> IO (Either CallError CallResult)
 callExecutor handle config =
-  callExecutorWith handle (ExecuteModule config)
-
--- | Send one 'ExecutorCall' to an executor via its @Execute@ RPC.
-callExecutorWith :: ExecutorHandle -> ExecutorCall -> IO ProcessEvalOutput
-callExecutorWith = callExecutorJson
+  callExecutorJson handle (CallModule (Aeson.toJSON config))
 
 -- | Terminate the persistent executor subprocess identified by 'ExecutorId', if one is running, and remove it
 -- from 'WorkerState.executors'. Returns whether an executor with that id was registered.
