@@ -4,6 +4,7 @@
   sharedExeOverrides = {modify, hsLibC, ...}: {
     ghc-proxy = modify hsLibC.enableSharedExecutables;
     ghc-worker = modify hsLibC.enableSharedExecutables;
+    ghc-server = modify hsLibC.enableSharedExecutables;
   };
 
   allPackages = value: {
