@@ -27,14 +27,9 @@ library
 
   exposed-modules:
     BuckWorkerProto,
-    BuckWorkerProto.Data.Protocol,
     BuckWorkerProto.Protocol,
     Proto.Worker,
-    Proto.Worker_Fields
-    Proto.Instrument,
-    Proto.Instrument_Fields
-    Proto.GhcServer,
-    Proto.GhcServer_Fields
+    Proto.Worker_Fields,
     Proto.Executor,
     Proto.Executor_Fields
   build-depends:

@@ -5,7 +5,6 @@ import Common.Grpc (GrpcHandler (..))
 import Control.Concurrent.Chan (newChan)
 import Control.Concurrent.MVar (modifyMVar_, newMVar, readMVar)
 import Control.Concurrent.STM (atomically, modifyTVar')
-import Control.Exception (SomeException (..), displayException, fromException, try)
 import Control.Monad (filterM, join, when)
 import Control.Monad.Extra (whenMaybe)
 import Data.IORef (newIORef)
@@ -15,7 +14,6 @@ import Data.Map.Strict (Map, (!?))
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 import Data.Text (Text)
-import Data.Text.Encoding (decodeUtf8Lenient)
 import GHC (ModuleName, mkModuleName, moduleNameString)
 import GhcServer.Build (Build (..), BuildResult (..), awaitBuild, newBuild, newBuildState, scheduleBatch)
 import GhcServer.Build.Schedule (BuildExt (..), ModuleKey (..), TaskKey (..), TaskValue, emptyBuildExt, taskUnit)
@@ -32,12 +30,8 @@ import GhcServer.Log (emitLog, newLogger)
 import GhcServer.Path (cacheDirName, outputDirName, tmpDirName)
 import GhcServer.Project (discoverProject)
 import Internal.State (newState)
-import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
 import Prelude hiding (log)
-import Proto.GhcServer qualified as GS
-import Proto.GhcServer_Fields qualified as Fields
 import System.Directory.OsPath (doesDirectoryExist, removeDirectoryRecursive)
-import System.Exit (ExitCode (..), exitSuccess)
 import System.OsPath (OsPath, (</>))
 import System.OsPath.Extra (toOsPath)
 import Test.Data.Scheduler (SchedulerResources (..), SchedulerState (..))
@@ -46,7 +40,7 @@ import Types.Api (ApiResponse (..), ExecutorId (..), HomeModule (..), Target (..
 import qualified Types.Args as Args
 import Types.Args (emptyArgs)
 import Types.FeatureFlags (Feature (..))
-import Types.Grpc (CommandEnv (..), RequestArgs (..))
+import Types.Grpc (RequestArgs (..))
 import Types.Log (Logger (..))
 import Types.Settings (featureOn)
 import Types.State (WorkerState (executors, settings))
@@ -255,8 +249,8 @@ buildEnv config outputDir tmpDir project log = do
     executorRts = config.executorRts
   }
 
--- | Everything created at server boot that is needed to serve both the GhcServer protocol and (optionally) the
--- Instrument protocol. 'WorkerState', 'Project', and the instrumentation channel are all reachable through
+-- | Everything created at server boot that is needed to serve the 'Worker' protocol. 'WorkerState', 'Project', and
+-- the instrumentation channel are all reachable through
 -- 'buildEnv' rather than duplicated here.
 data ServerContext =
   ServerContext {
@@ -284,7 +278,7 @@ handle env project build (RequestArgs argv) =
     parseError message = pure ([message], 1)
 
 -- | Create the server context: discovers the project, creates the persistent 'WorkerState' and scheduler, and
--- builds the gRPC handler for the GhcServer protocol.
+-- builds the gRPC handler for the 'Worker' protocol.
 --
 -- Starts the scheduler at boot. Each gRPC request submits a batch and awaits completion.
 -- The scheduler persists across requests, accumulating 'WorkerState' and skipping previously completed tasks.
@@ -314,38 +308,6 @@ grpcHandler = GrpcHandler (const (handle env project build)),
 -- | Create the gRPC handler for the server.
 serverHandler :: ServerConfig -> IO GrpcHandler
 serverHandler config = (.grpcHandler) <$> serverContext config
-
--- | Convert protobuf env entries to 'CommandEnv'.
---
--- Duplicated from 'Common.Grpc.commandEnv' because it's pinned to the Buck 'Worker' protocol's generated
--- 'EnvironmentEntry' type; 'ghc-server' has its own, structurally identical but nominally distinct, generated type.
-commandEnv :: [Proto GS.ExecuteCommand'EnvironmentEntry] -> CommandEnv
-commandEnv =
-  CommandEnv .
-  Map.fromList .
-  fmap \kv -> (fromBs kv.key, fromBs kv.value)
-  where
-    fromBs = Text.unpack . decodeUtf8Lenient
-
--- | Handle an 'Execute' request: run the 'GrpcHandler' against the decoded argv\/env and report the result.
---
--- Duplicated from 'Common.Grpc.execute' for the same reason as 'commandEnv' above.
-executeCommand :: GrpcHandler -> Proto GS.ExecuteCommand -> IO (Proto GS.ExecuteResponse)
-executeCommand handler req = do
-  eres <- try (handler.run (commandEnv req.env) (RequestArgs argv))
-  (output, exitCode) <-
-    case eres of
-      Right (output, exitCode) -> pure (output, exitCode)
-      Left e@(SomeException e') ->
-        case fromException e of
-          Just ExitSuccess -> exitSuccess
-          _ -> pure (["Uncaught exception: " ++ displayException e'], 1)
-  pure $
-    defMessage
-      & Fields.exitCode .~ exitCode
-      & Fields.stderr .~ Text.intercalate "\n" (Text.pack <$> output)
-  where
-    argv = Text.unpack . decodeUtf8Lenient <$> req.argv
 
 -- | Which scope a clean target spec refers to: the whole project, a single unit, or a single module within a
 -- unit. Deliberately a separate, much simpler grammar than 'parseTarget'\/'UnitRequest' -- clean has no notion of
@@ -469,7 +431,7 @@ resetWorkerState env = do
 -- module\/unit was still up to date after its cache was deleted from under it -- see the clean-scoping KB entry).
 --
 -- Dispatched through the unified 'Types.Api.Command' (the @Clean@ constructor) rather than its own gRPC
--- method, since @ghc-server.proto@'s @GhcServer@ service was merged down to just @Execute@\/@Events@\/@Api@ (see
+-- method, since the @Worker@ service in @worker.proto@ only has @Execute@\/@Exec@\/@Events@\/@Api@ (see
 -- 'GhcServer.Grpc.runCommand'). Returns a success flag and human-readable message instead of building a proto
 -- response directly, since that's now 'GhcServer.Grpc''s job (JSON-encoding a 'Types.Api.Response').
 --

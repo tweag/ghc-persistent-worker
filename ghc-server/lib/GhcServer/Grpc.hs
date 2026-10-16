@@ -1,5 +1,6 @@
 module GhcServer.Grpc where
 
+import Common.Grpc (execute, workerMethods)
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (Chan, dupChan, readChan)
 import Control.Concurrent.MVar (MVar, readMVar)
@@ -21,15 +22,15 @@ import GhcServer.Build.Executor (terminateExecutor)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.Request (ExecutorSelection (..), ScheduleRequest (..), UnitRequest (..))
 import GhcServer.Data.Unit (ClientModule (..), Project (..), Unit (..))
-import GhcServer.Handler (ServerContext (..), executeCommand, runClean)
+import GhcServer.Handler (ServerContext (..), runClean)
 import GhcServer.Log (emitEvent)
 import GhcWorker.Grpc qualified as Worker
 import Network.GRPC.Common (NextElem (..))
 import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
 import Network.GRPC.Server.Protobuf (ProtobufMethodsOf)
-import Network.GRPC.Server.StreamType (Methods, mkNonStreaming, mkServerStreaming, simpleMethods)
-import Proto.GhcServer (Encoded, GhcServer)
-import Proto.GhcServer_Fields qualified as Fields
+import Network.GRPC.Server.StreamType (Methods)
+import Proto.Worker (Encoded, Worker)
+import Proto.Worker_Fields qualified as Fields
 import qualified Types.Api as TaskKind
 import Types.Api (
   ApiRequest (..),
@@ -161,7 +162,7 @@ runCommand mchan build env project = \case
 -- @payload@ field, runs it via the supplied dispatcher, and JSON-encodes the resulting 'Response'
 -- back into a response 'GS.Json'. Replaces the former @Instrument@ service's @Send@ RPC\/'GhcWorker.Grpc.handleCommand'
 -- (which was pinned to the now-unused @ApiRequest@\/@CommandResponse@ proto messages); this version is
--- pinned to @ghc-server.proto@'s @Encoded@ message, used for both request and response.
+-- pinned to @worker.proto@'s @Encoded@ message, used for both request and response.
 handleApi ::
   (forall a . ApiRequest a -> IO (ApiResponse a)) ->
   Proto Encoded ->
@@ -173,14 +174,11 @@ handleApi run req = do
     Right (SomeApiRequest cmd) -> Aeson.encode <$> run cmd
   pure (defMessage & Fields.payload .~ LBS.toStrict resp)
 
--- | Assemble the gRPC 'Methods' for the 'GhcServer' service, backed by the persistent state\/scheduler built by
+-- | Assemble the gRPC 'Methods' for the 'Worker' service, backed by the persistent state\/scheduler built by
 -- 'GhcServer.Handler.serverContext'.
---
--- 'ServiceMethods'' generated type family lists RPC methods in alphabetical order, not declaration order --
--- @ghc-server.proto@'s merged service is @'["api", "events", "execute"]@, hence that argument order below.
-serverMethods :: ServerContext -> Methods IO (ProtobufMethodsOf GhcServer)
+serverMethods :: ServerContext -> Methods IO (ProtobufMethodsOf Worker)
 serverMethods ctx =
-  simpleMethods
-    (mkNonStreaming (handleApi (runCommand ctx.buildEnv.instrChan ctx.build ctx.buildEnv ctx.buildEnv.project)))
-    (mkServerStreaming (const (events ctx.buildEnv.project ctx.buildEnv.stateVar ctx.buildEnv.instrChan)))
-    (mkNonStreaming (executeCommand ctx.grpcHandler))
+  workerMethods
+    (handleApi (runCommand ctx.buildEnv.instrChan ctx.build ctx.buildEnv ctx.buildEnv.project))
+    (events ctx.buildEnv.project ctx.buildEnv.stateVar ctx.buildEnv.instrChan)
+    (execute ctx.grpcHandler)

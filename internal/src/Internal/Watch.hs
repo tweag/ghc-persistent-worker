@@ -13,15 +13,12 @@ import System.Directory.OsPath (createDirectoryIfMissing, doesPathExist, listDir
 import System.Environment (lookupEnv)
 import System.FSNotify (Event (..), EventIsDirectory (..), StopListening, WatchManager, watchDir, withManager)
 import System.OsPath.Extra (OsPath, fromOsPath, takeDirectory, takeFileName, toOsPath, (</>))
+import Types.Orchestration (primarySocketName)
 
 -- | Directory in which workers create one subdirectory each, configurable with @WORKER_PATH@.
 workerDirectory :: IO OsPath
 workerDirectory =
   maybe (toOsPath "/tmp/ghc-persistent-worker") toOsPath <$> lookupEnv "WORKER_PATH"
-
--- | Name of a worker's instrumentation socket within its directory.
-instrumentSocketName :: OsPath
-instrumentSocketName = toOsPath "instrument"
 
 -- | Call the action with the path of each directory that is created inside the given directory.
 watchAddedDirs :: WatchManager -> OsPath -> (OsPath -> IO ()) -> IO StopListening
@@ -30,7 +27,7 @@ watchAddedDirs manager dir onAdded =
     Added added _ IsDirectory -> onAdded (toOsPath added)
     _ -> pure ()
 
--- | Call the action once with the instrument socket path of each worker directory, both those that already exist
+-- | Call the action once with the primary server socket path of each worker directory, both those that already exist
 -- and those that are created later.
 -- The socket itself may not exist yet when the action is called; use 'waitForPath'.
 -- The action runs on the watcher thread and must not block.
@@ -43,7 +40,7 @@ watchWorkerSockets dir onSocket = do
     isNew key = atomicModifyIORef' seen \ s -> (Set.insert key s, not (Set.member key s))
     visit workerDir =
       when (not ("log" `isInfixOf` fromOsPath (takeFileName workerDir))) do
-        whenM (isNew (fromOsPath workerDir)) (onSocket (workerDir </> instrumentSocketName))
+        whenM (isNew (fromOsPath workerDir)) (onSocket (workerDir </> primarySocketName))
   withManager \ manager -> do
     _ <- watchAddedDirs manager dir visit
     existing <- listDirectory dir

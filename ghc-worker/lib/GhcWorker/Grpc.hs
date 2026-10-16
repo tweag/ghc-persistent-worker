@@ -1,11 +1,13 @@
 module GhcWorker.Grpc where
 
 import BuckWorkerProto ()
+import Common.Grpc (GrpcHandler, execute, workerMethods)
 import Control.Concurrent.Chan (Chan, dupChan, readChan, writeChan)
 import Control.Concurrent.MVar (MVar, modifyMVar_, readMVar)
 import Control.Monad (forever)
 import Data.Aeson (eitherDecodeStrict, encode)
 import Data.Binary qualified as Binary
+import Data.Foldable (for_)
 import Data.ByteString (toStrict)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Map.Strict qualified as Map
@@ -16,8 +18,8 @@ import Network.GRPC.Common (NextElem (..))
 import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
 import Network.GRPC.Server.Protobuf (ProtobufMethodsOf)
 import Network.GRPC.Server.StreamType (Methods (..), mkNonStreaming, mkServerStreaming, simpleMethods)
-import Proto.Instrument (Encoded, Instrument)
-import Proto.Instrument_Fields qualified as Fields
+import Proto.Worker (Encoded, Worker)
+import Proto.Worker_Fields qualified as Fields
 import Types.Api (
   ApiRequest (..),
   ApiResponse (..),
@@ -50,14 +52,16 @@ mkStats _ = do
       , cpuNs = fromIntegral s.cpu_ns
       }
 
--- | Implementation of a streaming grapesy handler that sends instrumentation statistics pulled from the provided
+-- | Implementation of the @Events@ method: sends instrumentation statistics and events pulled from the provided
 -- channel to the client.
+-- If instrumentation is disabled, the stream ends immediately.
 notifyMe ::
   MVar WorkerState ->
-  Chan Event ->
+  Maybe (Chan Event) ->
   (NextElem (Proto Encoded) -> IO ()) ->
   IO ()
-notifyMe stateVar chan callback = do
+notifyMe _ Nothing callback = callback NoNextElem
+notifyMe stateVar (Just chan) callback = do
   state <- readMVar stateVar
   myChan <- dupChan chan
   stats <- mkStats state
@@ -71,12 +75,8 @@ notifyMe stateVar chan callback = do
         & Fields.payload .~ toStrict (Binary.encode msg)
 
 -- TODO rebuild flag is now duplicated again?
-triggerTask ::
-  MVar WorkerState ->
-  (CommandEnv -> RequestArgs -> IO ()) ->
-  TaskTrigger ->
-  IO (ApiResponse a)
-triggerTask _stateVar _recompile = \case
+triggerTask :: TaskTrigger -> IO (ApiResponse a)
+triggerTask = \case
   TaskTrigger {task = Metadata} ->
     pure (ApiFailure "Cannot trigger metadata")
   TaskTrigger {task = Build _rebuild} ->
@@ -128,10 +128,10 @@ applyEviction stateVar target =
     matches m = homeModuleMatchTarget (homeModuleFromGhc m) target
 
 -- TODO immediately evict instead of scheduling it
-evictBytecode :: MVar WorkerState -> Chan Event -> Target -> IO ()
+evictBytecode :: MVar WorkerState -> Maybe (Chan Event) -> Target -> IO ()
 evictBytecode stateVar chan req = do
   applyEviction stateVar req
-  pushBytecodeState stateVar chan
+  for_ chan (pushBytecodeState stateVar)
 
 -- | Flip a single 'Feature' in 'WorkerState', shared by both 'GhcWorker.Grpc.apiRequest' and
 -- 'GhcServer.Grpc.runCommand'.
@@ -142,14 +142,13 @@ toggleFeature stateVar feature =
 -- | Dispatch a single decoded 'Command' to the appropriate handler, producing the 'Response'
 -- to be JSON-encoded back into the @Send@ RPC's 'Instr.CommandResponse'.
 apiRequest ::
-  Chan Event ->
+  Maybe (Chan Event) ->
   MVar WorkerState ->
-  (CommandEnv -> RequestArgs -> IO ()) ->
   ApiRequest a ->
   IO (ApiResponse a)
-apiRequest chan stateVar recompile = \case
+apiRequest chan stateVar = \case
   TriggerTask trigger ->
-    triggerTask stateVar recompile trigger
+    triggerTask trigger
   EvictBytecode req ->
     ApiSuccess () <$ evictBytecode stateVar chan req
   Clean _ ->
@@ -173,14 +172,16 @@ handleCommand run req = do
     Right (SomeApiRequest cmd) -> encode <$> run cmd
   pure (defMessage & Fields.payload .~ LBS.toStrict resp)
 
--- | A grapesy server that streams instrumentation data from the provided channel and dispatches every other
--- 'Instrument' operation through the unified @Send@ RPC.
-instrumentMethods ::
-  Chan Event ->
+-- | The 'Worker' service of the GHC worker: builds are handled by the 'GrpcHandler', while instrumentation data is
+-- streamed from the provided channel, if there is one, and the remaining API requests are dispatched through the
+-- unified @Api@ method.
+ghcMethods ::
   MVar WorkerState ->
-  (CommandEnv -> RequestArgs -> IO ()) ->
-  Methods IO (ProtobufMethodsOf Instrument)
-instrumentMethods chan stateVar recompile =
-  simpleMethods
-    (mkNonStreaming (handleCommand (apiRequest chan stateVar recompile)))
-    (mkServerStreaming (const (notifyMe stateVar chan)))
+  Maybe (Chan Event) ->
+  GrpcHandler ->
+  Methods IO (ProtobufMethodsOf Worker)
+ghcMethods stateVar chan handler =
+  workerMethods
+    (handleCommand (apiRequest chan stateVar))
+    (notifyMe stateVar chan)
+    (execute handler)

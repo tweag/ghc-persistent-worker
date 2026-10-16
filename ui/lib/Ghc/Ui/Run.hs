@@ -2,12 +2,11 @@ module Ghc.Ui.Run where
 
 import Brick (customMainWithDefaultVty)
 import Brick.BChan (newBChan)
-import BuckWorkerProto.Data.Protocol (Protocol (..))
 import Control.Applicative ((<|>))
 import Control.Concurrent (newMVar, threadDelay)
 import Control.Concurrent.Async.Lifted (async)
 import Control.Exception (IOException, bracket, displayException, try)
-import Control.Monad (filterM, forever, void)
+import Control.Monad (filterM, forever, guard, void)
 import Control.Monad.Catch (finally)
 import Control.Monad.Extra (whenM)
 import Control.Monad.IO.Class (liftIO)
@@ -38,6 +37,7 @@ import System.FSNotify (WatchManager, withManager)
 import System.OsPath (OsPath, osp, (</>))
 import System.OsPath.Extra (toOsPath)
 import System.OsString (isInfixOf)
+import Types.Orchestration (primarySocketName)
 
 newtype WorkerPath =
   WorkerPath { path :: OsPath }
@@ -47,18 +47,14 @@ envWorkerPath :: IO WorkerPath
 envWorkerPath =
   WorkerPath <$> workerDirectory
 
--- | A socket given via @INSTRUMENT_SOCKET@ belongs to a worker, while the default socket in the current directory
--- belongs to a @ghc-server@.
-resolveSocket :: IO (Maybe (Protocol, OsPath))
+-- | A socket given via @INSTRUMENT_SOCKET@, or else the default socket in the current directory if a server is
+-- listening on it.
+resolveSocket :: IO (Maybe OsPath)
 resolveSocket = do
   cwd <- getCurrentDirectory
   fromEnv <- fmap toOsPath <$> lookupEnv "INSTRUMENT_SOCKET"
   defaultUp <- isServerUp (defaultSocketPath cwd)
-  pure (
-    ((ProtocolInstrument,) <$> fromEnv)
-    <|>
-    (if defaultUp then Just (ProtocolGhcServer, defaultSocketPath cwd) else Nothing)
-    )
+  pure (fromEnv <|> (defaultSocketPath cwd <$ guard defaultUp))
 
 runClock :: ServerM ()
 runClock =
@@ -67,9 +63,9 @@ runClock =
     trySendEvent (SetTime time)
     liftIO $ threadDelay 100_000
 
-connectAsync :: Protocol -> OsPath -> ServerM ()
-connectAsync protocol socket =
-  void $ async $ serverConnect protocol Nothing socket
+connectAsync :: OsPath -> ServerM ()
+connectAsync socket =
+  void $ async $ serverConnect Nothing socket
 
 -- | Find already running workers if the socket directory exists, or create the directory otherwise. Reports
 -- a failure creating the directory (e.g. permission denied) to the op log instead of discarding it, since a
@@ -78,8 +74,8 @@ discover :: WorkerPath -> ServerM ()
 discover workers = do
   whenM (liftIO (doesDirectoryExist workers.path)) do
     dirs <- liftIO $ listDirectory workers.path
-    sockets <- liftIO $ filterM doesPathExist [workers.path </> dir </> [osp|instrument|] | dir <- dirs]
-    traverse_ (serverConnect ProtocolInstrument Nothing) sockets
+    sockets <- liftIO $ filterM doesPathExist [workers.path </> dir </> primarySocketName | dir <- dirs]
+    traverse_ (serverConnect Nothing) sockets
   created <- liftIO $ try @IOException (createDirectoryIfMissing True workers.path)
   either createDirFailed pure created
   where
@@ -94,7 +90,7 @@ runWorkerWatcher workers manager = do
       if not (isInfixOf [osp|log|] dir)
       then lower do
         logInfo "Detected new worker"
-        connectAsync ProtocolInstrument (dir </> [osp|instrument|])
+        connectAsync (dir </> primarySocketName)
       else pure ()
 
 withWorkerWatcher ::
@@ -111,9 +107,9 @@ withoutSpecified workers ma = do
   discover workers
   withWorkerWatcher workers ma
 
-withSpecified :: (Protocol, OsPath) -> ServerM a -> ServerM a
-withSpecified (protocol, socket) ma = do
-  connectAsync protocol socket
+withSpecified :: OsPath -> ServerM a -> ServerM a
+withSpecified socket ma = do
+  connectAsync socket
   ma
 
 runBrick :: ServerM ()

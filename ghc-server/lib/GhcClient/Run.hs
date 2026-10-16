@@ -3,9 +3,8 @@
 module GhcClient.Run where
 
 import BuckWorkerProto ()
+import Common.Grpc (sendRequest, waitPoll)
 import Control.Applicative ((<|>))
-import Control.Concurrent (threadDelay)
-import Control.Exception (throwIO, try)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT, runExceptT, throwE)
 import Data.Text qualified as Text
@@ -17,9 +16,8 @@ import Types.Api (ExecutorId (..))
 import GhcServer.Optparse (readPath)
 import GhcServer.Path (socketPath)
 import Internal.Log (dbg)
-import Network.GRPC.Client (Server (..), recvNextOutput, sendFinalInput, withConnection, withRPC)
-import Network.GRPC.Common (Proxy (..), def)
-import Network.GRPC.Common.Protobuf (Proto, Protobuf, defMessage, (&), (.~))
+import Network.GRPC.Client (Server (..))
+import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
 import Options.Applicative (
   Parser,
   ParserInfo,
@@ -45,12 +43,11 @@ import Options.Applicative (
   switch,
   (<**>),
   )
-import Proto.GhcServer (ExecuteCommand, ExecuteResponse, GhcServer)
-import Proto.GhcServer_Fields qualified as Fields
+import Proto.Worker (ExecuteCommand)
+import Proto.Worker_Fields qualified as Fields
 import System.Directory.OsPath (getCurrentDirectory)
 import System.Exit (die)
 import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
-import System.OsPath (OsPath)
 import System.OsPath.Extra (fromOsPath)
 
 -- | CLI argument parser for the client.
@@ -96,34 +93,6 @@ clientParserInfo =
   where
     desc = "Send build commands to ghc-server"
 
--- | Send an 'ExecuteCommand' to the 'GhcServer' service on a new connection and return the response.
-sendExecute :: Server -> Proto ExecuteCommand -> IO (Proto ExecuteResponse)
-sendExecute server request =
-  withConnection def server \ connection ->
-    withRPC connection def (Proxy @(Protobuf GhcServer "execute")) \ call -> do
-      sendFinalInput call request
-      recvNextOutput call
-
--- | Poll the given socket path until 'ghc-server' responds, by repeatedly attempting a real 'sendExecute' call.
--- Retries up to 30 times with 100ms delay (3 seconds total).
-waitPoll :: OsPath -> IO ()
-waitPoll socketP =
-  check maxRetries
-  where
-    maxRetries :: Int
-    maxRetries = 30
-
-    check 0 = throwIO (userError "GHC server didn't respond within 3 seconds")
-    check n =
-      try connect >>= \case
-        Right _ -> pure ()
-        Left (_ :: IOError) -> do
-          threadDelay 100_000
-          check (n - 1)
-
-    -- The part that throws is in 'withConnection', so this has to be executed every time.
-    connect = sendExecute (ServerUnix (fromOsPath socketP)) defMessage
-
 -- | Wait for the server to come online, then send a gRPC request to schedule jobs.
 client :: ClientConfig -> ExceptT String IO ()
 client config = do
@@ -131,7 +100,7 @@ client config = do
   liftIO do
     hPutStrLn stderr ("Connecting to ghc-server at " ++ fromOsPath socket)
     waitPoll socket
-  response <- liftIO $ sendExecute (ServerUnix (fromOsPath socket)) request
+  response <- liftIO $ sendRequest (ServerUnix (fromOsPath socket)) request
   dbg (Text.unpack response.stderr)
   if response.exitCode == 0
   then dbg "Build succeeded."

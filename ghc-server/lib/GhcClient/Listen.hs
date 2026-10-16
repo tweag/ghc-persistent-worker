@@ -4,7 +4,6 @@
 module GhcClient.Listen where
 
 import BuckWorkerProto ()
-import BuckWorkerProto.Data.Protocol (Protocol (..))
 import BuckWorkerProto.Protocol (streamEvents)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (newMVar, withMVar)
@@ -23,15 +22,11 @@ import Network.GRPC.Common (def)
 import Network.GRPC.Common.NextElem (whileNext_)
 import Options.Applicative (
   Parser,
-  ReadM,
-  eitherReader,
   help,
   long,
   metavar,
   option,
   optional,
-  showDefault,
-  value,
   )
 import System.Environment (lookupEnv)
 import System.IO qualified as IO
@@ -51,26 +46,13 @@ import Types.Api (
 
 data ListenConfig =
   ListenConfig {
-    protocol :: Protocol,
     projectRoot :: Maybe OsPath,
     socket :: Maybe OsPath
   }
   deriving stock (Eq, Show)
 
-protocolReader :: ReadM Protocol
-protocolReader =
-  eitherReader \case
-    "ghc-server" -> Right ProtocolGhcServer
-    "instrument" -> Right ProtocolInstrument
-    other -> Left ("Invalid protocol: " ++ other ++ " (supported: ghc-server, instrument)")
-
 listenParser :: Parser ListenConfig
 listenParser = do
-  protocol <-
-    option protocolReader (
-      long "protocol" <> metavar "PROTOCOL" <> value ProtocolGhcServer <> showDefault
-      <> help "Service providing the events: ghc-server or instrument"
-    )
   projectRoot <- optional (option readPath (long "root" <> metavar "PROJECT_ROOT" <> help "Project directory whose ghc-server socket is used"))
   socket <- optional (option readPath (long "socket" <> metavar "SOCKET" <> help "Path to the server's Unix socket; by default, workers are discovered in the worker directory"))
   pure ListenConfig {..}
@@ -124,19 +106,19 @@ retrying n action =
       retrying (n - 1) action
 
 -- | Stream the events of a single socket to the printer until the stream ends.
-streamSocket :: Protocol -> Printer -> Maybe String -> OsPath -> IO ()
-streamSocket protocol printer label socket =
+streamSocket :: Printer -> Maybe String -> OsPath -> IO ()
+streamSocket printer label socket =
   withConnection def (ServerUnix (fromOsPath socket)) \ connection ->
-    streamEvents protocol connection \ recv ->
+    streamEvents connection \ recv ->
       whileNext_ recv \ payload -> printer.emit label (decode (fromStrict payload))
 
 -- | Wait indefinitely for the socket to appear, then stream its events, retrying when connecting fails.
-listenOn :: Protocol -> Printer -> Maybe String -> OsPath -> IO ()
-listenOn protocol printer label socket = do
+listenOn :: Printer -> Maybe String -> OsPath -> IO ()
+listenOn printer label socket = do
   info ("Waiting for socket at " ++ fromOsPath socket)
   waitForPath socket
   info ("Listening for events at " ++ fromOsPath socket)
-  retrying attempts (streamSocket protocol printer label socket)
+  retrying attempts (streamSocket printer label socket)
   info ("Event stream ended at " ++ fromOsPath socket)
 
 info :: String -> IO ()
@@ -154,12 +136,12 @@ listen config = do
   printer <- newPrinter
   resolveSource config >>= \case
     SingleSocket socket ->
-      listenOn config.protocol printer Nothing socket
+      listenOn printer Nothing socket
     WorkerDirectory dir -> do
       info ("Watching for workers in " ++ fromOsPath dir)
       watchWorkerSockets dir \ socket ->
         void $ forkIO $ reportFailure socket $
-          listenOn config.protocol printer (Just (fromOsPath (takeFileName (takeDirectory socket)))) socket
+          listenOn printer (Just (fromOsPath (takeFileName (takeDirectory socket)))) socket
 
 requestTag :: RequestId -> String
 requestTag RequestId {number} = "#" ++ show number

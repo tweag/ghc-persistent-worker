@@ -1,7 +1,6 @@
-{-# LANGUAGE RecursiveDo #-}
 module GhcWorker.Orchestration where
 
-import Common.Grpc (forwardRequest, runGrpcServer, streamingNotImplemented, waitPoll)
+import Common.Grpc (forwardApi, forwardEvents, forwardRequest, runGrpcServer, waitPoll, workerMethods)
 import Control.Concurrent.Async (async, cancel, wait)
 import Control.DeepSeq (force)
 import Control.Exception (bracket_, finally, onException, try)
@@ -14,8 +13,7 @@ import Network.GRPC.Client (Server (..), withConnection)
 import Network.GRPC.Common (def)
 import Network.GRPC.Server.Protobuf (ProtobufMethodsOf)
 import Network.GRPC.Server.StreamType (Methods (..), mkClientStreaming, mkNonStreaming)
-import Proto.Instrument (Instrument (..))
-import Proto.Worker (Worker (..))
+import Proto.Worker (Worker)
 import System.Directory.OsPath (createDirectoryIfMissing, removeFile)
 import System.Exit (exitFailure)
 import System.File.OsPath (withFile)
@@ -24,53 +22,32 @@ import System.OsPath.Extra (encodeUtf, fromOsPath, takeDirectory)
 import qualified System.OsString as OsString
 import System.OsString (dropWhileEnd, unsafeFromChar)
 import System.Process (ProcessHandle, getProcessExitCode)
-import Types.FeatureFlags (Feature (..))
-import Types.Grpc (CommandEnv, RequestArgs (..))
 import Types.Orchestration (
-  InstrumentSocketPath (..),
   PrimarySocketDiscoveryPath (..),
   PrimarySocketPath (..),
   ServerSocketPath (..),
   SocketDirectory (..),
-  instrumentSocketIn,
   primarySocketDiscoveryIn,
   spawnedSocketDirectory,
   )
-import Types.Settings (Settings (..), featureOn)
-
--- | The implementation of an app consisting of two gRPC servers, implementing the protocols 'Worker' and 'Instrument'.
--- The 'Instrument' component is intended to be optional.
-data CreateMethods where
-  CreateMethods :: {
-    createInstrumentation :: (CommandEnv -> RequestArgs -> IO ()) -> IO (instrumentSocket, Methods IO (ProtobufMethodsOf Instrument)),
-    createGhc :: Maybe instrumentSocket -> IO (CommandEnv -> RequestArgs -> IO (), Methods IO (ProtobufMethodsOf Worker))
-  } -> CreateMethods
 
 -- | Start a gRPC server that dispatches requests to GHC handlers.
 runLocalGhc ::
-  CreateMethods ->
+  Methods IO (ProtobufMethodsOf Worker) ->
   ServerSocketPath ->
-  Maybe InstrumentSocketPath ->
   IO ()
-runLocalGhc CreateMethods {..} socket minstr = mdo
+runLocalGhc methods socket = do
   dbg ("Starting ghc server on " ++ fromOsPath socket.path)
-  instrResource <- for minstr \instrumentSocket -> do
-    dbg ("Instrumentation info available on " ++ fromOsPath instrumentSocket.path)
-    (resource, instrMethods) <- createInstrumentation (\ ce (RequestArgs args) -> recompile ce (RequestArgs (args ++ ["-fforce-recomp"])))
-    _instrThread <- async $ runGrpcServer instrumentSocket.path instrMethods
-    pure resource
-  (recompile, methods) <- createGhc instrResource
   runGrpcServer socket.path methods
 
 -- | Start a gRPC server that runs GHC for client proxies, deleting the discovery file on shutdown.
 runCentralGhc ::
-  CreateMethods ->
+  Methods IO (ProtobufMethodsOf Worker) ->
   PrimarySocketDiscoveryPath ->
   ServerSocketPath ->
-  Maybe InstrumentSocketPath ->
   IO ()
-runCentralGhc mode discovery socket instrumentSocket =
-  finally (runLocalGhc mode socket instrumentSocket) do
+runCentralGhc methods discovery socket =
+  finally (runLocalGhc methods socket) do
     dbg ("Shutting down ghc server on " ++ fromOsPath socket.path)
     removeFile discovery.path
 
@@ -82,10 +59,7 @@ withProxy ::
   IO a
 withProxy socket use = do
   withConnection def server $ \ connection -> do
-    use $
-      Method (mkClientStreaming streamingNotImplemented) $
-      Method (mkNonStreaming (forwardRequest connection)) $
-      NoMoreMethods
+    use (workerMethods (forwardApi connection) (forwardEvents connection) (forwardRequest connection))
   where
     server = ServerUnix (fromOsPath socket.path)
 
@@ -120,18 +94,9 @@ waitForCentralGhc proc socket = do
     dbg "Spawned process for the GHC server exited after starting up."
 
 -- | Run a GHC server synchronously.
-runCentralGhcSpawned :: CreateMethods -> Settings -> ServerSocketPath -> IO ()
-runCentralGhcSpawned methods settings socket =
-  runCentralGhc methods primaryFile socket instrumentSocket
-  where
-    instrumentSocket =
-      if (featureOn FeatureInstrument settings)
-      then Just (instrumentSocketIn dir)
-      else Nothing
-
-    primaryFile = primarySocketDiscoveryIn dir
-
-    dir = spawnedSocketDirectory socket
+runCentralGhcSpawned :: Methods IO (ProtobufMethodsOf Worker) -> ServerSocketPath -> IO ()
+runCentralGhcSpawned methods socket =
+  runCentralGhc methods (primarySocketDiscoveryIn (spawnedSocketDirectory socket)) socket
 
 -- | Run a server if this process is the primary worker, otherwise return the primary's socket path.
 -- Since multiple workers are started in separate processes, we negotiate using file system locks.
@@ -169,7 +134,7 @@ runOrProxyCentralGhc socketDir runServer = do
     primaryFile = primarySocketDiscoveryIn socketDir
 
 -- | Start a gRPC server that either runs GHC (primary server) or a proxy that forwards requests to the primary.
-serveOrProxyCentralGhc :: CreateMethods -> ServerSocketPath -> IO ()
+serveOrProxyCentralGhc :: Methods IO (ProtobufMethodsOf Worker) -> ServerSocketPath -> IO ()
 serveOrProxyCentralGhc methods socket = do
   runOrProxyCentralGhc socketDir run >>= \case
     Right (_, thread) -> onException (wait thread) (cancel thread)
@@ -177,10 +142,8 @@ serveOrProxyCentralGhc methods socket = do
   where
     run primaryFile = do
       let primary = PrimarySocketPath socket.path
-      thread <- async (runCentralGhc methods primaryFile socket instrumentSocket)
+      thread <- async (runCentralGhc methods primaryFile socket)
       waitPoll primary.path
       pure (primary, thread)
-
-    instrumentSocket = Just (instrumentSocketIn socketDir)
 
     socketDir = SocketDirectory (OsString.init $ dropWhileEnd (unsafeFromChar '-' /=) $ takeDirectory socket.path)

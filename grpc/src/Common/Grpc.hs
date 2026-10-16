@@ -4,10 +4,15 @@ module Common.Grpc (
   commandEnv,
   execute,
   streamingNotImplemented,
-  fromGrpcHandler,
   grpcServerConfig,
   runGrpcServer,
   forwardRequest,
+  forwardApi,
+  forwardEvents,
+  ApiHandler,
+  EventsHandler,
+  workerMethods,
+  executeMethods,
   sendRequest,
   waitPoll,
 ) where
@@ -20,13 +25,22 @@ import Data.Int (Int32)
 import Data.Map.Strict qualified as Map
 import Data.Text qualified as Text
 import Data.Text.Encoding (decodeUtf8Lenient)
-import Network.GRPC.Client (Connection, Server (..), recvNextOutput, sendFinalInput, withConnection, withRPC)
+import Network.GRPC.Client (Connection, Server (..), recvNextOutput, rpc, sendFinalInput, withConnection, withRPC)
+import Network.GRPC.Client.StreamType.IO (nonStreaming, serverStreaming)
 import Network.GRPC.Common (NextElem (..), Proxy (..), def)
+import Network.GRPC.Common.NextElem (whileNext_)
 import Network.GRPC.Common.Protobuf (Proto, Protobuf, defMessage, (&), (.~))
 import Network.GRPC.Server.Protobuf (ProtobufMethodsOf)
 import Network.GRPC.Server.Run (InsecureConfig (..), ServerConfig (..), runServerWithHandlers)
-import Network.GRPC.Server.StreamType (Methods (..), fromMethods, mkClientStreaming, mkNonStreaming, simpleMethods)
-import Proto.Worker (ExecuteCommand'EnvironmentEntry, ExecuteEvent, Worker)
+import Network.GRPC.Server.StreamType (
+  Methods (..),
+  fromMethods,
+  mkClientStreaming,
+  mkNonStreaming,
+  mkServerStreaming,
+  simpleMethods,
+  )
+import Proto.Worker (Encoded, ExecuteCommand'EnvironmentEntry, ExecuteEvent, Worker)
 import Proto.Worker_Fields qualified as Fields
 import System.Exit (ExitCode (..), exitSuccess)
 import System.IO (hPutStrLn, stderr)
@@ -90,14 +104,34 @@ streamingNotImplemented _ =
       & Fields.stderr
       .~ "Streaming not implemented"
 
--- | Wrap a 'GrpcHandler' in a grapesy handler data type.
-fromGrpcHandler ::
-  GrpcHandler ->
+-- | Handler for the @Api@ method: receives an encoded request and returns an encoded response.
+type ApiHandler = Proto Encoded -> IO (Proto Encoded)
+
+-- | Handler for the @Events@ method: pushes encoded events to the callback until it sends 'NoNextElem' or the handler
+-- returns.
+type EventsHandler = (NextElem (Proto Encoded) -> IO ()) -> IO ()
+
+-- | Assemble the full 'Worker' service.
+-- @Execute@ is what Buck uses, since @Exec@ is not supported.
+-- @Api@ and @Events@ are extensions used by the instrumentation UI and client.
+workerMethods ::
+  ApiHandler ->
+  EventsHandler ->
+  (Proto ExecuteCommand -> IO (Proto ExecuteResponse)) ->
   Methods IO (ProtobufMethodsOf Worker)
-fromGrpcHandler handler =
+workerMethods api events executeCommand =
   simpleMethods
+    (mkNonStreaming api)
+    (mkServerStreaming (const events))
     (mkClientStreaming streamingNotImplemented)
-    (mkNonStreaming (execute handler))
+    (mkNonStreaming executeCommand)
+
+-- | A 'Worker' service that only runs 'Execute' requests, rejecting @Api@ and ending @Events@ streams immediately.
+executeMethods ::
+  (Proto ExecuteCommand -> IO (Proto ExecuteResponse)) ->
+  Methods IO (ProtobufMethodsOf Worker)
+executeMethods =
+  workerMethods (const (throwIO (userError "Api is not supported by this server"))) ($ NoNextElem)
 
 -- | Create a gRPC server config listening on a Unix domain socket.
 grpcServerConfig :: OsPath -> ServerConfig
@@ -133,6 +167,18 @@ forwardRequest connection req =
   withRPC connection def (Proxy @(Protobuf Worker "execute")) \ call -> do
     sendFinalInput call req
     recvNextOutput call
+
+-- | Forward an @Api@ request to another gRPC server.
+forwardApi :: Connection -> ApiHandler
+forwardApi connection =
+  nonStreaming connection (rpc @(Protobuf Worker "api"))
+
+-- | Forward an @Events@ stream from another gRPC server.
+forwardEvents :: Connection -> EventsHandler
+forwardEvents connection send =
+  serverStreaming connection (rpc @(Protobuf Worker "events")) defMessage \ recv -> do
+    whileNext_ recv (send . NextElem)
+    send NoNextElem
 
 -- | Attempt to connect and send a gRPC message to the server at the given socket path.
 -- Retries up to 30 times with 100ms delay (3 seconds total).

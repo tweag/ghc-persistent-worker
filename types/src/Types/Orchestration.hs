@@ -81,15 +81,12 @@ newtype PrimarySocketPath =
 -- | For the case where the primary server is spawned, rather than reusing the socket on which communication with Buck
 -- is happening.
 primarySocketIn :: SocketDirectory -> PrimarySocketPath
-primarySocketIn dir = PrimarySocketPath (dir.path </> toOsPath "server")
+primarySocketIn dir = PrimarySocketPath (dir.path </> primarySocketName)
 
--- | The file system path of the socket on which the primary worker outputs instrumentation information.
-newtype InstrumentSocketPath =
-  InstrumentSocketPath { path :: OsPath }
-  deriving stock (Eq, Show)
-
-instrumentSocketIn :: SocketDirectory -> InstrumentSocketPath
-instrumentSocketIn dir = InstrumentSocketPath (dir.path </> toOsPath "instrument")
+-- | The name of the primary server's socket within its socket directory, which is also where instrumentation clients
+-- look for it.
+primarySocketName :: OsPath
+primarySocketName = toOsPath "server"
 
 -- | The file system path in which the primary worker running the GHC server stores its socket path for clients to
 -- discover.

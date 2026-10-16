@@ -58,8 +58,8 @@ makeRequest command handleResponse = do
   where
     send = do
       RequestEnv {config = ApiConfig {connections}} <- ask
-      liftServer $ forConcurrently_ connections \ ServerConnection {protocol, connection} -> do
-        output <- liftIO (apiRequest protocol connection message)
+      liftServer $ forConcurrently_ connections \ ServerConnection {connection} -> do
+        output <- liftIO (apiRequest connection message)
         case eitherDecodeStrict' output of
           Left err -> logError ("Failed to decode grpc response: " <> Text.pack err)
           Right (payload) -> handleResponse payload

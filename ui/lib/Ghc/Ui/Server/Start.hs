@@ -1,6 +1,5 @@
 module Ghc.Ui.Server.Start where
 
-import BuckWorkerProto.Data.Protocol (Protocol (..))
 import BuckWorkerProto.Protocol (streamEvents)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async.Lifted (async, cancel)
@@ -75,14 +74,12 @@ serverListen sessionId workerId recv =
     Sessions $
     Sessions.Session sessionId (ApiEvent workerId (decode (fromStrict payload)))
 
--- | Subscribe to the events of the server listening on the socket, using the gRPC service determined by the
--- 'Protocol'.
+-- | Subscribe to the events of the server listening on the socket.
 serverConnect ::
-  Protocol ->
   Maybe ServerProcess ->
   OsPath ->
   ServerM ()
-serverConnect protocol process socket =
+serverConnect process socket =
  spin (5 :: Int)
  where
     spin = \case
@@ -92,10 +89,10 @@ serverConnect protocol process socket =
           catch (tryConnect connection) (retry n)
 
     tryConnect connection =
-      streamEvents protocol connection \ recv -> do
+      streamEvents connection \ recv -> do
         traverse_ updateProcess process
         time <- liftIO $ getModificationTime socket
-        sendEvent $ Sessions $ Sessions.AddWorker sessionId workerId time (GrpcConnection ServerConnection {protocol, connection})
+        sendEvent $ Sessions $ Sessions.AddWorker sessionId workerId time (GrpcConnection ServerConnection {connection})
         serverListen sessionId workerId recv
 
     updateProcess new =
@@ -122,7 +119,7 @@ serverConnect protocol process socket =
 listenSubprocess :: OsPath -> ServerM ()
 listenSubprocess socket = do
   liftIO (isServerUp socket) >>= \case
-    True -> serverConnect ProtocolGhcServer Nothing socket
+    True -> serverConnect Nothing socket
     False -> do
       liftIO (threadDelay 100_000)
       listenSubprocess socket
@@ -181,7 +178,7 @@ ensureServerOnSocket path socket config@ServerConfig {root, options} =
   where
     connectExisting = do
       logInfo ("Connecting to preexisting ghc-server process in " <> desc)
-      void $ async $ serverConnect ProtocolGhcServer (Just (withStatus ServerConnected)) socket
+      void $ async $ serverConnect (Just (withStatus ServerConnected)) socket
       pure (withStatus ServerStarting)
 
     startNew = do

@@ -4,7 +4,7 @@
 {-# OPTIONS_GHC -Wno-duplicate-exports#-}
 {-# OPTIONS_GHC -Wno-dodgy-exports#-}
 module Proto.Worker (
-        Worker(..), ExecuteCancel(), ExecuteCommand(),
+        Worker(..), Empty(), Encoded(), ExecuteCancel(), ExecuteCommand(),
         ExecuteCommand'EnvironmentEntry(), ExecuteEvent(),
         ExecuteEvent'Data(..), _ExecuteEvent'Command, _ExecuteEvent'Cancel,
         ExecuteResponse()
@@ -34,6 +34,175 @@ import qualified Data.Vector
 import qualified Data.Vector.Generic
 import qualified Data.Vector.Unboxed
 import qualified Text.Read
+{- | Fields :
+      -}
+data Empty
+  = Empty'_constructor {_Empty'_unknownFields :: !Data.ProtoLens.FieldSet}
+  deriving stock (Prelude.Eq, Prelude.Ord)
+instance Prelude.Show Empty where
+  showsPrec _ __x __s
+    = Prelude.showChar
+        '{'
+        (Prelude.showString
+           (Data.ProtoLens.showMessageShort __x) (Prelude.showChar '}' __s))
+instance Data.ProtoLens.Message Empty where
+  messageName _ = Data.Text.pack "worker.Empty"
+  packedMessageDescriptor _
+    = "\n\
+      \\ENQEmpty"
+  packedFileDescriptor _ = packedFileDescriptor
+  fieldsByTag = let in Data.Map.fromList []
+  unknownFields
+    = Lens.Family2.Unchecked.lens
+        _Empty'_unknownFields
+        (\ x__ y__ -> x__ {_Empty'_unknownFields = y__})
+  defMessage = Empty'_constructor {_Empty'_unknownFields = []}
+  parseMessage
+    = let
+        loop :: Empty -> Data.ProtoLens.Encoding.Bytes.Parser Empty
+        loop x
+          = do end <- Data.ProtoLens.Encoding.Bytes.atEnd
+               if end then
+                   do (let missing = []
+                       in
+                         if Prelude.null missing then
+                             Prelude.return ()
+                         else
+                             Prelude.fail
+                               ((Prelude.++)
+                                  "Missing required fields: "
+                                  (Prelude.show (missing :: [Prelude.String]))))
+                      Prelude.return
+                        (Lens.Family2.over
+                           Data.ProtoLens.unknownFields (\ !t -> Prelude.reverse t) x)
+               else
+                   do tag <- Data.ProtoLens.Encoding.Bytes.getVarInt
+                      case tag of
+                        wire
+                          -> do !y <- Data.ProtoLens.Encoding.Wire.parseTaggedValueFromWire
+                                        wire
+                                loop
+                                  (Lens.Family2.over
+                                     Data.ProtoLens.unknownFields (\ !t -> (:) y t) x)
+      in
+        (Data.ProtoLens.Encoding.Bytes.<?>)
+          (do loop Data.ProtoLens.defMessage) "Empty"
+  buildMessage
+    = \ _x
+        -> Data.ProtoLens.Encoding.Wire.buildFieldSet
+             (Lens.Family2.view Data.ProtoLens.unknownFields _x)
+instance Control.DeepSeq.NFData Empty where
+  rnf
+    = \ x__ -> Control.DeepSeq.deepseq (_Empty'_unknownFields x__) ()
+{- | Fields :
+     
+         * 'Proto.Worker_Fields.payload' @:: Lens' Encoded Data.ByteString.ByteString@ -}
+data Encoded
+  = Encoded'_constructor {_Encoded'payload :: !Data.ByteString.ByteString,
+                          _Encoded'_unknownFields :: !Data.ProtoLens.FieldSet}
+  deriving stock (Prelude.Eq, Prelude.Ord)
+instance Prelude.Show Encoded where
+  showsPrec _ __x __s
+    = Prelude.showChar
+        '{'
+        (Prelude.showString
+           (Data.ProtoLens.showMessageShort __x) (Prelude.showChar '}' __s))
+instance Data.ProtoLens.Field.HasField Encoded "payload" Data.ByteString.ByteString where
+  fieldOf _
+    = (Prelude..)
+        (Lens.Family2.Unchecked.lens
+           _Encoded'payload (\ x__ y__ -> x__ {_Encoded'payload = y__}))
+        Prelude.id
+instance Data.ProtoLens.Message Encoded where
+  messageName _ = Data.Text.pack "worker.Encoded"
+  packedMessageDescriptor _
+    = "\n\
+      \\aEncoded\DC2\CAN\n\
+      \\apayload\CAN\SOH \SOH(\fR\apayload"
+  packedFileDescriptor _ = packedFileDescriptor
+  fieldsByTag
+    = let
+        payload__field_descriptor
+          = Data.ProtoLens.FieldDescriptor
+              "payload"
+              (Data.ProtoLens.ScalarField Data.ProtoLens.BytesField ::
+                 Data.ProtoLens.FieldTypeDescriptor Data.ByteString.ByteString)
+              (Data.ProtoLens.PlainField
+                 Data.ProtoLens.Optional (Data.ProtoLens.Field.field @"payload")) ::
+              Data.ProtoLens.FieldDescriptor Encoded
+      in
+        Data.Map.fromList
+          [(Data.ProtoLens.Tag 1, payload__field_descriptor)]
+  unknownFields
+    = Lens.Family2.Unchecked.lens
+        _Encoded'_unknownFields
+        (\ x__ y__ -> x__ {_Encoded'_unknownFields = y__})
+  defMessage
+    = Encoded'_constructor
+        {_Encoded'payload = Data.ProtoLens.fieldDefault,
+         _Encoded'_unknownFields = []}
+  parseMessage
+    = let
+        loop :: Encoded -> Data.ProtoLens.Encoding.Bytes.Parser Encoded
+        loop x
+          = do end <- Data.ProtoLens.Encoding.Bytes.atEnd
+               if end then
+                   do (let missing = []
+                       in
+                         if Prelude.null missing then
+                             Prelude.return ()
+                         else
+                             Prelude.fail
+                               ((Prelude.++)
+                                  "Missing required fields: "
+                                  (Prelude.show (missing :: [Prelude.String]))))
+                      Prelude.return
+                        (Lens.Family2.over
+                           Data.ProtoLens.unknownFields (\ !t -> Prelude.reverse t) x)
+               else
+                   do tag <- Data.ProtoLens.Encoding.Bytes.getVarInt
+                      case tag of
+                        10
+                          -> do y <- (Data.ProtoLens.Encoding.Bytes.<?>)
+                                       (do len <- Data.ProtoLens.Encoding.Bytes.getVarInt
+                                           Data.ProtoLens.Encoding.Bytes.getBytes
+                                             (Prelude.fromIntegral len))
+                                       "payload"
+                                loop (Lens.Family2.set (Data.ProtoLens.Field.field @"payload") y x)
+                        wire
+                          -> do !y <- Data.ProtoLens.Encoding.Wire.parseTaggedValueFromWire
+                                        wire
+                                loop
+                                  (Lens.Family2.over
+                                     Data.ProtoLens.unknownFields (\ !t -> (:) y t) x)
+      in
+        (Data.ProtoLens.Encoding.Bytes.<?>)
+          (do loop Data.ProtoLens.defMessage) "Encoded"
+  buildMessage
+    = \ _x
+        -> (Data.Monoid.<>)
+             (let
+                _v = Lens.Family2.view (Data.ProtoLens.Field.field @"payload") _x
+              in
+                if (Prelude.==) _v Data.ProtoLens.fieldDefault then
+                    Data.Monoid.mempty
+                else
+                    (Data.Monoid.<>)
+                      (Data.ProtoLens.Encoding.Bytes.putVarInt 10)
+                      ((\ bs
+                          -> (Data.Monoid.<>)
+                               (Data.ProtoLens.Encoding.Bytes.putVarInt
+                                  (Prelude.fromIntegral (Data.ByteString.length bs)))
+                               (Data.ProtoLens.Encoding.Bytes.putBytes bs))
+                         _v))
+             (Data.ProtoLens.Encoding.Wire.buildFieldSet
+                (Lens.Family2.view Data.ProtoLens.unknownFields _x))
+instance Control.DeepSeq.NFData Encoded where
+  rnf
+    = \ x__
+        -> Control.DeepSeq.deepseq
+             (_Encoded'_unknownFields x__)
+             (Control.DeepSeq.deepseq (_Encoded'payload x__) ())
 {- | Fields :
       -}
 data ExecuteCancel
@@ -821,12 +990,14 @@ data Worker = Worker {}
 instance Data.ProtoLens.Service.Types.Service Worker where
   type ServiceName Worker = "Worker"
   type ServicePackage Worker = "worker"
-  type ServiceMethods Worker = '["exec", "execute"]
+  type ServiceMethods Worker = '["api", "events", "exec", "execute"]
   packedServiceDescriptor _
     = "\n\
       \\ACKWorker\DC2<\n\
       \\aExecute\DC2\SYN.worker.ExecuteCommand\SUB\ETB.worker.ExecuteResponse\"\NUL\DC29\n\
-      \\EOTExec\DC2\DC4.worker.ExecuteEvent\SUB\ETB.worker.ExecuteResponse\"\NUL(\SOH"
+      \\EOTExec\DC2\DC4.worker.ExecuteEvent\SUB\ETB.worker.ExecuteResponse\"\NUL(\SOH\DC2,\n\
+      \\ACKEvents\DC2\r.worker.Empty\SUB\SI.worker.Encoded\"\NUL0\SOH\DC2)\n\
+      \\ETXApi\DC2\SI.worker.Encoded\SUB\SI.worker.Encoded\"\NUL"
 instance Data.ProtoLens.Service.Types.HasMethodImpl Worker "execute" where
   type MethodName Worker "execute" = "Execute"
   type MethodInput Worker "execute" = ExecuteCommand
@@ -837,6 +1008,16 @@ instance Data.ProtoLens.Service.Types.HasMethodImpl Worker "exec" where
   type MethodInput Worker "exec" = ExecuteEvent
   type MethodOutput Worker "exec" = ExecuteResponse
   type MethodStreamingType Worker "exec" = 'Data.ProtoLens.Service.Types.ClientStreaming
+instance Data.ProtoLens.Service.Types.HasMethodImpl Worker "events" where
+  type MethodName Worker "events" = "Events"
+  type MethodInput Worker "events" = Empty
+  type MethodOutput Worker "events" = Encoded
+  type MethodStreamingType Worker "events" = 'Data.ProtoLens.Service.Types.ServerStreaming
+instance Data.ProtoLens.Service.Types.HasMethodImpl Worker "api" where
+  type MethodName Worker "api" = "Api"
+  type MethodInput Worker "api" = Encoded
+  type MethodOutput Worker "api" = Encoded
+  type MethodStreamingType Worker "api" = 'Data.ProtoLens.Service.Types.NonStreaming
 packedFileDescriptor :: Data.ByteString.ByteString
 packedFileDescriptor
   = "\n\
@@ -854,12 +1035,17 @@ packedFileDescriptor
     \\fExecuteEvent\DC22\n\
     \\acommand\CAN\SOH \SOH(\v2\SYN.worker.ExecuteCommandH\NULR\acommand\DC2/\n\
     \\ACKcancel\CAN\STX \SOH(\v2\NAK.worker.ExecuteCancelH\NULR\ACKcancelB\ACK\n\
-    \\EOTdata2\129\SOH\n\
+    \\EOTdata\"\a\n\
+    \\ENQEmpty\"#\n\
+    \\aEncoded\DC2\CAN\n\
+    \\apayload\CAN\SOH \SOH(\fR\apayload2\218\SOH\n\
     \\ACKWorker\DC2<\n\
     \\aExecute\DC2\SYN.worker.ExecuteCommand\SUB\ETB.worker.ExecuteResponse\"\NUL\DC29\n\
-    \\EOTExec\DC2\DC4.worker.ExecuteEvent\SUB\ETB.worker.ExecuteResponse\"\NUL(\SOHB/\n\
-    \\RScom.facebook.buck.worker.modelB\vWorkerProtoP\SOHJ\206\t\n\
-    \\ACK\DC2\EOT\t\NUL.\SOH\n\
+    \\EOTExec\DC2\DC4.worker.ExecuteEvent\SUB\ETB.worker.ExecuteResponse\"\NUL(\SOH\DC2,\n\
+    \\ACKEvents\DC2\r.worker.Empty\SUB\SI.worker.Encoded\"\NUL0\SOH\DC2)\n\
+    \\ETXApi\DC2\SI.worker.Encoded\SUB\SI.worker.Encoded\"\NULB/\n\
+    \\RScom.facebook.buck.worker.modelB\vWorkerProtoP\SOHJ\191\f\n\
+    \\ACK\DC2\EOT\t\NUL;\SOH\n\
     \\181\STX\n\
     \\SOH\f\DC2\ETX\t\NUL\DC22\170\STX\n\
     \ Copyright (c) Meta Platforms, Inc. and affiliates.\n\
@@ -988,29 +1174,70 @@ packedFileDescriptor
     \\ENQ\EOT\ETX\STX\SOH\SOH\DC2\ETX%\DC2\CAN\n\
     \\f\n\
     \\ENQ\EOT\ETX\STX\SOH\ETX\DC2\ETX%\ESC\FS\n\
+    \\t\n\
+    \\STX\EOT\EOT\DC2\ETX)\NUL\DLE\n\
     \\n\
     \\n\
-    \\STX\ACK\NUL\DC2\EOT)\NUL.\SOH\n\
+    \\ETX\EOT\EOT\SOH\DC2\ETX)\b\r\n\
     \\n\
     \\n\
-    \\ETX\ACK\NUL\SOH\DC2\ETX)\b\SO\n\
-    \A\n\
-    \\EOT\ACK\NUL\STX\NUL\DC2\ETX+\STX:\SUB4 TODO(ctolliday) delete once workers switch to Exec\n\
+    \\STX\EOT\ENQ\DC2\EOT+\NUL-\SOH\n\
     \\n\
-    \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\SOH\DC2\ETX+\ACK\r\n\
-    \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\STX\DC2\ETX+\SO\FS\n\
-    \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\ETX\DC2\ETX+'6\n\
+    \\n\
+    \\ETX\EOT\ENQ\SOH\DC2\ETX+\b\SI\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\SOH\DC2\ETX-\STX<\n\
+    \\EOT\EOT\ENQ\STX\NUL\DC2\ETX,\STX\DC4\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\SOH\DC2\ETX-\ACK\n\
+    \\ENQ\EOT\ENQ\STX\NUL\ENQ\DC2\ETX,\STX\a\n\
+    \\f\n\
+    \\ENQ\EOT\ENQ\STX\NUL\SOH\DC2\ETX,\b\SI\n\
+    \\f\n\
+    \\ENQ\EOT\ENQ\STX\NUL\ETX\DC2\ETX,\DC2\DC3\n\
+    \\n\
+    \\n\
+    \\STX\ACK\NUL\DC2\EOT/\NUL;\SOH\n\
+    \\n\
+    \\n\
+    \\ETX\ACK\NUL\SOH\DC2\ETX/\b\SO\n\
+    \A\n\
+    \\EOT\ACK\NUL\STX\NUL\DC2\ETX1\STX:\SUB4 TODO(ctolliday) delete once workers switch to Exec\n\
     \\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\ENQ\DC2\ETX-\v\DC1\n\
+    \\ENQ\ACK\NUL\STX\NUL\SOH\DC2\ETX1\ACK\r\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\STX\DC2\ETX-\DC2\RS\n\
+    \\ENQ\ACK\NUL\STX\NUL\STX\DC2\ETX1\SO\FS\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\ETX\DC2\ETX-)8b\ACKproto3"
+    \\ENQ\ACK\NUL\STX\NUL\ETX\DC2\ETX1'6\n\
+    \\v\n\
+    \\EOT\ACK\NUL\STX\SOH\DC2\ETX3\STX<\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\SOH\SOH\DC2\ETX3\ACK\n\
+    \\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\SOH\ENQ\DC2\ETX3\v\DC1\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\SOH\STX\DC2\ETX3\DC2\RS\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\SOH\ETX\DC2\ETX3)8\n\
+    \s\n\
+    \\EOT\ACK\NUL\STX\STX\DC2\ETX7\STX/\SUBf Extensions of the Buck protocol, not used by Buck.\n\
+    \ Stream the instrumentation events of the server.\n\
+    \\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\STX\SOH\DC2\ETX7\ACK\f\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\STX\STX\DC2\ETX7\r\DC2\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\STX\ACK\DC2\ETX7\GS#\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\STX\ETX\DC2\ETX7$+\n\
+    \2\n\
+    \\EOT\ACK\NUL\STX\ETX\DC2\ETX:\STX'\SUB% Send a request to the server's API.\n\
+    \\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\ETX\SOH\DC2\ETX:\ACK\t\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\ETX\STX\DC2\ETX:\n\
+    \\DC1\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\ETX\ETX\DC2\ETX:\FS#b\ACKproto3"
