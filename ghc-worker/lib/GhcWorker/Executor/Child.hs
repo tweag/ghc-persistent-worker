@@ -1,5 +1,5 @@
 -- | The child side of a persistent executor subprocess that serves bytecode plans (see
--- 'GhcWorker.Executor.Client' for the parent side and 'Internal.Executor.Load' for the session handling).
+-- 'Internal.Executor.Client' for the parent side and 'Internal.Executor.Load' for the session handling).
 --
 -- A persistent executor serves the @Executor@ gRPC service (@proto\/executor.proto@) on a Unix socket, so that the
 -- GHC session state (loaded bytecode, interpreter) built up by one call is reused by the next one dispatched to the

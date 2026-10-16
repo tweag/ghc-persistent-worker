@@ -103,7 +103,9 @@ library
                       Internal.Env
                       Internal.Error
                       Internal.Evaluate
+                      Internal.Executor.Client
                       Internal.Executor.GbcBuffer
+                      Internal.Executor.Lifecycle
                       Internal.Executor.Load
                       Internal.Executor.PayloadArena
                       Internal.Json
@@ -124,6 +126,7 @@ library
                       array,
                       async,
                       base >= 4.20,
+                      buck-worker-proto,
                       buck-worker-types,
                       containers,
                       directory,
@@ -137,8 +140,10 @@ library
                       ghc,
                       ghc-boot,
                       ghci,
+                      grapesy >=1.0.1,
                       hashable,
                       mmap,
+                      process,
                       text,
                       time,
                       transformers,

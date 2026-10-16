@@ -32,6 +32,7 @@ import Options.Applicative (
   option,
   progDesc,
   strOption,
+  value,
   (<**>),
   )
 import System.OsPath.Extra (toOsPath)
@@ -40,7 +41,7 @@ import Types.FeatureFlags (parseFeatureFlag)
 import Types.Grpc (CommandEnv, RequestArgs)
 import Types.Log (TraceId (..))
 import Types.Orchestration (ServerSocketPath (..), serverSocketFromPath)
-import Types.Settings (Settings (..), defaultSettings, parseByteSize, setFeature)
+import Types.Settings (Settings (..), defaultExecutorRts, defaultSettings, parseByteSize, setFeature)
 import Types.State (WorkerState (..))
 
 -- | Global options for the worker, passed when the process is started, in contrast to request options stored in
@@ -66,9 +67,9 @@ featureFlagsParser =
   where
     applyFlags = flip foldr defaultSettings (uncurry setFeature)
 
-    flagOption value = do
+    flagOption enabled = do
       flag <- eitherReader (first unpack . parseFeatureFlag . pack)
-      pure (flag, value)
+      pure (flag, enabled)
 
 -- | Parser for '--max-bytecode', bounding the loader state size.
 maxBytecodeParser :: Parser (Maybe Int)
@@ -81,12 +82,23 @@ maxBytecodeParser =
       )
     )
 
+-- | Parser for '--executor-rts', the RTS options of persistent executor subprocesses.
+executorRtsParser :: Parser [String]
+executorRtsParser =
+  words <$> strOption (
+    long "executor-rts"
+    <> metavar "OPTS"
+    <> help "RTS options for persistent executor subprocesses, separated by spaces"
+    <> value (unwords defaultExecutorRts)
+    )
+
 cliOptionsParser :: Parser CliOptions
 cliOptionsParser = do
   serve <- serverSocketFromPath . toOsPath <$> strOption (long "serve" <> metavar "SOCKET" <> help "Socket path for the GHC server")
   features0 <- featureFlagsParser
   maxBytecode <- maxBytecodeParser
-  pure CliOptions {serve, settings = features0 {lazyByteCodeCacheLimit = maxBytecode}}
+  executorRts <- executorRtsParser
+  pure CliOptions {serve, settings = features0 {lazyByteCodeCacheLimit = maxBytecode, executorRts}}
 
 cliOptionsParserInfo :: ParserInfo CliOptions
 cliOptionsParserInfo =

@@ -16,7 +16,7 @@ main = do
   hSetBuffering stdout LineBuffering
   hSetBuffering stderr LineBuffering
   getArgs >>= \case
-    -- Relaunch as a persistent executor for bytecode plans, see 'GhcWorker.Executor.Client.spawnExecutorWith'.
+    -- Relaunch as a persistent executor for bytecode plans, see 'Internal.Executor.Client.spawnExecutorWith'.
     ["executor", "--socket", socket] -> runPlanExecutor (toOsPath socket)
     _ ->
       try (runWorker =<< parseCliArgs) >>= \case

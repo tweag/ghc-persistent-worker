@@ -21,7 +21,9 @@ data Settings =
     --
     -- When set and 'lazyByteCode' is enabled, the least recently used entries are unloaded at the end of each compile
     -- job once the tracked total exceeds this limit. 'Nothing' disables unloading entirely.
-    lazyByteCodeCacheLimit :: Maybe Int
+    lazyByteCodeCacheLimit :: Maybe Int,
+    -- | RTS options passed to persistent executor subprocesses spawned by the worker's eval mode.
+    executorRts :: [String]
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary)
@@ -31,8 +33,14 @@ settingsWithFeatures features =
   Settings {
     features,
     useIncrModGraph = True,
-    lazyByteCodeCacheLimit = Nothing
+    lazyByteCodeCacheLimit = Nothing,
+    executorRts = defaultExecutorRts
   }
+
+-- | The nursery of an executor needs to be much smaller than the compiled-in default of the worker, and it doesn't
+-- benefit from all capabilities.
+defaultExecutorRts :: [String]
+defaultExecutorRts = ["-N2", "-A16M"]
 
 defaultSettings :: Settings
 defaultSettings =

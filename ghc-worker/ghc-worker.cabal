@@ -71,7 +71,6 @@ library
     GhcWorker.CompileResult
     GhcWorker.Eval.Executor
     GhcWorker.Executor.Child
-    GhcWorker.Executor.Client
     GhcWorker.Executor.Plan
     GhcWorker.GhcHandler
     GhcWorker.Grpc

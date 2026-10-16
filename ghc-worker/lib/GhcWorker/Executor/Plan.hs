@@ -43,7 +43,7 @@ import GHC.Unit.Module.Location (ModLocation (..))
 import GHC.Unit.Module.ModIface (mi_deps)
 import GHC.Unit.Module.ModNodeKey (ModNodeKeyWithUid (..))
 import GHC.Unit.Types (GenWithIsBoot (..), IsBootInterface (..), UnitId)
-import GhcWorker.Executor.Client (callExecutorJson)
+import Internal.Executor.Client (callExecutorJson)
 import Internal.Executor.GbcBuffer (encodeByteCode)
 import Internal.Executor.PayloadArena (appendPayload, ensureArena)
 import Types.ExecutorPlan (

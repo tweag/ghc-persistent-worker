@@ -16,23 +16,15 @@ module GhcWorker.Eval.Executor where
 
 #if defined(GBC)
 
-import Control.Concurrent.MVar (MVar, modifyMVar, readMVar, withMVar)
-import Control.Monad (when)
-import Data.Char (isAlphaNum)
-import Data.Foldable (for_, traverse_)
-import qualified Data.Map.Strict as Map
+import Control.Concurrent.MVar (MVar, readMVar)
+import Data.Foldable (for_)
 import qualified Data.Text as Text
 import GHC.Utils.Outputable (text)
-import GhcWorker.Executor.Client (
-  awaitExecutor,
-  isRunning,
-  rtsArgs,
-  spawnExecutorWith,
-  stopExecutor,
-  watchExecutor,
-  )
 import GhcWorker.Executor.Plan (PlanError (..), displayPlanError, executePlanned)
 import GhcWorker.Instrumentation (EvalReport (..), failedEval)
+import Internal.Executor.Client (rtsArgs, spawnExecutorWith)
+import Internal.Executor.Lifecycle (ExecutorEnv (..), executorSocketName)
+import qualified Internal.Executor.Lifecycle as Lifecycle
 import System.Directory (getTemporaryDirectory)
 import System.Environment (getExecutablePath)
 import System.FilePath ((</>))
@@ -41,6 +33,7 @@ import System.Posix.Process (getProcessID)
 import Types.Api (Event, ExecutorId (..))
 import Types.ExecutorPlan (EntryKind, ExecutorPlan)
 import Types.Log (Logger (..))
+import Types.Settings (Settings (..))
 import Types.ProcessEval (EvalOutcome (..), ProcessEvalOutput (..), ProcessEvalResult (..))
 import Types.State (WorkerState (..))
 import Types.State.Executor (ExecutorHandle (..), HomeModuleId)
@@ -58,67 +51,32 @@ tempPrefix = do
       | length tmp > 50 = "/tmp"
       | otherwise = tmp
 
--- | The socket an executor serves on. The id is sanitized, since it is chosen by the rule.
+-- | The socket an executor serves on, see 'executorSocketName'.
 executorSocket :: ExecutorId -> IO FilePath
 executorSocket executorId = do
   prefix <- tempPrefix
-  pure (prefix ++ "-" ++ sanitized ++ ".sock")
-  where
-    sanitized = [if isAlphaNum c || c == '-' then c else '_' | c <- Text.unpack executorId.text]
+  pure (prefix ++ "-" ++ executorSocketName executorId)
 
 -- | Bytecode payloads are written to files in a directory that is private to the worker process.
 payloadTransport :: IO PayloadTransport
 payloadTransport =
   PayloadFiles . (++ "-payloads") <$> tempPrefix
 
--- | Launch a new executor, without waiting for it to become ready.
-spawnExecutor :: ExecutorId -> IO ExecutorHandle
-spawnExecutor executorId = do
+-- | Launch a new executor with the given RTS options, without waiting for it to become ready.
+spawnExecutor :: [String] -> ExecutorId -> IO ExecutorHandle
+spawnExecutor rts executorId = do
   self <- getExecutablePath
   socket <- executorSocket executorId
-  -- The executor doesn't need the worker's capabilities; the compiled-in default is @-N@.
-  spawnExecutorWith self (rtsArgs ["-N2"]) (toOsPath socket)
+  spawnExecutorWith self (rtsArgs rts) (toOsPath socket)
 
--- | Return the registered executor if the predicate accepts it, otherwise stop it and register a new one, and wait
--- until it serves its socket.
--- A new process is observed for status events, which are published with the given action.
-acquireExecutor ::
-  (Event -> IO ()) ->
-  (ExecutorHandle -> IO Bool) ->
-  MVar WorkerState ->
-  ExecutorId ->
-  IO ExecutorHandle
-acquireExecutor emit reuse stateVar executorId = do
-  (handle, spawned) <- modifyMVar stateVar \ state -> do
-    let existing = Map.lookup executorId state.executors
-    reusable <- maybe (pure False) reuse existing
-    case existing of
-      Just handle | reusable -> pure (state, (handle, False))
-      _ -> do
-        traverse_ stopExecutor existing
-        spawned <- spawnExecutor executorId
-        -- Keep the call lock, so that callers still holding it stay serialized with the new process.
-        let handle = maybe spawned (\ old -> spawned {calls = old.calls, incarnation = old.incarnation + 1}) existing
-        pure (state {executors = Map.insert executorId handle state.executors}, (handle, True))
-  awaitExecutor handle
-  when spawned (watchExecutor emit stateVar executorId handle)
-  pure handle
-
--- | Replace the executor after a failed call.
---
--- The incarnation is that of the handle the caller saw failing. If the registered executor is a newer, running one,
--- another target has replaced it already and it is kept, since stopping it would kill that target's calls.
--- Waits for calls in flight on the old process before stopping it.
-respawnExecutor :: (Event -> IO ()) -> MVar WorkerState -> ExecutorId -> Int -> IO ExecutorHandle
-respawnExecutor emit stateVar executorId failed =
-  (Map.lookup executorId . (.executors) <$> readMVar stateVar) >>= \case
-    Just handle -> withMVar handle.calls \ () -> replace
-    Nothing -> replace
-  where
-    replace = acquireExecutor emit replaced stateVar executorId
-    replaced handle
-      | handle.incarnation == failed = pure False
-      | otherwise = isRunning handle
+-- | The environment of the shared executor lifecycle logic.
+-- The RTS options are read from the worker's settings (see 'Types.Settings.Settings.executorRts') up front, since the
+-- state is locked while an executor is spawned.
+-- Status events of new executor processes are published with the given action.
+executorEnv :: (Event -> IO ()) -> MVar WorkerState -> IO ExecutorEnv
+executorEnv emit stateVar = do
+  rts <- (.settings.executorRts) <$> readMVar stateVar
+  pure ExecutorEnv {stateVar, emit, spawn = spawnExecutor rts}
 
 type PlannedOutput = Either PlanError (ExecutorPlan, ProcessEvalOutput)
 
@@ -146,11 +104,12 @@ runInExecutor ::
 runInExecutor emit logger stateVar executorId options root entry kind = do
   transport <- payloadTransport
   let execute = executePlanned id transport stateVar executorId options root entry kind
-  seen <- acquireExecutor emit isRunning stateVar executorId
+  env <- executorEnv emit stateVar
+  seen <- Lifecycle.ensureExecutor env executorId
   first <- execute
   result <-
     if needsRespawn first
-    then respawnExecutor emit stateVar executorId seen.incarnation *> execute
+    then Lifecycle.respawnExecutor env executorId seen.incarnation *> execute
     else pure first
   reportResult logger result
 

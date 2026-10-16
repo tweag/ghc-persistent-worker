@@ -2,8 +2,8 @@
 -- 'Types.State.WorkerState.executors'): spawning the relaunch of an executable in @executor@ mode, waiting for its
 -- socket, sending calls and stopping it.
 --
--- Used by the @ghc-server@ ('GhcServer.Build.Executor') and by the worker's eval mode ('GhcWorker.Executor.Plan').
-module GhcWorker.Executor.Client where
+-- Used by the @ghc-server@ ('GhcServer.Build.Executor') and by the worker's eval mode ('GhcWorker.Eval.Executor').
+module Internal.Executor.Client where
 
 import BuckWorkerProto ()
 import Control.Concurrent (forkIO, threadDelay)
