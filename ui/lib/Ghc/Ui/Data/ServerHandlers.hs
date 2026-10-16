@@ -3,11 +3,11 @@ module Ghc.Ui.Data.ServerHandlers where
 import GHC.Generics (Generic)
 import Ghc.Ui.Data.ServerApi (ServerApi)
 import Ghc.Ui.Data.ServerProcess (ServerConfig)
-import Network.GRPC.Client (Connection)
+import Ghc.Ui.Data.ServerConnection (ServerConnection)
 
 data ApiConfig =
   ApiConfig {
-     connections :: [Connection],
+     connections :: [ServerConnection],
      sync :: Bool
   }
   deriving stock (Generic)

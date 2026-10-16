@@ -15,13 +15,13 @@ import Ghc.Ui.Data.Sessions (GrpcConnection (..), SessionsEvent (..), SessionsSt
 import Ghc.Ui.Data.WorkerId (WorkerId)
 import qualified Ghc.Ui.Event.Session as Session
 import Ghc.Ui.Event.Session (handleSessionEvent)
-import Network.GRPC.Client (Connection)
+import Ghc.Ui.Data.ServerConnection (ServerConnection)
 
 sessionLens :: SessionId -> Traversal' SessionsState SessionState
 sessionLens sessionId =
   listElementsL . each . filtered \ s -> sessionId == s.sessionId
 
-addWorker :: SessionId -> WorkerId -> UTCTime -> Connection -> EventM Name SessionsState ()
+addWorker :: SessionId -> WorkerId -> UTCTime -> ServerConnection -> EventM Name SessionsState ()
 addWorker sessionId workerId startTime connection = do
   session <- preuse (sessionLens sessionId)
   when (isNothing session) do

@@ -1,6 +1,6 @@
 module Ghc.Ui.Server.Api where
 
-import BuckWorkerProto ()
+import BuckWorkerProto.Protocol (apiRequest)
 import Control.Concurrent.Async.Lifted (async, forConcurrently_)
 import Control.Monad (void)
 import Control.Monad.Catch (catch)
@@ -11,14 +11,10 @@ import Data.Text qualified as Text
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Ghc.Ui.Data.ServerApi (ServerApi (..))
+import Ghc.Ui.Data.ServerConnection (ServerConnection (..))
 import Ghc.Ui.Data.ServerHandlers (ApiConfig (..))
 import Ghc.Ui.Server.Monad (ServerEnv, ServerM, logError)
 import Internal.Error (nonAsync)
-import Network.GRPC.Client (rpc)
-import Network.GRPC.Client.StreamType.IO (nonStreaming)
-import Network.GRPC.Common.Protobuf (Protobuf, defMessage, (&), (.~))
-import Proto.GhcServer (GhcServer)
-import Proto.GhcServer_Fields qualified as Fields
 import Types.Api (
   ApiRequest (..),
   ApiResponse (..),
@@ -62,16 +58,13 @@ makeRequest command handleResponse = do
   where
     send = do
       RequestEnv {config = ApiConfig {connections}} <- ask
-      liftServer $ forConcurrently_ connections \ connection -> do
-        output <- liftIO (nonStreaming connection (rpc @(Protobuf GhcServer "api")) message)
-        case eitherDecodeStrict' output.payload of
+      liftServer $ forConcurrently_ connections \ ServerConnection {protocol, connection} -> do
+        output <- liftIO (apiRequest protocol connection message)
+        case eitherDecodeStrict' output of
           Left err -> logError ("Failed to decode grpc response: " <> Text.pack err)
           Right (payload) -> handleResponse payload
 
-    message =
-      defMessage
-      & Fields.payload
-      .~ toStrict (encode (SomeApiRequest command))
+    message = toStrict (encode (SomeApiRequest command))
 
 requestLogError ::
   ToJSON a =>

@@ -4,6 +4,8 @@
 module GhcClient.Listen where
 
 import BuckWorkerProto ()
+import BuckWorkerProto.Data.Protocol (Protocol (..))
+import BuckWorkerProto.Protocol (streamEvents)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (newMVar, withMVar)
 import Control.Exception (SomeAsyncException, SomeException, catch, displayException, fromException, throwIO)
@@ -16,11 +18,9 @@ import Data.Text qualified as Text
 import GhcServer.Optparse (readPath)
 import GhcServer.Path (socketPath)
 import Internal.Watch (waitForPath, watchWorkerSockets, workerDirectory)
-import Network.GRPC.Client (Server (..), rpc, withConnection)
-import Network.GRPC.Client.StreamType.IO (serverStreaming)
+import Network.GRPC.Client (Server (..), withConnection)
 import Network.GRPC.Common (def)
 import Network.GRPC.Common.NextElem (whileNext_)
-import Network.GRPC.Common.Protobuf (Protobuf, defMessage)
 import Options.Applicative (
   Parser,
   ReadM,
@@ -33,8 +33,6 @@ import Options.Applicative (
   showDefault,
   value,
   )
-import Proto.GhcServer (GhcServer)
-import Proto.Instrument (Instrument)
 import System.Environment (lookupEnv)
 import System.IO qualified as IO
 import System.OsPath (OsPath)
@@ -50,13 +48,6 @@ import Types.Api (
   UnitSummary (..),
   renderTarget,
   )
-
--- | The gRPC service whose @Events@ endpoint is read.
-data Protocol =
-  ProtocolGhcServer
-  |
-  ProtocolInstrument
-  deriving stock (Eq, Show)
 
 data ListenConfig =
   ListenConfig {
@@ -133,16 +124,11 @@ retrying n action =
       retrying (n - 1) action
 
 -- | Stream the events of a single socket to the printer until the stream ends.
-streamEvents :: Protocol -> Printer -> Maybe String -> OsPath -> IO ()
-streamEvents protocol printer label socket =
+streamSocket :: Protocol -> Printer -> Maybe String -> OsPath -> IO ()
+streamSocket protocol printer label socket =
   withConnection def (ServerUnix (fromOsPath socket)) \ connection ->
-    case protocol of
-      ProtocolGhcServer ->
-        serverStreaming connection (rpc @(Protobuf GhcServer "events")) defMessage \ recv ->
-          whileNext_ recv \ message -> printer.emit label (decode (fromStrict message.payload))
-      ProtocolInstrument ->
-        serverStreaming connection (rpc @(Protobuf Instrument "events")) defMessage \ recv ->
-          whileNext_ recv \ message -> printer.emit label (decode (fromStrict message.payload))
+    streamEvents protocol connection \ recv ->
+      whileNext_ recv \ payload -> printer.emit label (decode (fromStrict payload))
 
 -- | Wait indefinitely for the socket to appear, then stream its events, retrying when connecting fails.
 listenOn :: Protocol -> Printer -> Maybe String -> OsPath -> IO ()
@@ -150,7 +136,7 @@ listenOn protocol printer label socket = do
   info ("Waiting for socket at " ++ fromOsPath socket)
   waitForPath socket
   info ("Listening for events at " ++ fromOsPath socket)
-  retrying attempts (streamEvents protocol printer label socket)
+  retrying attempts (streamSocket protocol printer label socket)
   info ("Event stream ended at " ++ fromOsPath socket)
 
 info :: String -> IO ()

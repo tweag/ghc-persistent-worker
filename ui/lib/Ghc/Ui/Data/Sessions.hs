@@ -6,14 +6,14 @@ import Data.Time (UTCTime)
 import Ghc.Ui.Data.Name (Name (Sessions))
 import Ghc.Ui.Data.Session (SessionEvent, SessionId, SessionState (..))
 import Ghc.Ui.Data.WorkerId (WorkerId)
-import Network.GRPC.Client (Connection)
+import Ghc.Ui.Data.ServerConnection (ServerConnection)
 
 -- TODO why is this a tuple?
 -- If the index is required, can it be a Map?
 type SessionsState = GenericList Name Seq SessionState
 
 newtype GrpcConnection =
-  GrpcConnection Connection
+  GrpcConnection ServerConnection
 
 instance Show GrpcConnection where
   show _ = "GrpcConnection"

@@ -2,6 +2,7 @@ module Ghc.Ui.Run where
 
 import Brick (customMainWithDefaultVty)
 import Brick.BChan (newBChan)
+import BuckWorkerProto.Data.Protocol (Protocol (..))
 import Control.Applicative ((<|>))
 import Control.Concurrent (newMVar, threadDelay)
 import Control.Concurrent.Async.Lifted (async)
@@ -46,12 +47,18 @@ envWorkerPath :: IO WorkerPath
 envWorkerPath =
   WorkerPath <$> workerDirectory
 
-resolveSocket :: IO (Maybe OsPath)
+-- | A socket given via @INSTRUMENT_SOCKET@ belongs to a worker, while the default socket in the current directory
+-- belongs to a @ghc-server@.
+resolveSocket :: IO (Maybe (Protocol, OsPath))
 resolveSocket = do
   cwd <- getCurrentDirectory
   fromEnv <- fmap toOsPath <$> lookupEnv "INSTRUMENT_SOCKET"
   defaultUp <- isServerUp (defaultSocketPath cwd)
-  pure (fromEnv <|> (if defaultUp then Just (defaultSocketPath cwd) else Nothing))
+  pure (
+    ((ProtocolInstrument,) <$> fromEnv)
+    <|>
+    (if defaultUp then Just (ProtocolGhcServer, defaultSocketPath cwd) else Nothing)
+    )
 
 runClock :: ServerM ()
 runClock =
@@ -60,9 +67,9 @@ runClock =
     trySendEvent (SetTime time)
     liftIO $ threadDelay 100_000
 
-connectAsync :: OsPath -> ServerM ()
-connectAsync socket =
-  void $ async $ serverConnect Nothing socket
+connectAsync :: Protocol -> OsPath -> ServerM ()
+connectAsync protocol socket =
+  void $ async $ serverConnect protocol Nothing socket
 
 -- | Find already running workers if the socket directory exists, or create the directory otherwise. Reports
 -- a failure creating the directory (e.g. permission denied) to the op log instead of discarding it, since a
@@ -72,7 +79,7 @@ discover workers = do
   whenM (liftIO (doesDirectoryExist workers.path)) do
     dirs <- liftIO $ listDirectory workers.path
     sockets <- liftIO $ filterM doesPathExist [workers.path </> dir </> [osp|instrument|] | dir <- dirs]
-    traverse_ (serverConnect Nothing) sockets
+    traverse_ (serverConnect ProtocolInstrument Nothing) sockets
   created <- liftIO $ try @IOException (createDirectoryIfMissing True workers.path)
   either createDirFailed pure created
   where
@@ -87,7 +94,7 @@ runWorkerWatcher workers manager = do
       if not (isInfixOf [osp|log|] dir)
       then lower do
         logInfo "Detected new worker"
-        connectAsync (dir </> [osp|instrument|])
+        connectAsync ProtocolInstrument (dir </> [osp|instrument|])
       else pure ()
 
 withWorkerWatcher ::
@@ -104,9 +111,9 @@ withoutSpecified workers ma = do
   discover workers
   withWorkerWatcher workers ma
 
-withSpecified :: OsPath -> ServerM a -> ServerM a
-withSpecified socket ma = do
-  connectAsync socket
+withSpecified :: (Protocol, OsPath) -> ServerM a -> ServerM a
+withSpecified (protocol, socket) ma = do
+  connectAsync protocol socket
   ma
 
 runBrick :: ServerM ()

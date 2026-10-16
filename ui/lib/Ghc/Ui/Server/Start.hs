@@ -1,5 +1,7 @@
 module Ghc.Ui.Server.Start where
 
+import BuckWorkerProto.Data.Protocol (Protocol (..))
+import BuckWorkerProto.Protocol (streamEvents)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async.Lifted (async, cancel)
 import Control.Exception (SomeException)
@@ -9,7 +11,7 @@ import Control.Monad.Extra (ifM, unlessM)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (ReaderT (..), ask)
 import Data.Binary (decode)
-import Data.ByteString (fromStrict)
+import Data.ByteString (ByteString, fromStrict)
 import Data.Foldable (for_, traverse_)
 import Data.Functor ((<&>))
 import Data.IORef (IORef)
@@ -19,6 +21,7 @@ import qualified Data.Text as Text
 import Data.Text (Text)
 import Ghc.Ui.Data.Main (MainEvent (..))
 import Ghc.Ui.Data.OpLog (OpLevel (..))
+import Ghc.Ui.Data.ServerConnection (ServerConnection (..))
 import Ghc.Ui.Data.ServerHandlers (ServerHandlers (..))
 import Ghc.Ui.Data.ServerProcess (
   ServerConfig (..),
@@ -46,12 +49,9 @@ import Ghc.Ui.Server.Monad (
   )
 import Ghc.Ui.Server.Process (isServerUp, resolveServerExe, startServerProcess)
 import Ghc.Ui.Server.Stop (requestShutdown, stopServer)
-import Network.GRPC.Client (Server (ServerUnix), closeConnection, openConnection, rpc)
-import Network.GRPC.Client.StreamType.IO (serverStreaming)
+import Network.GRPC.Client (Server (ServerUnix), closeConnection, openConnection)
 import Network.GRPC.Common (NextElem, def)
 import Network.GRPC.Common.NextElem (whileNext_)
-import Network.GRPC.Common.Protobuf (Proto, Protobuf, defMessage)
-import Proto.GhcServer (Encoded, GhcServer)
 import System.Directory.OsPath (getModificationTime)
 import System.Exit (ExitCode (..))
 import System.IO qualified as IO
@@ -67,19 +67,22 @@ defaultSocketPath root = root </> [osp|socket/server.sock|]
 serverListen ::
   SessionId ->
   WorkerId ->
-  (ReaderT ServerEnv IO (NextElem (Proto Encoded))) ->
+  ServerM (NextElem ByteString) ->
   ServerM ()
 serverListen sessionId workerId recv =
-  whileNext_ recv \ message ->
+  whileNext_ recv \ payload ->
     sendEvent $
     Sessions $
-    Sessions.Session sessionId (ApiEvent workerId (decode (fromStrict message.payload)))
+    Sessions.Session sessionId (ApiEvent workerId (decode (fromStrict payload)))
 
+-- | Subscribe to the events of the server listening on the socket, using the gRPC service determined by the
+-- 'Protocol'.
 serverConnect ::
+  Protocol ->
   Maybe ServerProcess ->
   OsPath ->
   ServerM ()
-serverConnect process socket =
+serverConnect protocol process socket =
  spin (5 :: Int)
  where
     spin = \case
@@ -89,10 +92,10 @@ serverConnect process socket =
           catch (tryConnect connection) (retry n)
 
     tryConnect connection =
-      serverStreaming connection (rpc @(Protobuf GhcServer "events")) defMessage \ recv -> do
+      streamEvents protocol connection \ recv -> do
         traverse_ updateProcess process
         time <- liftIO $ getModificationTime socket
-        sendEvent $ Sessions $ Sessions.AddWorker sessionId workerId time (GrpcConnection connection)
+        sendEvent $ Sessions $ Sessions.AddWorker sessionId workerId time (GrpcConnection ServerConnection {protocol, connection})
         serverListen sessionId workerId recv
 
     updateProcess new =
@@ -119,7 +122,7 @@ serverConnect process socket =
 listenSubprocess :: OsPath -> ServerM ()
 listenSubprocess socket = do
   liftIO (isServerUp socket) >>= \case
-    True -> serverConnect Nothing socket
+    True -> serverConnect ProtocolGhcServer Nothing socket
     False -> do
       liftIO (threadDelay 100_000)
       listenSubprocess socket
@@ -178,7 +181,7 @@ ensureServerOnSocket path socket config@ServerConfig {root, options} =
   where
     connectExisting = do
       logInfo ("Connecting to preexisting ghc-server process in " <> desc)
-      void $ async $ serverConnect (Just (withStatus ServerConnected)) socket
+      void $ async $ serverConnect ProtocolGhcServer (Just (withStatus ServerConnected)) socket
       pure (withStatus ServerStarting)
 
     startNew = do

@@ -231,6 +231,7 @@
           "bytestring"
           "containers"
           "deepseq"
+          "exceptions"
           "grapesy"
           "lens-family"
           "proto-lens"

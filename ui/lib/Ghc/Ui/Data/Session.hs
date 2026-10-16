@@ -16,7 +16,7 @@ import Ghc.Ui.Data.Settings (SettingsState)
 import qualified Ghc.Ui.Data.Tasks as Tasks
 import Ghc.Ui.Data.Tasks (TasksState)
 import Ghc.Ui.Data.WorkerId (WorkerId)
-import Network.GRPC.Client (Connection)
+import Ghc.Ui.Data.ServerConnection (ServerConnection)
 import Types.Api qualified as Api
 
 newtype SessionId =
@@ -26,7 +26,7 @@ newtype SessionId =
 data Worker =
   Worker {
     workerId :: WorkerId,
-    connection :: Connection,
+    connection :: ServerConnection,
     stats :: Stats
   }
   deriving stock (Generic)

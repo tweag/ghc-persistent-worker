@@ -27,6 +27,8 @@ library
 
   exposed-modules:
     BuckWorkerProto,
+    BuckWorkerProto.Data.Protocol,
+    BuckWorkerProto.Protocol,
     Proto.Worker,
     Proto.Worker_Fields
     Proto.Instrument,
@@ -40,6 +42,7 @@ library
     bytestring,
     containers,
     deepseq,
+    exceptions,
     grapesy ^>=1.1,
     lens-family,
     proto-lens,

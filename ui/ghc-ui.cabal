@@ -43,6 +43,7 @@ library
     Ghc.Ui.Data.OpLog
     Ghc.Ui.Data.Project
     Ghc.Ui.Data.ServerApi
+    Ghc.Ui.Data.ServerConnection
     Ghc.Ui.Data.ServerHandlers
     Ghc.Ui.Data.ServerProcess
     Ghc.Ui.Data.Session
