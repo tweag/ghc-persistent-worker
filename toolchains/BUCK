@@ -81,7 +81,7 @@ persistent_worker(
     worker_proxy = ":buck_proxy",
     # worker = ":impure_ghc_worker",
     # worker_proxy = ":impure_buck_proxy",
-    worker_args = ["--enable", "instrument"],
+    worker_args = ["--enable", "instrument", "--executor-rts", "-N4 -A16M"],
     proxy_args = [],
 )
 
