@@ -118,6 +118,7 @@ library
                       Internal.State.UnitIndex
                       Internal.State.UnitIndex.Update
                       Internal.ValidateNames
+                      Internal.Watch
 
     build-depends:    aeson,
                       array,
@@ -128,6 +129,8 @@ library
                       directory,
                       exceptions,
                       bytestring,
+                      extra,
+                      fsnotify,
                       flatparse,
                       filepath,
                       file-io,

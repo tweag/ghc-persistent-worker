@@ -4,12 +4,18 @@
 module GhcClient.Listen where
 
 import BuckWorkerProto ()
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.MVar (newMVar, withMVar)
+import Control.Exception (SomeAsyncException, SomeException, catch, displayException, fromException, throwIO)
+import Control.Monad (void)
+import Data.Maybe (isJust)
 import Data.Binary (decode)
 import Data.ByteString (fromStrict)
 import Data.List (intercalate)
 import Data.Text qualified as Text
 import GhcServer.Optparse (readPath)
 import GhcServer.Path (socketPath)
+import Internal.Watch (waitForPath, watchWorkerSockets, workerDirectory)
 import Network.GRPC.Client (Server (..), rpc, withConnection)
 import Network.GRPC.Client.StreamType.IO (serverStreaming)
 import Network.GRPC.Common (def)
@@ -29,10 +35,10 @@ import Options.Applicative (
   )
 import Proto.GhcServer (GhcServer)
 import Proto.Instrument (Instrument)
-import System.Directory.OsPath (getCurrentDirectory)
-import System.IO (hPutStrLn, stderr)
+import System.Environment (lookupEnv)
+import System.IO qualified as IO
 import System.OsPath (OsPath)
-import System.OsPath.Extra (fromOsPath)
+import System.OsPath.Extra (fromOsPath, takeDirectory, takeFileName, toOsPath)
 import Types.Api (
   Event (..),
   ExecutorId (..),
@@ -74,33 +80,100 @@ listenParser = do
       long "protocol" <> metavar "PROTOCOL" <> value ProtocolGhcServer <> showDefault
       <> help "Service providing the events: ghc-server or instrument"
     )
-  projectRoot <- optional (option readPath (long "root" <> metavar "PROJECT_ROOT" <> help "Path to the project directory"))
-  socket <- optional (option readPath (long "socket" <> metavar "SOCKET" <> help "Path to the server's Unix socket, overriding the one derived from the project root"))
+  projectRoot <- optional (option readPath (long "root" <> metavar "PROJECT_ROOT" <> help "Project directory whose ghc-server socket is used"))
+  socket <- optional (option readPath (long "socket" <> metavar "SOCKET" <> help "Path to the server's Unix socket; by default, workers are discovered in the worker directory"))
   pure ListenConfig {..}
 
-resolveSocket :: ListenConfig -> IO OsPath
-resolveSocket config =
-  case config.socket of
-    Just path -> pure path
-    Nothing -> socketPath <$> maybe getCurrentDirectory pure config.projectRoot
+-- | Where events come from: one known socket, or every worker that appears in the worker directory.
+data Source =
+  SingleSocket OsPath
+  |
+  WorkerDirectory OsPath
+  deriving stock (Eq, Show)
 
--- | Connect to the server and print each received event until the stream ends.
-listen :: ListenConfig -> IO ()
-listen config = do
-  socket <- resolveSocket config
-  hPutStrLn stderr ("Listening for events at " ++ fromOsPath socket)
+-- | Without an explicit socket or project root, workers are discovered like the UI does: via @INSTRUMENT_SOCKET@ or
+-- the worker directory (@WORKER_PATH@, default @/tmp/ghc-persistent-worker@).
+resolveSource :: ListenConfig -> IO Source
+resolveSource config =
+  case (config.socket, config.projectRoot) of
+    (Just path, _) -> pure (SingleSocket path)
+    (Nothing, Just root) -> pure (SingleSocket (socketPath root))
+    (Nothing, Nothing) ->
+      lookupEnv "INSTRUMENT_SOCKET" >>= \case
+        Just path -> pure (SingleSocket (toOsPath path))
+        Nothing -> WorkerDirectory <$> workerDirectory
+
+data Printer =
+  Printer { emit :: Maybe String -> Event -> IO () }
+
+-- | Print events from concurrent listeners without interleaving them, prefixing each line with the label if any.
+newPrinter :: IO Printer
+newPrinter = do
+  lock <- newMVar ()
+  pure Printer {emit = \ label event -> withMVar lock \ () -> putStr (render label event)}
+  where
+    render label event =
+      unlines (fmap (maybe id (\ l -> (('[' : l ++ "] ") ++)) label) (lines (prettyEvent event)))
+
+attempts :: Int
+attempts = 30
+
+retryDelayMicros :: Int
+retryDelayMicros = 100_000
+
+-- | Run the action, retrying after a delay when it throws a synchronous exception, until the attempts run out, in
+-- which case the last exception is rethrown.
+retrying :: Int -> IO a -> IO a
+retrying n action =
+  action `catch` \ (e :: SomeException) ->
+    if n <= 1 || isJust (fromException @SomeAsyncException e)
+    then throwIO e
+    else do
+      threadDelay retryDelayMicros
+      retrying (n - 1) action
+
+-- | Stream the events of a single socket to the printer until the stream ends.
+streamEvents :: Protocol -> Printer -> Maybe String -> OsPath -> IO ()
+streamEvents protocol printer label socket =
   withConnection def (ServerUnix (fromOsPath socket)) \ connection ->
-    case config.protocol of
+    case protocol of
       ProtocolGhcServer ->
         serverStreaming connection (rpc @(Protobuf GhcServer "events")) defMessage \ recv ->
-          whileNext_ recv \ message -> printEvent (decode (fromStrict message.payload))
+          whileNext_ recv \ message -> printer.emit label (decode (fromStrict message.payload))
       ProtocolInstrument ->
         serverStreaming connection (rpc @(Protobuf Instrument "events")) defMessage \ recv ->
-          whileNext_ recv \ message -> printEvent (decode (fromStrict message.payload))
-  hPutStrLn stderr "Event stream ended."
+          whileNext_ recv \ message -> printer.emit label (decode (fromStrict message.payload))
 
-printEvent :: Event -> IO ()
-printEvent = putStrLn . prettyEvent
+-- | Wait indefinitely for the socket to appear, then stream its events, retrying when connecting fails.
+listenOn :: Protocol -> Printer -> Maybe String -> OsPath -> IO ()
+listenOn protocol printer label socket = do
+  info ("Waiting for socket at " ++ fromOsPath socket)
+  waitForPath socket
+  info ("Listening for events at " ++ fromOsPath socket)
+  retrying attempts (streamEvents protocol printer label socket)
+  info ("Event stream ended at " ++ fromOsPath socket)
+
+info :: String -> IO ()
+info = IO.hPutStrLn IO.stderr
+
+-- | Failures of individual workers must not stop the listener from picking up others.
+reportFailure :: OsPath -> IO () -> IO ()
+reportFailure socket action =
+  action `catch` \ (e :: SomeException) ->
+    info ("Failed to listen at " ++ fromOsPath socket ++ ": " ++ displayException e)
+
+-- | Print events from the selected source; for a worker directory, never returns.
+listen :: ListenConfig -> IO ()
+listen config = do
+  printer <- newPrinter
+  resolveSource config >>= \case
+    SingleSocket socket ->
+      listenOn config.protocol printer Nothing socket
+    WorkerDirectory dir -> do
+      info ("Watching for workers in " ++ fromOsPath dir)
+      watchWorkerSockets dir \ socket ->
+        void $ forkIO $ reportFailure socket $
+          listenOn config.protocol printer (Just (fromOsPath (takeFileName (takeDirectory socket)))) socket
 
 requestTag :: RequestId -> String
 requestTag RequestId {number} = "#" ++ show number
@@ -117,7 +190,7 @@ prettyEvent = \case
       ++ ["(debuggable)" | debuggable]
       ++ ["(subprocess)" | process]
     )
-  CompileEnd {target, exitCode, stderr, result, processStats, noMain, requestId} ->
+  CompileEnd {target, exitCode, stderr = errors, result, processStats, noMain, requestId} ->
     withDetails
       (unwords (
         [status, requestTag requestId, Text.unpack (renderTarget target)]
@@ -126,7 +199,7 @@ prettyEvent = \case
       (
         foldMap (\ r -> ["result: " ++ r]) result
         ++ foldMap (pure . prettyProcessStats) processStats
-        ++ [stderr | not (null stderr)]
+        ++ [errors | not (null errors)]
       )
     where
       status = if exitCode == 0 then "done " else "fail "

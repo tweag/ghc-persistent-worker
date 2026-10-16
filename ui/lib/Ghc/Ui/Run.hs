@@ -23,6 +23,7 @@ import Ghc.Ui.Server.Process (isServerUp)
 import Ghc.Ui.Server.Start (defaultSocketPath, serverConnect, serverHandlers)
 import Ghc.Ui.Server.Stop (stopServer)
 import Graphics.Vty (Vty (shutdown))
+import Internal.Watch (watchAddedDirs, workerDirectory)
 import Options.Applicative (execParser)
 import System.Directory.OsPath (
   createDirectoryIfMissing,
@@ -32,10 +33,9 @@ import System.Directory.OsPath (
   listDirectory,
   )
 import System.Environment (lookupEnv)
-import qualified System.FSNotify as FSNotify
-import System.FSNotify (EventIsDirectory (..), WatchManager, watchDir, withManager)
+import System.FSNotify (WatchManager, withManager)
 import System.OsPath (OsPath, osp, (</>))
-import System.OsPath.Extra (fromOsPath, toOsPath)
+import System.OsPath.Extra (toOsPath)
 import System.OsString (isInfixOf)
 
 newtype WorkerPath =
@@ -44,7 +44,7 @@ newtype WorkerPath =
 
 envWorkerPath :: IO WorkerPath
 envWorkerPath =
-  WorkerPath . maybe [osp|/tmp/ghc-persistent-worker|] toOsPath <$> lookupEnv "WORKER_PATH"
+  WorkerPath <$> workerDirectory
 
 resolveSocket :: IO (Maybe OsPath)
 resolveSocket = do
@@ -83,14 +83,12 @@ discover workers = do
 runWorkerWatcher :: WorkerPath -> WatchManager -> ServerM (IO ())
 runWorkerWatcher workers manager = do
   lowerServer \ lower ->
-    watchDir manager (fromOsPath workers.path) (const True) \case
-      FSNotify.Added dir _ IsDirectory
-        | let path = toOsPath dir
-        , not (isInfixOf [osp|log|] path) ->
-          lower do
-            logInfo "Detected new worker"
-            connectAsync (path </> [osp|instrument|])
-      _ -> pure ()
+    watchAddedDirs manager workers.path \ dir ->
+      if not (isInfixOf [osp|log|] dir)
+      then lower do
+        logInfo "Detected new worker"
+        connectAsync (dir </> [osp|instrument|])
+      else pure ()
 
 withWorkerWatcher ::
   WorkerPath ->

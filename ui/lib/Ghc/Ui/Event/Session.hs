@@ -20,7 +20,7 @@ import qualified Ghc.Ui.Event.Log as Log
 import Ghc.Ui.Event.Project qualified as Project
 import Ghc.Ui.Event.Tasks qualified as Tasks
 import qualified Types.Api as Api
-import Types.Api (Event (..), Target, UnitSummary (..))
+import Types.Api (Event (..), Target, UnitSummary (..), RequestId)
 import Types.Settings (Settings (..))
 
 stripEscSeqs :: String -> String
@@ -35,7 +35,7 @@ compileEnd ::
   (Maybe String) ->
   Maybe Api.ProcessStats ->
   Bool ->
-  Int ->
+  RequestId ->
   EventM Name SessionState ()
 compileEnd target exitCode stderr result stats noMain requestId =
   if noMain

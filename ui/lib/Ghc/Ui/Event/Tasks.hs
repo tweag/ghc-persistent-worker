@@ -15,7 +15,7 @@ import Data.Time (getCurrentTime)
 import Ghc.Ui.Data.Name (Name (Tasks))
 import Ghc.Ui.Data.Tasks (Outcome (..), PhaseInfo (..), Task (..), TasksRow (..), TasksState, newTask)
 import Ghc.Ui.Data.WorkerId (WorkerId)
-import Types.Api (ProcessStats, Target)
+import Types.Api (ProcessStats, RequestId, Target)
 
 -- | Insert a row at index @i@ of the given (pre-fetched) element sequence, preserving the logical selection
 -- (mirroring the previous element it pointed to) the same way 'addTask' always did, and -- new -- keeping the
@@ -38,7 +38,7 @@ insertRow i row rows = do
     else
       modifying listSelectedL (Just . maybe i (\i' -> if i' >= i then i' + 1 else i'))
 
-addTask :: Target -> WorkerId -> Bool -> Bool -> Int -> EventM Name TasksState ()
+addTask :: Target -> WorkerId -> Bool -> Bool -> RequestId -> EventM Name TasksState ()
 addTask name wid debuggable process requestId = do
   task <- liftIO $ newTask name wid debuggable process requestId
   rows <- use listElementsL
@@ -62,7 +62,7 @@ addSeparator msg = do
 completeTask ::
   MonadIO m =>
   MonadState TasksState m =>
-  Int ->
+  RequestId ->
   Outcome ->
   Maybe ProcessStats ->
   m ()
@@ -78,7 +78,7 @@ completeTask requestId outcome stats = do
 -- no execution ever took place, so the row added on 'CompileStart' shouldn't linger as if it had.
 removeTask ::
   MonadState TasksState m =>
-  Int ->
+  RequestId ->
   m ()
 removeTask requestId =
   listElementsL %= Seq.filter \case
@@ -100,7 +100,7 @@ getSelectedTarget = do
 -- TODO lensify the request ID selector
 --
 -- TODO Also use listModify etc instead
-phaseStart :: Int -> String -> EventM Name TasksState ()
+phaseStart :: RequestId -> String -> EventM Name TasksState ()
 phaseStart requestId phase =
   listElementsL %= fmap \case
     TaskRow task | task.requestId == requestId ->
@@ -112,7 +112,7 @@ phaseStart requestId phase =
 
 -- | Records the duration of the task's current phase (see 'phaseStart'), identified via 'phase' since
 -- 'Types.Api.PhaseEnd' doesn't itself carry a phase name.
-phaseEnd :: Int -> Word -> EventM Name TasksState ()
+phaseEnd :: RequestId -> Word -> EventM Name TasksState ()
 phaseEnd requestId duration =
   listElementsL %= fmap \case
     TaskRow task | task.requestId == requestId ->

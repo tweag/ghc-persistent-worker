@@ -8,7 +8,7 @@ import Data.Text (Text)
 import Data.Time (UTCTime, getCurrentTime)
 import Ghc.Ui.Data.Name (Name (Tasks))
 import Ghc.Ui.Data.WorkerId (WorkerId)
-import Types.Api (ProcessStats, Target)
+import Types.Api (ProcessStats, RequestId, Target)
 
 -- | The outcome of a task, once it has finished. A task with no outcome yet is still running. A successful
 -- execute task (see 'Types.Api.Event'\'s @CompileEnd@ @result@ field) carries the exfiltrated @main@
@@ -49,7 +49,7 @@ data Task =
     -- Identifies this row unambiguously, so 'completeTask'\/'phaseStart'\/'phaseEnd' can match the exact task
     -- instance instead of matching by target text, which collides when the same target is dispatched more than
     -- once (e.g. as both a direct request and a transitive dependency of another request).
-    requestId :: Int
+    requestId :: RequestId
   }
 
 newTask ::
@@ -58,7 +58,7 @@ newTask ::
   WorkerId ->
   Bool ->
   Bool ->
-  Int ->
+  RequestId ->
   m Task
 newTask target worker debuggable process requestId = do
   startTime <- liftIO getCurrentTime
