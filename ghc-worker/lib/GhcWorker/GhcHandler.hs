@@ -192,6 +192,7 @@ dispatch hooks env args =
           reported modTarget True $
             runInExecutor (publishEvent hooks) env.log env.state executorId
               (concatMap (\ db -> ["-package-db", db]) packageDbs)
+              args.evalEnv
               (moduleUnitId modTarget.module_, moduleName modTarget.module_) expr kind
 #endif
 

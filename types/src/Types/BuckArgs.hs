@@ -106,7 +106,9 @@ data BuckArgs =
     evalCountFailures :: Bool,
     -- | Identifier of a persistent executor subprocess in which eval mode runs the expression, shared by all eval
     -- targets that specify the same id (see @GhcWorker.Eval.Executor@). Without it, the worker evaluates in-process.
-    evalExecutor :: Maybe String
+    evalExecutor :: Maybe String,
+    -- | Environment variables to set in the executor process while running the expression (@--eval-env KEY=VALUE@).
+    evalEnv :: [(String, String)]
   }
   deriving stock (Eq, Show)
 
@@ -149,7 +151,8 @@ emptyBuckArgs env =
     expr = Nothing,
     evalTargetName = Nothing,
     evalCountFailures = False,
-    evalExecutor = Nothing
+    evalExecutor = Nothing,
+    evalEnv = []
   }
 
 options :: Map String ([String] -> BuckArgs -> Either String ([String], BuckArgs))
@@ -191,10 +194,15 @@ options =
     withArg "--eval-target-name" \ z a -> z {evalTargetName = Just a},
     flag "--eval-count-failures" \ z -> z {evalCountFailures = True},
     withArg "--eval-executor" \ z a -> z {evalExecutor = Just a},
+    withArgErr "--eval-env" \ z a -> addEvalEnv z a,
     ("-c", \ rest z -> Right (rest, z {mode = Just ModeCompile})),
     ("-M", \ rest z -> Right (rest, z {mode = Just ModeMetadata}))
   ]
   where
+    addEvalEnv z a = case break (== '=') a of
+      (key, '=' : value) -> Right z {evalEnv = z.evalEnv ++ [(key, value)]}
+      _ -> Left ("--eval-env needs an argument of the form KEY=VALUE (arg: " ++ a ++ ")")
+
     addEnv z a = case z.envKey of
       Just key -> Right z {env = Map.insert key a z.env, envKey = Nothing}
       Nothing -> Left ("--extra-env-value used without preceding --extra-env-key (arg: " ++ a ++ ")")

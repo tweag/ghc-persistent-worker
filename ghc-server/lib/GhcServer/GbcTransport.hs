@@ -313,7 +313,7 @@ spawnRegistered stateVar options = do
 -- | Run one round and check its result and the number of sent modules, returning whether both match.
 round_ :: MVar WorkerState -> GbcTransportOptions -> PayloadTransport -> String -> Int -> Int -> IO Bool
 round_ stateVar options transport label offset expectedSent = do
-  (result, seconds) <- timed (executePlanned ExecutePlan transport stateVar executorId transportOptions root "entry" EntryString)
+  (result, seconds) <- timed (executePlanned ExecutePlan transport stateVar executorId transportOptions [] root "entry" EntryString)
   putStrLn ("[" ++ label ++ "] seconds: " ++ show seconds)
   case result of
     Left err -> False <$ putStrLn ("[" ++ label ++ "] failed: " ++ displayPlanError err)

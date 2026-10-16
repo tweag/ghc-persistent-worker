@@ -235,7 +235,7 @@ test_executorPlanExecute =
               _ <- ensureExecutor buildEnv executorId
               options <- executorGhcOptions buildEnv cfg.unit
               transport <- payloadTransport buildEnv
-              executePlanned ExecutePlan transport buildEnv.stateVar executorId options root "main" EntryString
+              executePlanned ExecutePlan transport buildEnv.stateVar executorId options [] root "main" EntryString
             planned = either (fail . show) pure
             sentModules plan = showHomeModuleId . (.home) <$> plan.modules
             check (plan, output) = do

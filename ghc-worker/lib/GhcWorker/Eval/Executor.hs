@@ -97,19 +97,20 @@ runInExecutor ::
   MVar WorkerState ->
   ExecutorId ->
   [String] ->
+  [(String, String)] ->
   HomeModuleId ->
   String ->
   EntryKind ->
   IO EvalReport
-runInExecutor emit logger stateVar executorId options root entry kind = do
+runInExecutor emit logger stateVar executorId options env root entry kind = do
   transport <- payloadTransport
-  let execute = executePlanned id transport stateVar executorId options root entry kind
-  env <- executorEnv emit stateVar
-  seen <- Lifecycle.ensureExecutor env executorId
+  let execute = executePlanned id transport stateVar executorId options env root entry kind
+  executorEnv_ <- executorEnv emit stateVar
+  seen <- Lifecycle.ensureExecutor executorEnv_ executorId
   first <- execute
   result <-
     if needsRespawn first
-    then Lifecycle.respawnExecutor env executorId seen.incarnation *> execute
+    then Lifecycle.respawnExecutor executorEnv_ executorId seen.incarnation *> execute
     else pure first
   reportResult logger result
 

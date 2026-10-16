@@ -347,8 +347,8 @@ resetLoaded stateVar executorId =
     reset handle = handle {loaded = ExecutorLoaded {modules = Map.empty, generation = handle.loaded.generation}}
 
 -- | The wire request for a plan.
-planRequest :: [String] -> HomeModuleId -> String -> EntryKind -> ExecutorPlan -> PlanRequest
-planRequest ghcOptions (unit, name) entry entryKind plan =
+planRequest :: [String] -> [(String, String)] -> HomeModuleId -> String -> EntryKind -> ExecutorPlan -> PlanRequest
+planRequest ghcOptions env (unit, name) entry entryKind plan =
   PlanRequest {
     ghcOptions,
     units = unitIdString <$> plan.units,
@@ -358,7 +358,8 @@ planRequest ghcOptions (unit, name) entry entryKind plan =
     entryUnit = unitIdString unit,
     entryModule = moduleNameString name,
     entry,
-    entryKind
+    entryKind,
+    env
   }
 
 -- | Whether the executor's loaded state is still what the parent recorded after a call.
@@ -399,11 +400,13 @@ executePlanned ::
   MVar WorkerState ->
   ExecutorId ->
   [String] ->
+  -- | Environment variables to set in the executor process for the execution.
+  [(String, String)] ->
   HomeModuleId ->
   String ->
   EntryKind ->
   IO (Either PlanError (ExecutorPlan, ProcessEvalOutput))
-executePlanned wrap transport stateVar executorId ghcOptions root entry kind =
+executePlanned wrap transport stateVar executorId ghcOptions env root entry kind =
   lookupCalls >>= \case
     Nothing -> pure (Left (PlanUnavailable ("Executor not registered: " ++ show executorId)))
     Just calls -> withMVar calls \ () -> planAndCall
@@ -414,7 +417,7 @@ executePlanned wrap transport stateVar executorId ghcOptions root entry kind =
       prepareExecution transport stateVar executorId root >>= \case
         Left err -> pure (Left (PlanUnavailable err))
         Right (handle, plan) ->
-          try @SomeException (callExecutorJson handle (wrap (planRequest ghcOptions root entry kind plan))) >>= \case
+          try @SomeException (callExecutorJson handle (wrap (planRequest ghcOptions env root entry kind plan))) >>= \case
             Left err -> Left (ExecutorUnreachable (displayException err)) <$ resetLoaded stateVar executorId
             Right output -> do
               unless (planApplied output) (resetLoaded stateVar executorId)

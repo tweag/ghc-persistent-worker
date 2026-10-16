@@ -119,7 +119,9 @@ data PlanRequest =
     entryUnit :: String,
     entryModule :: String,
     entry :: String,
-    entryKind :: EntryKind
+    entryKind :: EntryKind,
+    -- | Environment variables to set in the child process before running the entry.
+    env :: [(String, String)]
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)

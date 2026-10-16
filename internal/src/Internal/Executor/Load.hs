@@ -27,6 +27,7 @@ import Data.Foldable (for_)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (pack)
+import System.Environment (setEnv)
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import GHC (Ghc, getSession)
 import GHC.ByteCode.Serialize (readBinByteCode)
@@ -169,7 +170,8 @@ runPlan session env0 request =
       (fhv, _, _) <- loadName interp env name
       pure (env, fhv)
 
-    runEntry fhv =
+    runEntry fhv = do
+      for_ request.env (uncurry setEnv)
       either (EvalExecuteFailed . pack . displayException) id <$> try @SomeException case request.entryKind of
         EntryIO -> EvalSuccess Nothing <$ evalIO interp fhv
         EntryString -> EvalSuccess . Just . pack <$> evalString interp fhv

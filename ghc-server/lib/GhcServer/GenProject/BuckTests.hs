@@ -152,6 +152,8 @@ data Attr =
   List [String]
   |
   Str String
+  |
+  Dict [(String, String)]
 
 -- | A Buck target declaration.
 target :: String -> String -> [(String, Attr)] -> String
@@ -165,6 +167,8 @@ target rule name attrs =
       ["    " ++ key ++ " = ["] ++ ["        " ++ show v ++ "," | v <- values] ++ ["    ],"]
     attr (key, Str value) =
       ["    " ++ key ++ " = " ++ show value ++ ","]
+    attr (key, Dict entries) =
+      ["    " ++ key ++ " = {"] ++ ["        " ++ show k ++ ": " ++ show v ++ "," | (k, v) <- entries] ++ ["    },"]
 
 -- | The library of a dependency unit; the first one also contains the runner.
 u2Target :: BuckTestsShape -> Int -> String
@@ -195,6 +199,7 @@ evalTarget shape u t =
     ("modname", Str (testModule u t)),
     ("expr", Str "test"),
     ("executor", Str (u1Library u)),
+    ("env", Dict [("test_iterations", show u)]),
     ("deps", List (["//haskell:base", ":" ++ u1Library u] ++ [":" ++ u2Library d | d <- [1 .. shape.u2]]))
   ]
 

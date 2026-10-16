@@ -90,7 +90,7 @@ executeModuleTaskExecutor env executorId unit modName =
     runPlanned kind = do
       options <- executorGhcOptions env unit
       transport <- payloadTransport env
-      withRespawn env executorId (executePlanned ExecutePlan transport env.stateVar executorId options root "main" kind)
+      withRespawn env executorId (executePlanned ExecutePlan transport env.stateVar executorId options [] root "main" kind)
 
     logger = instrumentLogger env.instrChan logCategory env.log
 
