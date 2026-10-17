@@ -35,11 +35,6 @@ data Feature =
   -- | Transfer the bytecode payloads of executor plans through an append-only segment in shared memory instead of
   -- @.gbc@ files (see 'Internal.Executor.PayloadArena'). Only effective with the GBC backport.
   FeatureSharedPayloads
-  |
-  -- | Replace the @stdout@ and @stderr@ of persistent executors with handles that attribute the output to the calls
-  -- that wrote it (see 'Internal.Executor.Output'). It is read when an executor is spawned, so toggling it affects
-  -- executors spawned afterwards. Without it, the output goes to the real stdio of the executor process.
-  FeatureExecutorCaptureStdio
   deriving stock (Eq, Show, Ord, Enum, Bounded, Generic)
   deriving anyclass (Binary, FromJSON, ToJSON)
 
@@ -56,5 +51,4 @@ parseFeatureFlag = \case
   "lazy-byte-code" -> Right FeatureLazyByteCode
   "shared-memory" -> Right FeatureSharedMemory
   "shared-payloads" -> Right FeatureSharedPayloads
-  "executor-capture-stdio" -> Right FeatureExecutorCaptureStdio
   flag -> Left ("Invalid feature flag: " <> flag)

@@ -71,10 +71,10 @@ featureFlagsParser =
       flag <- eitherReader (first unpack . parseFeatureFlag . pack)
       pure (flag, enabled)
 
--- | Parser for '--executor-capture-stdio', which enables 'FeatureExecutorCaptureStdio' like @--enable@ does.
+-- | Parser for '--executor-capture-stdio', which sets 'Types.Settings.Settings.executorCaptureStdio'.
 captureStdioParser :: Parser (Settings -> Settings)
 captureStdioParser =
-  flag id (setFeature FeatureExecutorCaptureStdio True) (
+  flag id (\ settings -> settings {executorCaptureStdio = True}) (
     long "executor-capture-stdio"
     <> help "Attribute the stdout and stderr of persistent executors to their tasks"
     )

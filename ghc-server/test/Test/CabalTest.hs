@@ -110,6 +110,16 @@ createSmallCabalProject :: FilePath -> IO ()
 createSmallCabalProject root = do
   createDirectoryIfMissing True (root ++ "/lib-a")
   createDirectoryIfMissing True (root ++ "/lib-b")
+  createDirectoryIfMissing True (root ++ "/test-main")
+
+  writeProjectFile root "test-main/Main.hs" $ unlines
+    [ "module Main where"
+    , ""
+    , "import B (greeting)"
+    , ""
+    , "main :: IO ()"
+    , "main = putStrLn greeting"
+    ]
 
   writeProjectFile root "lib-a/A.hs" $ unlines
     [ "module A where"
@@ -143,6 +153,13 @@ createSmallCabalProject root = do
     , "  hs-source-dirs: lib-b"
     , "  exposed-modules: B"
     , "  build-depends: base, test-project:lib-a"
+    , "  default-language: GHC2021"
+    , ""
+    , "test-suite lib-b-test"
+    , "  type: exitcode-stdio-1.0"
+    , "  hs-source-dirs: test-main"
+    , "  main-is: Main.hs"
+    , "  build-depends: base, test-project:lib-b"
     , "  default-language: GHC2021"
     ]
 
@@ -245,6 +262,7 @@ test_cabalDiscovery =
     annotate ("Units: " ++ show unitNames)
     diff (UnitName "lib-a") Set.member unitNames
     diff (UnitName "lib-b") Set.member unitNames
+    diff (UnitName "lib-b-test") Set.member unitNames
 
     case Map.lookup (UnitName "lib-b") tp.project.units of
       Nothing -> annotate "lib-b not found" >> assert False
@@ -262,6 +280,7 @@ test_cabalBuildAll =
     assertHasMetadata "lib-b" evs
     assertHasCompiled "lib-a" evs
     assertHasCompiled "lib-b" evs
+    assertHasCompiled "lib-b-test" evs
 
 -- | Test the large 4-library Cabal project builds.
 test_cabalLargeBuild :: TestTree

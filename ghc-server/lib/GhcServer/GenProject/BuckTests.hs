@@ -110,7 +110,10 @@ testSource name deps =
       "test :: IO String",
       "test = do",
       "  putStrLn (" ++ show (name ++ " dependencies: ") ++ " ++ show (sum [" ++ intercalate ", " (["value"] ++ [dep ++ ".value" | dep <- deps]) ++ "]))",
-      "  " ++ runnerModule ++ ".runTest " ++ show name
+      "  " ++ runnerModule ++ ".runTest " ++ show name,
+      "",
+      "main :: IO ()",
+      "main = test >>= putStrLn"
     ]
 
 -- | Source of the shared test runner.
@@ -199,7 +202,7 @@ evalTarget shape u t =
     ("modname", Str (testModule u t)),
     ("expr", Str "test"),
     ("executor", Str (u1Library u)),
-    ("env", Dict [("test_iterations", show u)]),
+    ("env", Dict [("test_iterations", show (10 * u))]),
     ("deps", List (["//haskell:base", ":" ++ u1Library u] ++ [":" ++ u2Library d | d <- [1 .. shape.u2]]))
   ]
 
@@ -211,11 +214,58 @@ buckFile shape =
   ++ concat [u1Target shape u | u <- [1 .. shape.u1]]
   ++ concat [evalTarget shape u t | u <- [1 .. shape.u1], t <- [1 .. shape.mt]]
 
+-- | A Cabal stanza.
+stanza :: String -> String -> [(String, [String])] -> [String]
+stanza kind name fields =
+  [kind ++ " " ++ name]
+  ++ ["  " ++ key ++ ": " ++ intercalate ", " values | (key, values) <- fields]
+  ++ [""]
+
+-- | Cabal component names cannot contain underscores.
+cabalName :: String -> String
+cabalName = map \ c -> if c == '_' then '-' else c
+
+-- | The Cabal file with a sublibrary for each library unit and a test suite for each test target.
+--
+-- Each test suite's main module is the test module itself, selected with @-main-is@.
+cabalFile :: BuckTestsShape -> String
+cabalFile shape =
+  unlines $
+    ["cabal-version: 3.0", "name: " ++ packageName, "version: 0.1.0.0", "build-type: Simple", ""]
+    ++ concat [u2Stanza u | u <- [1 .. shape.u2]]
+    ++ concat [u1Stanza u | u <- [1 .. shape.u1]]
+    ++ concat [testStanza u t | u <- [1 .. shape.u1], t <- [1 .. shape.mt]]
+  where
+    u2Stanza u =
+      stanza "library" (cabalName (u2Library u)) [
+        ("exposed-modules", [m2Module u m | m <- [1 .. shape.m2]] ++ [runnerModule | u == 1]),
+        ("build-depends", ["base"] ++ ["random" | u == 1]),
+        ("default-language", ["Haskell2010"])
+      ]
+    u1Stanza u =
+      stanza "library" (cabalName (u1Library u)) [
+        ("exposed-modules", [m1Module u m | m <- [1 .. shape.m1]]),
+        ("build-depends", ["base"]),
+        ("default-language", ["Haskell2010"])
+      ]
+    testStanza u t =
+      stanza "test-suite" (cabalName (testTarget u t)) [
+        ("type", ["exitcode-stdio-1.0"]),
+        ("main-is", [testModule u t ++ ".hs"]),
+        ("ghc-options", ["-main-is " ++ testModule u t]),
+        ("build-depends", ["base", packageName ++ ":{" ++ intercalate ", " (cabalName <$> u1Library u : [u2Library d | d <- [1 .. shape.u2]]) ++ "}"]),
+        ("default-language", ["Haskell2010"])
+      ]
+
+packageName :: String
+packageName = "buck-tests"
+
 -- | Write the project to disk.
 writeBuckTestsProject :: OsPath -> BuckTestsShape -> IO ()
 writeBuckTestsProject root shape = do
   createDirectoryIfMissing True root
   OsPath.writeFile (root </> [osp|BUCK|]) (toUtf8Lazy (buckFile shape))
+  OsPath.writeFile (root </> toOsPath packageName <.> [osp|cabal|]) (toUtf8Lazy (cabalFile shape))
   write runnerModule runnerSource
   mapM_ (\ (name, deps) -> write name (testSource name deps)) tests
   mapM_ (\ name -> write name (librarySource name)) libraries

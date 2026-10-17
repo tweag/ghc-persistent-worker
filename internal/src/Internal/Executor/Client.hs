@@ -38,8 +38,7 @@ import System.Process (
   )
 import Types.Api (Event (..), ExecutorId, RequestId)
 import Types.Executor.Protocol (CallError (..), CallResult, ExecutorCall, ExecutorEvent (..), ExecutorRequest (..), OutputLine (..))
-import Types.FeatureFlags (Feature (..))
-import Types.Settings (Settings, featureOn)
+import Types.Settings (Settings (..))
 import Types.State (WorkerState (..))
 import Types.State.Executor (ExecutorHandle (..), emptyExecutorLoaded, newCallLock)
 
@@ -49,14 +48,15 @@ rtsArgs = \case
   [] -> []
   opts -> ["+RTS"] ++ opts ++ ["-RTS"]
 
--- | Argument that makes an executor attribute its stdout and stderr to the calls, see 'FeatureExecutorCaptureStdio'.
+-- | Argument that makes an executor attribute its stdout and stderr to the calls, see
+-- 'Types.Settings.Settings.executorCaptureStdio'.
 captureStdioArg :: String
 captureStdioArg = "--capture-stdio"
 
 -- | The extra executor arguments for the settings, to be passed to 'spawnExecutorWith'.
 captureStdioArgs :: Settings -> [String]
 captureStdioArgs settings =
-  [captureStdioArg | featureOn FeatureExecutorCaptureStdio settings]
+  [captureStdioArg | settings.executorCaptureStdio]
 
 -- | Launch the given executable as an executor child on the socket, with extra arguments (e.g. RTS options).
 spawnExecutorWith :: FilePath -> [String] -> OsPath -> IO ExecutorHandle

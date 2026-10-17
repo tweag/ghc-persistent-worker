@@ -23,7 +23,12 @@ data Settings =
     -- job once the tracked total exceeds this limit. 'Nothing' disables unloading entirely.
     lazyByteCodeCacheLimit :: Maybe Int,
     -- | RTS options passed to persistent executor subprocesses spawned by the worker's eval mode.
-    executorRts :: [String]
+    executorRts :: [String],
+    -- | Replace the @stdout@ and @stderr@ of persistent executors with handles that attribute the output to the calls
+    -- that wrote it (see 'Internal.Executor.Output'). It is read when an executor is spawned, so changing it affects
+    -- executors spawned afterwards. Without it, the output goes to the real stdio of the executor process and results
+    -- carry no captured output.
+    executorCaptureStdio :: Bool
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary)
@@ -34,7 +39,8 @@ settingsWithFeatures features =
     features,
     useIncrModGraph = True,
     lazyByteCodeCacheLimit = Nothing,
-    executorRts = defaultExecutorRts
+    executorRts = defaultExecutorRts,
+    executorCaptureStdio = False
   }
 
 -- | The nursery of an executor needs to be much smaller than the compiled-in default of the worker, and it doesn't

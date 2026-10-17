@@ -79,7 +79,7 @@ spawnExecutor args executorId = do
 
 -- | The environment of the shared executor lifecycle logic.
 -- The executor arguments are derived from the worker's settings (see 'Types.Settings.Settings.executorRts' and
--- 'Types.FeatureFlags.FeatureExecutorCaptureStdio') up front, since the state is locked while an executor is spawned.
+-- 'Types.Settings.Settings.executorCaptureStdio') up front, since the state is locked while an executor is spawned.
 -- Status events of new executor processes are published with the given action.
 executorEnv :: (Event -> IO ()) -> MVar WorkerState -> IO ExecutorEnv
 executorEnv emit stateVar = do

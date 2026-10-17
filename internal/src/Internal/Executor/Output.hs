@@ -8,7 +8,8 @@
 -- everything a task writes is collected, to be returned in the 'Captured' part of its result.
 --
 -- Output from threads that aren't registered (e.g. ones forked by the evaluated code, or the executor's own) is
--- published without a task and echoed to the original handles.
+-- published without a task.
+-- All output is also copied to the original handles, so that the executor's real stdio shows everything.
 module Internal.Executor.Output where
 
 import Control.Concurrent (ThreadId, myThreadId)
@@ -128,7 +129,7 @@ route router original stream chunk = do
   owner <- currentOwner router
   completed <- completeLines (selectLane stream owner) chunk
   publishLines router owner stream completed
-  unless (isJust owner.task) (writeBytes (selectHandle stream original) chunk)
+  writeBytes (selectHandle stream original) chunk
 
 -- | Replace @stdout@ and @stderr@ for the duration of the action.
 withOutputRouter :: OutputRouter -> IO a -> IO a

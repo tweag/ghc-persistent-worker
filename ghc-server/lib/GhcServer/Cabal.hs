@@ -9,6 +9,7 @@ import Data.Foldable (find, toList, traverse_)
 import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
+import Data.String (fromString)
 import qualified Data.Set as Set
 import Data.Set (Set)
 import qualified Data.Text as Text
@@ -21,6 +22,8 @@ import Distribution.Types.CondTree (CondTree (..))
 import Distribution.Types.Dependency (Dependency (..))
 import Distribution.Types.GenericPackageDescription (GenericPackageDescription (..))
 import Distribution.Types.Library (Library (..))
+import Distribution.Types.TestSuite (TestSuite (..))
+import Distribution.Types.TestSuiteInterface (TestSuiteInterface (..))
 import Distribution.Types.LibraryName (LibraryName (..))
 import Distribution.Types.PackageName (unPackageName)
 import Distribution.Types.UnqualComponentName (unUnqualComponentName)
@@ -32,6 +35,7 @@ import GhcServer.Data.Unit (Project (..), Unit (..), mkUnitCache)
 import GhcServer.Project (unitDepNode)
 import Language.Haskell.Extension (Extension (..), Language (..))
 import System.Directory.OsPath (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, listDirectory)
+import System.FilePath (dropExtension, splitDirectories)
 import System.OsPath (OsPath, isExtensionOf, osp, (</>))
 import System.OsPath.Extra (fromOsPath, toOsPath)
 import Types.Log (Logger (..))
@@ -204,7 +208,21 @@ languageArg = \case
   Just lang -> "-X" ++ show lang
   Nothing -> "-XHaskell2010"
 
--- | Build a 'Unit' from a library component.
+-- | The module of a test suite's @main-is@ file, named after its path.
+--
+-- Only @exitcode-stdio@ suites have one.
+testMainModules :: TestSuiteInterface -> [Cabal.ModuleName]
+testMainModules = \case
+  TestSuiteExeV10 _ path -> [fromString (intercalate "." (splitDirectories (dropExtension (mainIsPath path))))]
+  _ -> []
+  where
+#if MIN_VERSION_Cabal(3,14,0)
+    mainIsPath = getSymbolicPath
+#else
+    mainIsPath = id
+#endif
+
+-- | Build a 'Unit' from a component's modules and build info.
 buildUnit ::
   OsPath ->
   OsPath ->
@@ -212,10 +230,11 @@ buildUnit ::
   UnitName ->
   Set UnitName ->
   UnitName ->
-  Library ->
+  [Cabal.ModuleName] ->
+  BuildInfo ->
   IO Unit
-buildUnit projectRoot outputDir tmpDir pkgName components name lib = do
-  modules <- componentModules name srcDirs (lib.exposedModules ++ bi.otherModules)
+buildUnit projectRoot outputDir tmpDir pkgName components name componentMods bi = do
+  modules <- componentModules name srcDirs (componentMods ++ bi.otherModules)
   createDirectoryIfMissing True (outputDir </> toOsPath (Text.unpack name.text))
   createDirectoryIfMissing True (tmpDir </> toOsPath (Text.unpack name.text))
   pure Unit {
@@ -243,12 +262,10 @@ buildUnit projectRoot outputDir tmpDir pkgName components name lib = do
 
     ghcArgs = extensionArgs ++ concatMap (\ d -> ["-package", Text.unpack d.text]) (extDeps ++ coreDeps)
 
-    bi = lib.libBuildInfo
-
 processPackage :: OsPath -> OsPath -> OsPath -> GenericPackageDescription -> IO Project
 processPackage projectRoot outputDir tmpDir gpd = do
-  units <- for (main ++ sub) \ (name, tree) ->
-    buildUnit projectRoot outputDir tmpDir pkgName components name tree.condTreeData
+  units <- for (libraries ++ tests) \ (name, mods, bi) ->
+    buildUnit projectRoot outputDir tmpDir pkgName components name mods bi
   pure Project {
     units = Map.fromList [(u.name, u) | u <- units],
     depGraph = graphFromEdgedVerticesOrd (map unitDepNode units)
@@ -256,9 +273,22 @@ processPackage projectRoot outputDir tmpDir gpd = do
   where
     components = Set.fromList (fst <$> sub)
 
+
+    libraries = [libraryComponent name tree.condTreeData | (name, tree) <- main ++ sub]
+
+    libraryComponent name lib = (name, lib.exposedModules, lib.libBuildInfo)
+
+    tests = [testComponent name tree.condTreeData | (name, tree) <- testSuites]
+
+    testComponent name suite = (name, testMainModules suite.testInterface, suite.testBuildInfo)
+
+    testSuites = [(componentName name, tree) | (name, tree) <- gpd.condTestSuites]
+
     main = (pkgName,) <$> toList gpd.condLibrary
 
-    sub = [(UnitName (Text.pack (unUnqualComponentName name)), lib) | (name, lib) <- gpd.condSubLibraries]
+    sub = [(componentName name, lib) | (name, lib) <- gpd.condSubLibraries]
+
+    componentName name = UnitName (Text.pack (unUnqualComponentName name))
 
     pkgName = UnitName (Text.pack (unPackageName (packageName gpd)))
 
