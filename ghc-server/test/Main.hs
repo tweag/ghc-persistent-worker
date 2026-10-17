@@ -45,5 +45,6 @@ main = do
   args <- getArgs
   case args of
     ["eval"] -> runProcessEval ProcessEvalOptions {configFile = Nothing}
-    ["executor", "--socket", socket] -> runExecutor (toOsPath socket)
+    ["executor", "--socket", socket] -> runExecutor False (toOsPath socket)
+    ["executor", "--socket", socket, "--capture-stdio"] -> runExecutor True (toOsPath socket)
     _ -> defaultMain tests

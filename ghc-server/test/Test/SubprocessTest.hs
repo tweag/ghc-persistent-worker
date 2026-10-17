@@ -154,9 +154,9 @@ test_executorExecute =
         (buildEnv, cfg) <- compiledProject "ghc-server-executor"
         let executorId = ExecutorId "unit1"
         handle1 <- liftIO (ensureExecutor buildEnv executorId)
-        checkOutput =<< liftIO (callExecutor handle1 cfg)
+        checkOutput =<< liftIO (callExecutor handle1 (RequestId 0) cfg)
         handle2 <- liftIO (ensureExecutor buildEnv executorId)
-        checkOutput =<< liftIO (callExecutor handle2 cfg)
+        checkOutput =<< liftIO (callExecutor handle2 (RequestId 0) cfg)
         pid1 <- liftIO (getPid handle1.process)
         pid2 <- liftIO (getPid handle2.process)
         annotate ("executor pids: " ++ show (pid1, pid2))
@@ -169,7 +169,7 @@ test_executorExecute =
         replacedPid <- liftIO (getPid replaced.process)
         assert (replacedPid /= pid2)
         replaced.incarnation === handle2.incarnation + 1
-        checkOutput =<< liftIO (callExecutor replaced cfg)
+        checkOutput =<< liftIO (callExecutor replaced (RequestId 0) cfg)
         terminated <- liftIO (terminateExecutor buildEnv executorId)
         assert terminated
         state <- liftIO (readMVar buildEnv.stateVar)
@@ -233,7 +233,7 @@ test_executorPlanExecute =
               _ <- ensureExecutor buildEnv executorId
               options <- executorGhcOptions buildEnv cfg.unit
               transport <- payloadTransport buildEnv
-              executePlanned transport buildEnv.stateVar executorId options [] root "main" EntryString
+              executePlanned transport buildEnv.stateVar executorId (RequestId 0) options [] root "main" EntryString
             planned = either (fail . displayCallError) pure
             sentModules plan = showHomeModuleId . (.home) <$> plan.modules
             check (plan, result) = do

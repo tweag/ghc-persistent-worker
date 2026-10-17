@@ -78,7 +78,7 @@ import GhcServer.Build.BytecodeMirror (
   mirrorSourceFor,
   rehydrateLinkable,
   )
-import Internal.Executor.Client (awaitExecutor, rtsArgs, spawnExecutorWith, stopExecutor)
+import Internal.Executor.Client (awaitExecutor, captureStdioArg, rtsArgs, spawnExecutorWith, stopExecutor)
 import Internal.Executor.Load (planLinkables)
 import GhcWorker.Executor.Plan (executePlanned, showHomeModuleId)
 import Internal.Executor.PayloadArena (payloadSegmentPath, removeSegment)
@@ -95,7 +95,7 @@ import Test.Target (fileUnitTargets)
 import Text.Read (readMaybe)
 import qualified Types.Args as Args
 import Types.Args (emptyArgs)
-import Types.Api (ExecutorId, ProcessStats (..))
+import Types.Api (ExecutorId, ProcessStats (..), RequestId (..))
 import Data.List (isPrefixOf, isSuffixOf, sortOn)
 import Numeric (readHex)
 import System.Process (getPid)
@@ -303,7 +303,7 @@ spawnRegistered :: MVar WorkerState -> GbcTransportOptions -> IO ()
 spawnRegistered stateVar options = do
   old <- Map.lookup executorId . (.executors) <$> readMVar stateVar
   traverse_ stopExecutor old
-  handle <- spawnExecutorWith options.serverExe (rtsArgs options.childRts) (toOsPath (options.project </> "executor.sock"))
+  handle <- spawnExecutorWith options.serverExe (captureStdioArg : rtsArgs options.childRts) (toOsPath (options.project </> "executor.sock"))
   modifyMVar_ stateVar \ state -> pure state {executors = Map.insert executorId handle state.executors}
   awaitExecutor handle
   childRss stateVar >>= traverse_ (putStrLn . ("[idle] child " ++))
@@ -312,7 +312,7 @@ spawnRegistered stateVar options = do
 -- | Run one round and check its result and the number of sent modules, returning whether both match.
 round_ :: MVar WorkerState -> GbcTransportOptions -> PayloadTransport -> String -> Int -> Int -> IO Bool
 round_ stateVar options transport label offset expectedSent = do
-  (result, seconds) <- timed (executePlanned transport stateVar executorId transportOptions [] root "entry" EntryString)
+  (result, seconds) <- timed (executePlanned transport stateVar executorId (RequestId 0) transportOptions [] root "entry" EntryString)
   putStrLn ("[" ++ label ++ "] seconds: " ++ show seconds)
   case result of
     Left err -> False <$ putStrLn ("[" ++ label ++ "] failed: " ++ displayCallError err)

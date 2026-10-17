@@ -19,13 +19,13 @@ import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.ProcessEval (ProcessEvalConfig)
 import GhcServer.Log (emitEvent)
 import GhcServer.Path (socketDirName)
-import Internal.Executor.Client (callExecutorJson, rtsArgs, spawnExecutorWith, stopExecutor)
+import Internal.Executor.Client (callExecutorJson, captureStdioArgs, rtsArgs, spawnExecutorWith, stopExecutor)
 import qualified Internal.Executor.Lifecycle as Lifecycle
 import Internal.Executor.Lifecycle (ExecutorEnv (..), executorSocketName)
 import System.Directory.OsPath (createDirectoryIfMissing)
 import System.Environment (getExecutablePath)
 import System.OsPath.Extra (OsPath, toOsPath, (</>))
-import Types.Api (ExecutorId (..), ProcessStats (..))
+import Types.Api (ExecutorId (..), ProcessStats (..), RequestId)
 import Types.Executor.Protocol (CallError, CallResult, ExecutorCall (..))
 import Types.State (WorkerState (..))
 import Types.State.Executor (ExecutorHandle (..))
@@ -35,33 +35,41 @@ executorSocket :: BuildEnv -> ExecutorId -> OsPath
 executorSocket env executorId =
   env.projectRoot </> socketDirName </> toOsPath (executorSocketName executorId)
 
--- | Launch a new executor child, without waiting for it to become ready.
-spawnExecutor :: BuildEnv -> ExecutorId -> IO ExecutorHandle
-spawnExecutor env executorId = do
+-- | Launch a new executor child with the given extra arguments, without waiting for it to become ready.
+spawnExecutor :: BuildEnv -> [String] -> ExecutorId -> IO ExecutorHandle
+spawnExecutor env args executorId = do
   self <- getExecutablePath
   createDirectoryIfMissing True (env.projectRoot </> socketDirName)
-  spawnExecutorWith self (rtsArgs env.executorRts) (executorSocket env executorId)
+  spawnExecutorWith self args (executorSocket env executorId)
 
 -- | The environment of the shared executor lifecycle logic.
-executorEnv :: BuildEnv -> ExecutorEnv
-executorEnv env =
-  ExecutorEnv {stateVar = env.stateVar, emit = emitEvent env.instrChan, spawn = spawnExecutor env}
+-- The settings are read up front, since the state is locked while an executor is spawned.
+executorEnv :: BuildEnv -> IO ExecutorEnv
+executorEnv env = do
+  settings <- (.settings) <$> readMVar env.stateVar
+  pure ExecutorEnv {
+    stateVar = env.stateVar,
+    emit = emitEvent env.instrChan,
+    spawn = spawnExecutor env (captureStdioArgs settings ++ rtsArgs env.executorRts)
+  }
 
 -- | Return the running executor for the given id, spawning (or respawning, if it died) one if necessary, and wait
 -- until it serves its socket.
 ensureExecutor :: BuildEnv -> ExecutorId -> IO ExecutorHandle
-ensureExecutor =
-  Lifecycle.ensureExecutor . executorEnv
+ensureExecutor env executorId = do
+  executorEnv' <- executorEnv env
+  Lifecycle.ensureExecutor executorEnv' executorId
 
 -- | Replace the executor for the given id with a fresh process, see 'Lifecycle.respawnExecutor'.
 respawnExecutor :: BuildEnv -> ExecutorId -> Int -> IO ExecutorHandle
-respawnExecutor =
-  Lifecycle.respawnExecutor . executorEnv
+respawnExecutor env executorId failed = do
+  executorEnv' <- executorEnv env
+  Lifecycle.respawnExecutor executorEnv' executorId failed
 
--- | Send one evaluation to an executor via its @Execute@ RPC.
-callExecutor :: ExecutorHandle -> ProcessEvalConfig -> IO (Either CallError CallResult)
-callExecutor handle config =
-  callExecutorJson handle (CallModule (Aeson.toJSON config))
+-- | Send one evaluation to an executor via its @Execute@ RPC, on behalf of the task with the given request id.
+callExecutor :: ExecutorHandle -> RequestId -> ProcessEvalConfig -> IO (Either CallError CallResult)
+callExecutor handle requestId config =
+  callExecutorJson handle requestId (CallModule (Aeson.toJSON config))
 
 -- | Terminate the persistent executor subprocess identified by 'ExecutorId', if one is running, and remove it
 -- from 'WorkerState.executors'. Returns whether an executor with that id was registered.

@@ -21,6 +21,7 @@ import GhcServer.Grpc (serverMethods)
 import GhcServer.Handler (serverContext)
 import GhcServer.Optparse (readPath)
 import GhcServer.Path (socketDirName, socketPath)
+import GhcWorker.Run (captureStdioParser)
 import Options.Applicative (
   Parser,
   ParserInfo,
@@ -90,7 +91,7 @@ data ExecMode =
   |
   ExecEvaluate ProcessEvalOptions
   |
-  ExecExecutor OsPath
+  ExecExecutor OsPath Bool
   |
   ExecGbcTransport GbcTransportOptions
   deriving stock (Show)
@@ -115,7 +116,7 @@ serverConfigParser = do
   maxJobs <- option auto (long "jobs" <> short 'j' <> metavar "N" <> help "Maximum concurrent jobs" <> value 4)
   verbose <- switch (long "verbose" <> short 'v' <> help "Print the build log on success")
   jsonConfig <- switch (long "json-config" <> help "Force unit.json-based project discovery even if a .cabal file is present")
-  settings <- featureFlagsParser
+  settings <- captureStdioParser <*> featureFlagsParser
   executorRts <- words <$> strOption (
     long "executor-rts"
     <> metavar "OPTS"
@@ -160,9 +161,12 @@ evaluateInfo =
 
 executorInfo :: ParserInfo ExecMode
 executorInfo =
-  ExecExecutor <$> info parser (progDesc "Run a persistent executor serving execute tasks until stdin closes")
+  info parser (progDesc "Run a persistent executor serving execute tasks until stdin closes")
   where
-    parser = option readPath (long "socket" <> metavar "PATH" <> help "Unix socket to serve the executor on")
+    parser =
+      ExecExecutor
+      <$> option readPath (long "socket" <> metavar "PATH" <> help "Unix socket to serve the executor on")
+      <*> switch (long "capture-stdio" <> help "Attribute stdout and stderr to the calls")
 
 gbcTransportInfo :: ParserInfo ExecMode
 gbcTransportInfo =
@@ -206,7 +210,7 @@ runServer = do
     ExecServer raw -> either die pure =<< runExceptT (server =<< lift (resolveServerConfig raw))
     ExecCabalSetup cabalArgs -> cabalSetup cabalArgs
     ExecEvaluate options -> runProcessEval options
-    ExecExecutor socket -> runExecutor socket
+    ExecExecutor socket capture -> runExecutor capture socket
     ExecGbcTransport options -> runGbcTransport options
   where
     server :: ServerConfig -> ExceptT String IO ()

@@ -3,7 +3,7 @@
 -- and the executor's socket name.
 module Internal.Executor.Lifecycle where
 
-import Control.Concurrent.MVar (MVar, modifyMVar, readMVar, withMVar)
+import Control.Concurrent.MVar (MVar, modifyMVar, readMVar)
 import Control.Monad (when)
 import Data.Char (isAlphaNum)
 import Data.Foldable (traverse_)
@@ -12,7 +12,7 @@ import qualified Data.Text as Text
 import Internal.Executor.Client (awaitExecutor, isRunning, stopExecutor, watchExecutor)
 import Types.Api (Event, ExecutorId (..))
 import Types.State (WorkerState (..))
-import Types.State.Executor (ExecutorHandle (..))
+import Types.State.Executor (ExecutorHandle (..), withoutCalls)
 
 -- | What the lifecycle functions need from their host: the worker state, the sink for status events and the way to
 -- launch a new executor process for an id.
@@ -40,11 +40,11 @@ ensureExecutor =
 --
 -- The incarnation is that of the handle the caller saw failing. If the registered executor is a newer, running one,
 -- another task has replaced it already and it is kept, since stopping it would kill that task's calls.
--- Waits for calls in flight on the old process (see 'ExecutorHandle.calls') before stopping it.
+-- Waits for calls in flight on the old process (see 'withoutCalls') before stopping it.
 respawnExecutor :: ExecutorEnv -> ExecutorId -> Int -> IO ExecutorHandle
 respawnExecutor env executorId failed =
   (Map.lookup executorId . (.executors) <$> readMVar env.stateVar) >>= \case
-    Just handle -> withMVar handle.calls \ () -> replace
+    Just handle -> withoutCalls handle replace
     Nothing -> replace
   where
     replace = acquireExecutor replaced env executorId
@@ -64,7 +64,7 @@ acquireExecutor reuse env executorId = do
       _ -> do
         traverse_ stopExecutor existing
         spawned <- env.spawn executorId
-        -- Keep the call lock, so that callers still holding it stay serialized with the new process.
+        -- Keep the call lock, so that callers still holding it stay in sync with the new process.
         let handle = maybe spawned (\ old -> spawned {calls = old.calls, incarnation = old.incarnation + 1}) existing
         pure (state {executors = Map.insert executorId handle state.executors}, (handle, True))
   awaitExecutor handle

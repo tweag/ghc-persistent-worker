@@ -25,7 +25,7 @@ import Types.State.Executor (ExecutorLoaded (..), HomeModuleId, LoadedModule (..
 #if defined(GBC)
 
 import Data.Text (pack)
-import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, readMVar, withMVar)
+import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, readMVar)
 import Control.Exception (IOException, try)
 import Control.Monad (unless)
 import Data.List (nub)
@@ -63,9 +63,9 @@ import Types.Executor.Protocol (
   )
 import System.Directory (createDirectoryIfMissing, getFileSize, getModificationTime)
 import System.FilePath ((</>))
-import Types.Api (ExecutorId)
+import Types.Api (ExecutorId, RequestId)
 import Types.State (WorkerState (..))
-import Types.State.Executor (ExecutorHandle (..), FileStamp (..), PayloadCache (..))
+import Types.State.Executor (ExecutorHandle (..), FileStamp (..), PayloadCache (..), withCall)
 import Types.State.Make (LibLoadState (requested), MakeState (..))
 
 #endif
@@ -386,12 +386,15 @@ needsRespawn = \case
 -- executor's result.
 -- If the executor fails to link the plan (or can't be reached), the recorded loaded set is reset with
 -- 'resetLoaded', so that the next execution resends the whole closure with newer linkable times.
--- Planning and sending are serialized per executor with the handle's @calls@ lock, since a plan only contains the
--- modules missing from the loaded set recorded by earlier plans, which the executor must have received beforehand.
+-- Planning is atomic in the state lock, so plans are numbered in the order they were planned, and the executor links
+-- them in that order (see 'Internal.Executor.Load.linkInOrder'), since a plan only contains the modules missing from
+-- the loaded set recorded by earlier plans. Calls to the same executor run concurrently.
+-- Each call holds the handle's @calls@ lock for its duration, which keeps a respawn from stopping the process.
 executePlanned ::
   PayloadTransport ->
   MVar WorkerState ->
   ExecutorId ->
+  RequestId ->
   [String] ->
   -- | Environment variables to set in the executor process for the execution.
   [(String, String)] ->
@@ -399,18 +402,18 @@ executePlanned ::
   String ->
   EntryKind ->
   IO (Either CallError (ExecutorPlan, CallResult))
-executePlanned transport stateVar executorId ghcOptions env root entry kind =
-  lookupCalls >>= \case
+executePlanned transport stateVar executorId requestId ghcOptions env root entry kind =
+  lookupHandle >>= \case
     Nothing -> pure (Left (PlanUnavailable ("Executor not registered: " <> pack (show executorId))))
-    Just calls -> withMVar calls \ () -> planAndCall
+    Just handle -> withCall handle planAndCall
   where
-    lookupCalls = fmap (.calls) . Map.lookup executorId . (.executors) <$> readMVar stateVar
+    lookupHandle = Map.lookup executorId . (.executors) <$> readMVar stateVar
 
     planAndCall =
       prepareExecution transport stateVar executorId root >>= \case
         Left err -> pure (Left (PlanUnavailable (pack err)))
         Right (handle, plan) ->
-          callExecutorJson handle (CallPlan (planRequest ghcOptions env root entry kind plan)) >>= \case
+          callExecutorJson handle requestId (CallPlan (planRequest ghcOptions env root entry kind plan)) >>= \case
             Left err -> Left err <$ resetLoaded stateVar executorId
             Right result -> do
               unless (planApplied result) (resetLoaded stateVar executorId)

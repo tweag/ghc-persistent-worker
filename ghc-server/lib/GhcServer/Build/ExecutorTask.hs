@@ -10,14 +10,13 @@
 module GhcServer.Build.ExecutorTask where
 
 import qualified GHC
-import Control.Concurrent.MVar (withMVar)
 import GhcServer.Build.Executor (callExecutor, ensureExecutor)
 import GhcServer.Build.Process (executeModuleTaskWith)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.Unit (Unit)
 import Test.Data.Scheduler (TaskResult)
-import Types.Api (ExecutorId, ProcessStats)
-import Types.State.Executor (ExecutorHandle (..))
+import Types.Api (ExecutorId, ProcessStats, RequestId)
+import Types.State.Executor (ExecutorHandle (..), withCall)
 
 #if defined(GBC)
 
@@ -61,24 +60,25 @@ import Types.State.Make (MakeState (..))
 executeModuleTaskExecutor ::
   BuildEnv ->
   ExecutorId ->
+  RequestId ->
   Unit ->
   GHC.ModuleName ->
   IO (Maybe (TaskResult String), Maybe ProcessStats)
 
 #if defined(GBC)
 
-executeModuleTaskExecutor env executorId unit modName =
+executeModuleTaskExecutor env executorId requestId unit modName =
   mainEntry env root >>= \case
     NoEntry -> pure (Nothing, Nothing)
     ModuleEntry reason -> do
       logger.debug ("Executing " ++ GHC.moduleNameString modName ++ " in module mode: " ++ reason)
-      executeModuleMode env executorId unit modName
+      executeModuleMode env executorId requestId unit modName
     PlanEntry kind ->
       try @SomeException (runPlanned kind) >>= \case
         Left err -> pure (Just (TaskFailed ("Executor for " ++ GHC.moduleNameString modName ++ " crashed: " ++ displayException err)), Nothing)
         Right (Left (PlanUnavailable err)) -> do
           logger.debug ("Executing " ++ GHC.moduleNameString modName ++ " in module mode: " ++ Text.unpack err)
-          executeModuleMode env executorId unit modName
+          executeModuleMode env executorId requestId unit modName
         Right (Left err) -> pure (Just (TaskFailed (displayCallError err)), Nothing)
         Right (Right (plan, result)) -> do
           logger.debug ("Executed " ++ GHC.moduleNameString modName ++ " with " ++ describePlan plan)
@@ -89,7 +89,7 @@ executeModuleTaskExecutor env executorId unit modName =
     runPlanned kind = do
       options <- executorGhcOptions env unit
       transport <- payloadTransport env
-      withRespawn env executorId (executePlanned transport env.stateVar executorId options [] root "main" kind)
+      withRespawn env executorId (executePlanned transport env.stateVar executorId requestId options [] root "main" kind)
 
     logger = instrumentLogger env.instrChan logCategory env.log
 
@@ -181,13 +181,14 @@ executeModuleTaskExecutor = executeModuleMode
 executeModuleMode ::
   BuildEnv ->
   ExecutorId ->
+  RequestId ->
   Unit ->
   GHC.ModuleName ->
   IO (Maybe (TaskResult String), Maybe ProcessStats)
-executeModuleMode env executorId =
+executeModuleMode env executorId requestId =
   executeModuleTaskWith call env
   where
     -- Holding the call lock keeps a concurrent respawn from stopping the process during the call.
     call _ config = do
       handle <- ensureExecutor env executorId
-      withMVar handle.calls \ () -> callExecutor handle config
+      withCall handle (callExecutor handle requestId config)

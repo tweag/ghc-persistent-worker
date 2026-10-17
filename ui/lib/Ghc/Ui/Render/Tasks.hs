@@ -5,6 +5,7 @@ import Brick.Widgets.List (renderList)
 import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
+import qualified Data.Text as Text
 import Data.Time (UTCTime, defaultTimeLocale, diffUTCTime, formatTime, nominalDiffTimeToSeconds)
 import Ghc.Ui.Attr qualified as Attr
 import Ghc.Ui.Data.Name (Name (Tasks))
@@ -84,10 +85,11 @@ renderTasks current now state =
         -- no need for rows to stretch to the panel's full width just to right-align one word. This mirrors
         -- how an execute task's result is already shown on its own line below ('drawResult').
         progressLine = padLeft (Pad 2) (withAttr Attr.taskTime (txt progress))
+        outputLine = padLeft (Pad 2) . withAttr Attr.disabled . txt . Text.take 200 <$> lastLine
         result = case outcome of
           Just (Succeeded (Just r)) -> Just r
           _ -> Nothing
-     in vBox ([header, progressLine] ++ maybe [] (pure . drawStats) stats ++ maybe [] (pure . drawResult) result)
+     in vBox ([header, progressLine] ++ maybe [] pure outputLine ++ maybe [] (pure . drawStats) stats ++ maybe [] (pure . drawResult) result)
 
   -- A successful execute task's exfiltrated result, rendered on the lines following its row: wrapped to the
   -- available width, truncated to 4 lines, indented by two cells, and left uncolored (unlike the marker/status

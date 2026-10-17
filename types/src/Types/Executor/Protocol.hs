@@ -7,8 +7,36 @@ import Data.Aeson (FromJSON, ToJSON, Value)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import GHC.Generics (Generic)
-import Types.Api (ProcessStats)
+import Types.Api (ExecutorStatus, OutputStream, ProcessStats, RequestId)
 import Types.ExecutorPlan (PlanRequest)
+
+-- | The payload of the executor's @Execute@ RPC: a call, and the task on whose behalf it runs, to which the child
+-- attributes the output written during the call.
+data ExecutorRequest =
+  ExecutorRequest {
+    requestId :: RequestId,
+    call :: ExecutorCall
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
+-- | A line the executor's process wrote to stdout or stderr, with the task it was attributed to, if any.
+data OutputLine =
+  OutputLine {
+    task :: Maybe RequestId,
+    stream :: OutputStream,
+    line :: Text
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
+-- | The elements of the executor's @Events@ stream (JSON-encoded).
+data ExecutorEvent =
+  StatusEvent ExecutorStatus
+  |
+  OutputEvent OutputLine
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | The payload of the executor's @Execute@ RPC.
 data ExecutorCall =

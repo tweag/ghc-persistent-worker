@@ -176,7 +176,7 @@ dispatchTask env ext task =
         let
           target = moduleEventTarget name
           runExecute = case task.value.executor of
-            Just executorId -> executeModuleTaskExecutor env executorId unit name
+            Just executorId -> executeModuleTaskExecutor env executorId requestId unit name
             Nothing -> (, Nothing) <$> executeModuleTask env ext unit name requestId Nothing
         emitTaskStart env requestId target (isJust task.value.executor)
         (mResult, stats) <- runExecute

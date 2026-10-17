@@ -21,6 +21,7 @@ import Options.Applicative (
   ParserInfo,
   eitherReader,
   execParser,
+  flag,
   fullDesc,
   header,
   help,
@@ -70,6 +71,14 @@ featureFlagsParser =
       flag <- eitherReader (first unpack . parseFeatureFlag . pack)
       pure (flag, enabled)
 
+-- | Parser for '--executor-capture-stdio', which enables 'FeatureExecutorCaptureStdio' like @--enable@ does.
+captureStdioParser :: Parser (Settings -> Settings)
+captureStdioParser =
+  flag id (setFeature FeatureExecutorCaptureStdio True) (
+    long "executor-capture-stdio"
+    <> help "Attribute the stdout and stderr of persistent executors to their tasks"
+    )
+
 -- | Parser for '--max-bytecode', bounding the loader state size.
 maxBytecodeParser :: Parser (Maybe Int)
 maxBytecodeParser =
@@ -95,9 +104,10 @@ cliOptionsParser :: Parser CliOptions
 cliOptionsParser = do
   serve <- serverSocketFromPath . toOsPath <$> strOption (long "serve" <> metavar "SOCKET" <> help "Socket path for the GHC server")
   features0 <- featureFlagsParser
+  captureStdio <- captureStdioParser
   maxBytecode <- maxBytecodeParser
   executorRts <- executorRtsParser
-  pure CliOptions {serve, settings = features0 {lazyByteCodeCacheLimit = maxBytecode, executorRts}}
+  pure CliOptions {serve, settings = (captureStdio features0) {lazyByteCodeCacheLimit = maxBytecode, executorRts}}
 
 cliOptionsParserInfo :: ParserInfo CliOptions
 cliOptionsParserInfo =

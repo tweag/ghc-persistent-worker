@@ -7,10 +7,10 @@
 -- 'Types.Api.ExecutorId'. The gRPC service is implemented in 'GhcWorker.Executor.Child'.
 module GhcServer.Build.ExecutorChild where
 
-import Control.Concurrent.MVar (MVar)
+import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import qualified Data.Aeson as Aeson
-import Data.ByteString (ByteString)
-import GhcServer.Build.ProcessChild (configInvalidResult, evalResult)
+import Internal.Executor.Output (Attach)
+import GhcServer.Build.ProcessChild (configInvalidResult, evalUncaptured)
 import GhcWorker.Executor.Child (planResult, serveExecutor)
 import Internal.Executor.Load (PlanSessionVar, newPlanSessionVar)
 import Internal.State (newState)
@@ -19,23 +19,26 @@ import Types.Executor.Protocol (CallResult, ExecutorCall (..))
 import Types.Settings (defaultSettings)
 import Types.State (WorkerState)
 
--- | Evaluate one encoded 'ExecutorCall' against the executor's persistent state.
-dispatchCall :: MVar WorkerState -> PlanSessionVar -> ByteString -> IO CallResult
-dispatchCall stateVar planVar payload =
-  either configInvalidResult dispatch (Aeson.eitherDecodeStrict' payload)
+-- | Evaluate one 'ExecutorCall' against the executor's persistent state.
+-- The output is captured by 'serveExecutor'.
+-- Module calls share the executor's 'Types.State.WorkerState' and are serialized with the given lock, whereas plans run
+-- concurrently.
+dispatchCall :: MVar () -> MVar WorkerState -> PlanSessionVar -> Attach -> ExecutorCall -> IO CallResult
+dispatchCall moduleLock stateVar planVar attach = \case
+  CallModule value ->
+    withMVar moduleLock \ () -> either configInvalidResult (evalUncaptured stateVar) (decodeConfig value)
+  CallPlan plan -> planResult planVar attach plan
   where
-    dispatch = \case
-      CallModule value -> either configInvalidResult (evalResult stateVar) (decodeConfig value)
-      CallPlan plan -> planResult planVar plan
-
     decodeConfig value =
       case Aeson.fromJSON value of
         Aeson.Error err -> Left err
         Aeson.Success config -> Right config
 
--- | Entry point of the @executor@ CLI mode: serve the @Executor@ service on the given socket until stdin closes.
-runExecutor :: OsPath -> IO ()
-runExecutor socket = do
+-- | Entry point of the @executor@ CLI mode: serve the @Executor@ service on the given socket until stdin closes,
+-- capturing stdio if the flag is set.
+runExecutor :: Bool -> OsPath -> IO ()
+runExecutor capture socket = do
   stateVar <- newState defaultSettings
   planVar <- newPlanSessionVar
-  serveExecutor socket (dispatchCall stateVar planVar)
+  moduleLock <- newMVar ()
+  serveExecutor capture socket (dispatchCall moduleLock stateVar planVar)

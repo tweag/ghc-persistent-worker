@@ -44,6 +44,8 @@ data Task =
     stats :: Maybe ProcessStats,
     phase :: Maybe String,
     phases :: Map String PhaseInfo,
+    -- | The last line the task wrote to stdout or stderr, if it ran in an executor.
+    lastLine :: Maybe Text,
     -- | The id allocated by the @instrument@ UI for the request that spawned this task (see
     -- 'UI.allocRequestId'), echoed back by the server in every 'Types.Api.Event' belonging to it.
     -- Identifies this row unambiguously, so 'completeTask'\/'phaseStart'\/'phaseEnd' can match the exact task
@@ -73,6 +75,7 @@ newTask target worker debuggable process requestId = do
     stats = Nothing,
     phase = Nothing,
     phases = [],
+    lastLine = Nothing,
     requestId
   }
 

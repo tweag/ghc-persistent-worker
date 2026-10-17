@@ -110,6 +110,13 @@ phaseStart requestId phase =
       }
     row -> row
 
+-- | Records the last output line of the task with the given request id, which ran in an executor.
+output :: RequestId -> Text -> EventM Name TasksState ()
+output requestId line =
+  listElementsL %= fmap \case
+    TaskRow task | task.requestId == requestId -> TaskRow task {lastLine = Just line}
+    row -> row
+
 -- | Records the duration of the task's current phase (see 'phaseStart'), identified via 'phase' since
 -- 'Types.Api.PhaseEnd' doesn't itself carry a phase name.
 phaseEnd :: RequestId -> Word -> EventM Name TasksState ()

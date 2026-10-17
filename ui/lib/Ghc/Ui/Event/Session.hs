@@ -2,10 +2,11 @@ module Ghc.Ui.Event.Session where
 
 import Brick (EventM, zoom)
 import Control.Lens (each, filtered, (%%=), (%=), (<>=))
+import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_)
 import qualified Data.Map.Strict as Map
 import Data.Text qualified as Text
-import Data.Time (secondsToNominalDiffTime)
+import Data.Time (getCurrentTime, secondsToNominalDiffTime)
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import qualified Ghc.Ui.Data.Log as Ui
 import Ghc.Ui.Data.Executors qualified as Executors
@@ -103,6 +104,22 @@ handleApiEvent worker = \case
 
   ExecutorGone {executor} ->
     #executors %= Executors.remove executor
+
+  ExecutorOutput {executor, task, stream, line} -> do
+    #executors %= Executors.output executor line
+    for_ task \ requestId -> zoom #tasks (Tasks.output requestId line)
+    time <- liftIO getCurrentTime
+    #log %= Log.insertMessage Ui.LogMessage {
+      category = executor.text <> foldMap (\ (Api.RequestId n) -> " #" <> Text.pack (show n)) task,
+      level = streamLevel stream,
+      message = line,
+      time
+    }
+
+streamLevel :: Api.OutputStream -> Text.Text
+streamLevel = \case
+  Api.Stdout -> "stdout"
+  Api.Stderr -> "stderr"
 
 handleSessionEvent :: SessionEvent -> EventM Name SessionState ()
 handleSessionEvent (ApiEvent worker event) = handleApiEvent worker event

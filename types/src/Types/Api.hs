@@ -150,6 +150,14 @@ data ExecutorStatus =
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary, FromJSON, ToJSON)
 
+-- | The standard stream a line of executor output was written to.
+data OutputStream =
+  Stdout
+  |
+  Stderr
+  deriving stock (Eq, Ord, Show, Generic)
+  deriving anyclass (Binary, FromJSON, ToJSON)
+
 data TaskKind =
   Metadata
   |
@@ -313,18 +321,31 @@ data Event =
   |
   -- | The executor process has stopped or was terminated.
   ExecutorGone { executor :: ExecutorId }
+  |
+  -- | A line written to stdout or stderr in an executor process.
+  -- It is attributed to the task that was running in the writing thread, if any; all other output has no task.
+  ExecutorOutput {
+    executor :: ExecutorId,
+    task :: Maybe RequestId,
+    stream :: OutputStream,
+    line :: Text
+  }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary)
 
 data Events =
   Events {
     publish :: (RequestId -> Event) -> IO ()
+    ,
+    -- | The id that 'publish' passes to events, to identify the request in other channels (like executor calls).
+    requestId :: RequestId
   }
 
 eventsNoop :: Events
 eventsNoop =
   Events {
-    publish = \ _ -> pure ()
+    publish = \ _ -> pure (),
+    requestId = RequestId 0
   }
 
 -- | Drop the 'CompileStart' and 'CompileEnd' events, for callers that report task boundaries themselves.
@@ -335,11 +356,13 @@ eventsWithoutTasks events =
       case event (RequestId 0) of
         CompileStart {} -> pure ()
         CompileEnd {} -> pure ()
-        _ -> events.publish event
+        _ -> events.publish event,
+    requestId = events.requestId
   }
 
 eventsForRequest :: RequestId -> (Event -> IO ()) -> Events
 eventsForRequest requestId publish =
   Events {
-    publish = \ event -> publish (event requestId)
+    publish = \ event -> publish (event requestId),
+    requestId
   }

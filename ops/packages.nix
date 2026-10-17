@@ -214,6 +214,7 @@
           "hashable"
           "mmap"
           "process"
+          "stm"
           "text"
           "time"
           "transformers"

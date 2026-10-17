@@ -44,7 +44,7 @@ import Prelude hiding (log)
 import System.IO (stdout)
 import System.IO.Silently (hCapture)
 import System.OsPath.Extra (fromOsPath)
-import Types.Api (targetFromWorkerSpec)
+import Types.Api (Events (..), targetFromWorkerSpec)
 import Types.Args (Args (..))
 import qualified Types.BuckArgs
 import Types.BuckArgs (BuckArgs, IsInterpreted (..), Mode (..), checkModuleTarget, parseBuckArgs, toGhcArgs)
@@ -190,7 +190,7 @@ dispatch hooks env args =
         Just (Right Internal.Evaluate.ExecutorEntry {entryKind = Just kind, packageDbs}) ->
           -- The session has ended, so the worker state contains its loaded modules.
           reported modTarget True $
-            runInExecutor (publishEvent hooks) env.log env.state executorId
+            runInExecutor (publishEvent hooks) env.log env.state executorId hooks.events.requestId
               (concatMap (\ db -> ["-package-db", db]) packageDbs)
               args.evalEnv
               (moduleUnitId modTarget.module_, moduleName modTarget.module_) expr kind

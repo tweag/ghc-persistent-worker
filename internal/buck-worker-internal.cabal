@@ -103,10 +103,12 @@ library
                       Internal.Env
                       Internal.Error
                       Internal.Evaluate
+                      Internal.Executor.CallbackHandle
                       Internal.Executor.Client
                       Internal.Executor.GbcBuffer
                       Internal.Executor.Lifecycle
                       Internal.Executor.Load
+                      Internal.Executor.Output
                       Internal.Executor.PayloadArena
                       Internal.Json
                       Internal.Log
@@ -144,6 +146,7 @@ library
                       hashable,
                       mmap,
                       process,
+                      stm,
                       text,
                       time,
                       transformers,

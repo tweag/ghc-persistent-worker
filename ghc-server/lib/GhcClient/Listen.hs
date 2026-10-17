@@ -12,6 +12,7 @@ import Control.Monad (void)
 import Data.Maybe (isJust)
 import Data.Binary (decode)
 import Data.ByteString (fromStrict)
+import Data.Char (toLower)
 import Data.List (intercalate)
 import Data.Text qualified as Text
 import GhcServer.Optparse (readPath)
@@ -195,6 +196,12 @@ prettyEvent = \case
     ]
   ExecutorGone {executor} ->
     "executor " ++ Text.unpack executor.text ++ " gone"
+  ExecutorOutput {executor, task, stream, line} ->
+    unwords [
+      "executor", Text.unpack executor.text,
+      maybe "" requestTag task,
+      map toLower (show stream) ++ ":", Text.unpack line
+    ]
   where
     withDetails header details = intercalate "\n" (header : fmap indent details)
     millis ns = show (ns `div` 1_000_000) ++ "ms"

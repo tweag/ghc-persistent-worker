@@ -3,7 +3,8 @@
 -- process, and 'GhcServer.Build.Executor' for the parent-side spawn\/dispatch\/terminate logic.
 module Types.State.Executor where
 
-import Control.Concurrent.MVar (MVar)
+import Control.Concurrent.QSemN (QSemN, newQSemN, signalQSemN, waitQSemN)
+import Control.Exception (bracket_)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -93,6 +94,23 @@ data PayloadCache =
 emptyPayloadCache :: PayloadCache
 emptyPayloadCache = PayloadCache {fileHashes = Map.empty, written = Map.empty, arena = Nothing}
 
+-- | The number of calls that can hold an executor's 'ExecutorHandle.calls' at the same time.
+maxConcurrentCalls :: Int
+maxConcurrentCalls = 64
+
+newCallLock :: IO QSemN
+newCallLock = newQSemN maxConcurrentCalls
+
+-- | Run a call to the executor, concurrently with other calls, but not while 'withoutCalls' runs.
+withCall :: ExecutorHandle -> IO a -> IO a
+withCall handle =
+  bracket_ (waitQSemN handle.calls 1) (signalQSemN handle.calls 1)
+
+-- | Run an action while no call is in flight and none is started, e.g. to replace the process.
+withoutCalls :: ExecutorHandle -> IO a -> IO a
+withoutCalls handle =
+  bracket_ (waitQSemN handle.calls maxConcurrentCalls) (signalQSemN handle.calls maxConcurrentCalls)
+
 -- | A running persistent executor child process: its OS process handle (for termination), the Unix socket
 -- path on which it serves the @Executor@ gRPC service, and the write end of its stdin pipe. The child exits when
 -- its stdin reaches EOF, so the handle must be kept alive (and is closed on termination).
@@ -104,10 +122,10 @@ data ExecutorHandle =
     loaded :: ExecutorLoaded,
     -- | RTS stats the executor reported with its most recent result.
     stats :: Maybe ProcessStats,
-    -- | Serializes planning and sending bytecode plans, since a plan's delta is only valid if the executor receives
-    -- it after all previously planned deltas.
+    -- | Lets calls run concurrently while keeping a respawn from stopping the process during a call, see
+    -- 'withCall' and 'withoutCalls'.
     -- Shared by all handles registered for the same 'Types.Api.ExecutorId', including respawned ones.
-    calls :: MVar (),
+    calls :: QSemN,
     -- | Counts the processes spawned for the same 'Types.Api.ExecutorId' before this one, so that a respawn can tell
     -- whether the process that failed has already been replaced.
     incarnation :: Int

@@ -22,7 +22,7 @@ import qualified Data.Text as Text
 import GHC.Utils.Outputable (text)
 import GhcWorker.Executor.Plan (executePlanned, needsRespawn)
 import GhcWorker.Instrumentation (EvalReport (..), failedEval)
-import Internal.Executor.Client (rtsArgs, spawnExecutorWith)
+import Internal.Executor.Client (captureStdioArgs, rtsArgs, spawnExecutorWith)
 import Internal.Executor.Lifecycle (ExecutorEnv (..), executorSocketName)
 import qualified Internal.Executor.Lifecycle as Lifecycle
 import System.Directory (getTemporaryDirectory)
@@ -30,7 +30,7 @@ import System.Environment (getExecutablePath)
 import System.FilePath ((</>))
 import System.OsPath.Extra (toOsPath)
 import System.Posix.Process (getProcessID)
-import Types.Api (Event, ExecutorId (..))
+import Types.Api (Event, ExecutorId (..), RequestId)
 import Types.ExecutorPlan (EntryKind, ExecutorPlan)
 import Types.Log (Logger (..))
 import Types.Settings (Settings (..))
@@ -69,21 +69,26 @@ payloadTransport :: IO PayloadTransport
 payloadTransport =
   PayloadFiles . (++ "-payloads") <$> tempPrefix
 
--- | Launch a new executor with the given RTS options, without waiting for it to become ready.
+-- | Launch a new executor with the given extra arguments (capture flag and RTS options), without waiting for it to
+-- become ready.
 spawnExecutor :: [String] -> ExecutorId -> IO ExecutorHandle
-spawnExecutor rts executorId = do
+spawnExecutor args executorId = do
   self <- getExecutablePath
   socket <- executorSocket executorId
-  spawnExecutorWith self (rtsArgs rts) (toOsPath socket)
+  spawnExecutorWith self args (toOsPath socket)
 
 -- | The environment of the shared executor lifecycle logic.
--- The RTS options are read from the worker's settings (see 'Types.Settings.Settings.executorRts') up front, since the
--- state is locked while an executor is spawned.
+-- The executor arguments are derived from the worker's settings (see 'Types.Settings.Settings.executorRts' and
+-- 'Types.FeatureFlags.FeatureExecutorCaptureStdio') up front, since the state is locked while an executor is spawned.
 -- Status events of new executor processes are published with the given action.
 executorEnv :: (Event -> IO ()) -> MVar WorkerState -> IO ExecutorEnv
 executorEnv emit stateVar = do
-  rts <- (.settings.executorRts) <$> readMVar stateVar
-  pure ExecutorEnv {stateVar, emit, spawn = spawnExecutor rts}
+  settings <- (.settings) <$> readMVar stateVar
+  pure ExecutorEnv {
+    stateVar,
+    emit,
+    spawn = spawnExecutor (captureStdioArgs settings ++ rtsArgs settings.executorRts)
+  }
 
 type PlannedOutput = Either CallError (ExecutorPlan, CallResult)
 
@@ -96,15 +101,16 @@ runInExecutor ::
   Logger ->
   MVar WorkerState ->
   ExecutorId ->
+  RequestId ->
   [String] ->
   [(String, String)] ->
   HomeModuleId ->
   String ->
   EntryKind ->
   IO EvalReport
-runInExecutor emit logger stateVar executorId options env root entry kind = do
+runInExecutor emit logger stateVar executorId requestId options env root entry kind = do
   transport <- payloadTransport
-  let execute = executePlanned transport stateVar executorId options env root entry kind
+  let execute = executePlanned transport stateVar executorId requestId options env root entry kind
   executorEnv_ <- executorEnv emit stateVar
   seen <- Lifecycle.ensureExecutor executorEnv_ executorId
   first <- execute

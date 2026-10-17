@@ -34,7 +34,7 @@ import GhcServer.Data.ProcessEval (
   ProcessEvalOptions (..),
   )
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitCache)
-import Types.Executor.Protocol (CallResult, Captured (..), EvalOutcome (..), SetupError (..))
+import Types.Executor.Protocol (CallResult (..), Captured (..), EvalOutcome (..), SetupError (..))
 import GhcWorker.Executor.Child (finishResult, setupFailure)
 import GhcServer.Path (outputDirName, tmpDirName)
 import Internal.Log (newLogger)
@@ -169,13 +169,21 @@ resolveConfig = \case
   Nothing ->
     Aeson.eitherDecodeStrict' <$> ByteString.getContents
 
--- | Run one evaluation against the given 'Types.State.WorkerState' with a fresh in-memory logger, capturing the
--- stdout and stderr of everything it does, and assemble the 'CallResult'.
+-- | Run one evaluation against the given 'Types.State.WorkerState' with a fresh in-memory logger and assemble the
+-- 'CallResult', whose captured output is empty.
+-- Persistent executors capture the output of each call in 'GhcWorker.Executor.Child.serveExecutor'.
+evalUncaptured :: MVar WorkerState -> ProcessEvalConfig -> IO CallResult
+evalUncaptured stateVar config = do
+  logger <- newLogger <$> newLog Nothing
+  outcome <- runEval logger stateVar config
+  finishResult logger Captured {stdout = "", stderr = ""} outcome
+
+-- | Run one evaluation like 'evalUncaptured', capturing the stdout and stderr of everything it does by redirecting
+-- the file descriptors.
 evalResult :: MVar WorkerState -> ProcessEvalConfig -> IO CallResult
 evalResult stateVar config = do
-  logger <- newLogger <$> newLog Nothing
-  (stderr, (stdout, outcome)) <- hCapture [IO.stderr] (capture (runEval logger stateVar config))
-  finishResult logger Captured {stdout = pack stdout, stderr = pack stderr} outcome
+  (stderr, (stdout, result)) <- hCapture [IO.stderr] (capture (evalUncaptured stateVar config))
+  pure result {captured = Captured {stdout = pack stdout, stderr = pack stderr}}
 
 -- | The result for a call whose config could not be decoded.
 configInvalidResult :: String -> IO CallResult

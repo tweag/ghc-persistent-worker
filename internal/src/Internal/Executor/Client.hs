@@ -7,7 +7,7 @@ module Internal.Executor.Client where
 
 import BuckWorkerProto ()
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.MVar (MVar, newMVar, readMVar)
+import Control.Concurrent.MVar (MVar, readMVar)
 import Control.Exception (SomeException, displayException, throwIO, try)
 import Control.Monad (unless, void, when)
 import qualified Data.Aeson as Aeson
@@ -36,10 +36,12 @@ import System.Process (
   terminateProcess,
   waitForProcess,
   )
-import Types.Api (Event (..), ExecutorId)
-import Types.Executor.Protocol (CallError (..), CallResult, ExecutorCall)
+import Types.Api (Event (..), ExecutorId, RequestId)
+import Types.Executor.Protocol (CallError (..), CallResult, ExecutorCall, ExecutorEvent (..), ExecutorRequest (..), OutputLine (..))
+import Types.FeatureFlags (Feature (..))
+import Types.Settings (Settings, featureOn)
 import Types.State (WorkerState (..))
-import Types.State.Executor (ExecutorHandle (..), emptyExecutorLoaded)
+import Types.State.Executor (ExecutorHandle (..), emptyExecutorLoaded, newCallLock)
 
 -- | Wrap RTS options in @+RTS ... -RTS@, or nothing if there are none.
 rtsArgs :: [String] -> [String]
@@ -47,11 +49,20 @@ rtsArgs = \case
   [] -> []
   opts -> ["+RTS"] ++ opts ++ ["-RTS"]
 
+-- | Argument that makes an executor attribute its stdout and stderr to the calls, see 'FeatureExecutorCaptureStdio'.
+captureStdioArg :: String
+captureStdioArg = "--capture-stdio"
+
+-- | The extra executor arguments for the settings, to be passed to 'spawnExecutorWith'.
+captureStdioArgs :: Settings -> [String]
+captureStdioArgs settings =
+  [captureStdioArg | featureOn FeatureExecutorCaptureStdio settings]
+
 -- | Launch the given executable as an executor child on the socket, with extra arguments (e.g. RTS options).
 spawnExecutorWith :: FilePath -> [String] -> OsPath -> IO ExecutorHandle
 spawnExecutorWith exe extraArgs socket = do
   removeIfExists socket
-  calls <- newMVar ()
+  calls <- newCallLock
   (mStdin, _, _, process) <-
     createProcess (proc exe (["executor", "--socket", fromOsPath socket] ++ extraArgs)) {std_in = CreatePipe}
   case mStdin of
@@ -81,8 +92,9 @@ awaitExecutor handle =
             False -> threadDelay 100_000 >> check (n - 1)
 
 -- | Send one call to an executor via its @Execute@ RPC, as JSON.
-callExecutorJson :: ExecutorHandle -> ExecutorCall -> IO (Either CallError CallResult)
-callExecutorJson handle call =
+-- The request id is the task on whose behalf the call is made, to which the executor attributes the output.
+callExecutorJson :: ExecutorHandle -> RequestId -> ExecutorCall -> IO (Either CallError CallResult)
+callExecutorJson handle requestId call =
   try @SomeException exchange <&> \case
     Left err -> Left (Unreachable (pack (displayException err)))
     Right result -> first (Undecodable . pack) result
@@ -91,7 +103,7 @@ callExecutorJson handle call =
       withConnection def (ServerUnix (fromOsPath handle.socket)) \ connection ->
         Aeson.eitherDecodeStrict' . (.payload) <$> nonStreaming connection (rpc @(Protobuf Executor "execute")) message
 
-    message = defMessage & Fields.payload .~ toStrict (Aeson.encode call)
+    message = defMessage & Fields.payload .~ toStrict (Aeson.encode ExecutorRequest {requestId, call})
 
 -- | Close the executor's stdin (which makes it exit on its own), terminate it for good measure, reap it and remove
 -- its socket.
@@ -102,7 +114,8 @@ stopExecutor handle = do
   void (waitForProcess handle.process)
   removeIfExists handle.socket
 
--- | Forward the status snapshots an executor publishes via its @Events@ RPC as 'ExecutorUpdate' events, and publish
+-- | Forward the status snapshots and the output an executor publishes via its @Events@ RPC as 'ExecutorUpdate' and
+-- 'ExecutorOutput' events, and publish
 -- 'ExecutorGone' when the stream ends, unless a newer process has been registered for the id in the meantime.
 --
 -- The watcher is never cancelled: stopping the process ends the stream, which ends the watcher.
@@ -133,7 +146,9 @@ watchExecutor emit stateVar executorId handle =
           receiveAll pid recv
         NoNextElem -> pure ()
 
-    publish pid status = emit ExecutorUpdate {executor = executorId, pid, status}
+    publish pid = \case
+      StatusEvent status -> emit ExecutorUpdate {executor = executorId, pid, status}
+      OutputEvent OutputLine {task, stream, line} -> emit ExecutorOutput {executor = executorId, task, stream, line}
 
     announceGone = do
       current <- Map.lookup executorId . (.executors) <$> readMVar stateVar

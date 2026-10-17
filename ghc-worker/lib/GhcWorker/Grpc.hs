@@ -17,7 +17,7 @@ import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats)
 import Network.GRPC.Common (NextElem (..))
 import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
 import Network.GRPC.Server.Protobuf (ProtobufMethodsOf)
-import Network.GRPC.Server.StreamType (Methods (..), mkNonStreaming, mkServerStreaming, simpleMethods)
+import Network.GRPC.Server.StreamType (Methods (..))
 import Proto.Worker (Encoded, Worker)
 import Proto.Worker_Fields qualified as Fields
 import Types.Api (
@@ -33,7 +33,6 @@ import Types.Api (
   homeModuleMatchTarget,
   )
 import Types.FeatureFlags (Feature (..))
-import Types.Grpc (CommandEnv (..), RequestArgs (..))
 import Types.Settings (toggleFlag)
 import qualified Types.State as State
 import Types.State (WorkerState (..))

@@ -122,7 +122,7 @@ echo "in one persistent executor per unit, interleaved with the compilation of d
     # The verbose log contains the executor stats reported after the request and the output of the tests.
     features=()
     [[ -n $SHARED_PAYLOADS ]] && features=(--enable shared-payloads)
-    $server --root $project --verbose $features --executor-rts "$*[4,-1]" +RTS -s$stats -RTS 2>$server_log &
+    $server --root $project --verbose --executor-capture-stdio $features --executor-rts "$*[4,-1]" +RTS -s$stats -RTS 2>$server_log &
     server_pid=$!
 
     zmodload zsh/datetime
