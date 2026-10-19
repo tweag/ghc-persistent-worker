@@ -18,7 +18,14 @@ import Network.GRPC.Server.Protobuf (ProtobufMethodsOf)
 import Network.GRPC.Server.StreamType (Methods (..))
 import Proto.Worker (Encoded, Worker)
 import Proto.Worker_Fields qualified as Fields
-import Types.Api (ApiRequest (..), ApiResponse (..), Event (..))
+import Types.Api (
+  ApiRequest (..),
+  ApiResponse (..),
+  Event (..),
+  SomeApiRequest (..),
+  TaskKind (..),
+  TaskTrigger (..),
+  )
 import Types.State (WorkerState (..))
 
 -- | Fetch statistics about the current state of the RTS for instrumentation.
@@ -56,12 +63,22 @@ notifyMe stateVar (Just chan) callback = do
       defMessage
         & Fields.payload .~ toStrict (Binary.encode msg)
 
+-- TODO rebuild flag is now duplicated again?
+triggerTask :: TaskTrigger -> IO (ApiResponse a)
+triggerTask = \case
+  TaskTrigger {task = Metadata} ->
+    pure (ApiFailure "Cannot trigger metadata")
+  TaskTrigger {task = Build _rebuild} ->
+    pure (ApiFailure "Cannot trigger build")
+  TaskTrigger {task = Execute} ->
+    pure (ApiFailure "Cannot trigger execute")
+
 -- | Dispatch a single decoded 'ApiRequest' to the appropriate handler.
--- The worker doesn't support any requests yet.
-apiRequest :: ApiRequest -> IO ApiResponse
+-- The worker doesn't support bytecode eviction yet.
+apiRequest :: ApiRequest a -> IO (ApiResponse a)
 apiRequest = \case
-  TriggerTask _ ->
-    pure (ApiFailure "Cannot trigger tasks")
+  TriggerTask trigger ->
+    triggerTask trigger
   EvictBytecode _ ->
     pure (ApiFailure "Evicting bytecode not supported")
   Clean _ ->
@@ -69,15 +86,16 @@ apiRequest = \case
 
 -- | Implementation of the @Api@ method: decodes the JSON payload, runs it via the supplied dispatcher, and
 -- JSON-encodes the resulting response.
+-- Exported (rather than kept local) so 'GhcServer.Grpc' can reuse it with its own dispatcher.
 handleCommand ::
-  (ApiRequest -> IO ApiResponse) ->
+  (forall a . ApiRequest a -> IO (ApiResponse a)) ->
   Proto Encoded ->
   IO (Proto Encoded)
 handleCommand run req = do
   resp <- case eitherDecodeStrict req.payload of
     Left err -> do
-      pure (encode (ApiFailure ("handleCommand: failed to decode payload: " <> pack err)))
-    Right cmd -> encode <$> run cmd
+      pure (encode (ApiFailure @() ("handleCommand: failed to decode payload: " <> pack err)))
+    Right (SomeApiRequest cmd) -> encode <$> run cmd
   pure (defMessage & Fields.payload .~ LBS.toStrict resp)
 
 -- | The 'Worker' service of the GHC worker: builds are handled by the 'GrpcHandler', while instrumentation data is
