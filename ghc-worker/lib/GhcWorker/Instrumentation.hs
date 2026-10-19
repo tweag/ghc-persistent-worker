@@ -7,10 +7,12 @@ import Control.Exception (bracket_)
 import Data.Foldable (for_, traverse_)
 import Data.Int (Int32)
 import GhcWorker.Grpc (mkStats)
+import GhcWorker.LogEvents (instrumentLoggerWith)
 import Internal.Log (dbg)
 import Prelude hiding (log)
 import Types.Api (Event (..), Events (..), RequestId, Target, eventsForRequest, eventsNoop, targetFromWorkerSpec)
 import Types.BuckArgs (BuckArgs (..))
+import Types.Log (Logger)
 import Types.State (WorkerState)
 import Types.Target (TargetSpec)
 
@@ -41,7 +43,11 @@ data Hooks =
     compileFinish :: Maybe (Maybe TargetSpec, [String], Int32) -> IO (),
 
     -- | Hook for publishing instrumentation events.
-    events :: Events
+    events :: Events,
+
+    -- | Forward the messages of a logger to the instrumentation events, using the given action to obtain the
+    -- category, which is the current target.
+    instrumentLogger :: IO String -> Logger -> Logger
   }
 
 -- | Dummy implementation of 'Hooks'.
@@ -50,7 +56,8 @@ hooksNoop =
   Hooks {
     compileStart = const (const (pure ())),
     compileFinish = const (pure ()),
-    events = eventsNoop
+    events = eventsNoop,
+    instrumentLogger = const id
   }
 
 -- | A request handler that is aware of instrumentation.
@@ -116,7 +123,8 @@ withInstrumentation instrChan status stateVar handler =
       let hooks = Hooks {
             compileStart = compileStart requestId,
             compileFinish = compileFinish requestId,
-            events = eventsForRequest requestId (writeChan instrChan)
+            events = eventsForRequest requestId (writeChan instrChan),
+            instrumentLogger = instrumentLoggerWith (writeChan instrChan)
           }
       result <- (handler.create hooks).run commandEnv argv
       stats <- mkStats state

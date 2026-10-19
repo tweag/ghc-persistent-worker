@@ -11,6 +11,7 @@ import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Coerce (coerce)
 import Data.Functor ((<&>))
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Int (Int32)
 #ifdef GHC_DEBUG
 import GHC.Debug.Stub (withGhcDebugUnix)
@@ -38,7 +39,7 @@ import Types.Settings (Settings (..))
 import Types.Grpc (RequestArgs (..))
 import Types.Log (Logger (..), TraceId, newLog)
 import Types.State (WorkerState (..))
-import Types.Target (TargetSpec (..))
+import Types.Target (TargetSpec (..), renderTargetSpec)
 
 #if __DEBUG__
 
@@ -155,7 +156,11 @@ ghcHandler ::
   InstrumentedHandler
 ghcHandler state settings traceId =
   InstrumentedHandler \ hooks -> GrpcHandler \ commandEnv argv -> do
-    log <- newLogger <$> newLog traceId
+    rawLog <- newLogger <$> newLog traceId
+    category <- newIORef "worker"
+    let log = hooks.instrumentLogger (readIORef category) rawLog {
+          setTarget = \ spec -> rawLog.setTarget spec *> writeIORef category (renderTargetSpec spec)
+        }
     result <- try do
       buckArgs <- either parseError pure (parseBuckArgs commandEnv argv)
       args <- toGhcArgs buckArgs (Just settings)

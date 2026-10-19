@@ -64,6 +64,7 @@ library
     GhcWorker.GhcHandler
     GhcWorker.Grpc
     GhcWorker.Instrumentation
+    GhcWorker.LogEvents
     GhcWorker.Orchestration
     GhcWorker.Run
   build-depends:
@@ -84,7 +85,8 @@ library
     optparse-applicative,
     os-string,
     process,
-    text
+    text,
+    time
   if (flag(ghc-debug))
     build-depends:
        ghc-debug-stub

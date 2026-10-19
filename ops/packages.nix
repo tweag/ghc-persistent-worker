@@ -38,6 +38,7 @@
           "os-string"
           "process"
           "text"
+          "time"
         ];
       };
 
