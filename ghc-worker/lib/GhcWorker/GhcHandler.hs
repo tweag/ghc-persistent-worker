@@ -8,7 +8,6 @@ import Control.Exception (throwIO, try)
 #ifdef __DEBUG__
 import Control.Monad (when)
 #endif
-import Control.Monad.IO.Class (liftIO)
 import Data.Coerce (coerce)
 import Data.Functor ((<&>))
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -53,12 +52,10 @@ import Internal.State (dumpState)
 compileAndReadAbiHash ::
   GhcMode ->
   (TargetSpec -> Ghc (Maybe ModIface)) ->
-  Hooks ->
   BuckArgs ->
   TargetSpec ->
   Ghc (Maybe CompileResult)
-compileAndReadAbiHash ghcMode compile hooks args target = do
-  liftIO $ hooks.compileStart args (Just target)
+compileAndReadAbiHash ghcMode compile args target = do
   modifyGlobalFlags \ d -> d {ghcMode}
   compile target >>= traverse \ iface -> do
     hsc_env <- getSession
@@ -87,7 +84,7 @@ dispatch hooks env args =
           writeResult args abiHash depFiles
           pure (0, Just target)
     Just ModeMetadata -> do
-      (success, target) <- computeMetadata env
+      (success, target) <- computeMetadata hooks.events env
       pure (if success then 0 else 1, target)
     Just m -> error ("worker: mode not implemented: " ++ show m)
     Nothing -> error "worker: no mode specified"
@@ -103,7 +100,7 @@ dispatch hooks env args =
       Nothing ->
         withGhcMakeSource env (withTarget compileHpt . TargetSource)
 
-    compileHpt = compileAndReadAbiHash CompManager (compileModuleWithDepsInHpt env.log hooks.events) hooks args
+    compileHpt = compileAndReadAbiHash CompManager (compileModuleWithDepsInHpt env.log hooks.events) args
 
     withTarget f (target :: TargetSpec) =
       reifyGhc $ \session -> do
@@ -117,26 +114,19 @@ dispatch hooks env args =
 #endif
 
 processResult ::
-  Hooks ->
   Logger ->
   MVar WorkerState ->
   Either IOError (Int32, Maybe TargetSpec) ->
   IO ([String], Int32)
-processResult hooks logger _stateVar result = do
+processResult logger _stateVar result = do
 #if __DEBUG__
   when (exitCode /= 0) do
     dumpState logger _stateVar _exception
 #endif
   output <- logger.flush
-  hooks.compileFinish (hookPayload output)
   pure (output, exitCode)
   where
-    hookPayload output =
-      if exitCode == 0
-      then Just (target, output, exitCode)
-      else Nothing
-
-    ((exitCode, target), _exception) = case result of
+    ((exitCode, _target), _exception) = case result of
       Right out -> (out, Nothing)
       Left err -> ((1, Nothing), Just ("Exception: " ++ show err))
 
@@ -144,10 +134,9 @@ processResult hooks logger _stateVar result = do
 -- EPS for local dependency lookup.
 --
 -- Parses the request args from Buck, creates a new 'Log' and 'Env', and passes all of that to 'dispatch'.
--- Afterwards, extracts the log messages that GHC wrote to 'Log' and calls the instrumentation hook 'compileFinish',
--- providing the log and exit code.
+-- Afterwards, extracts the log messages that GHC wrote to 'Log' and returns them with the exit code.
 --
--- If an exception was thrown, the hook is called without data.
+-- Task events are published by the compilation and metadata functions themselves, via 'Hooks.events'.
 ghcHandler ::
   -- | first req lock hack
   MVar WorkerState ->
@@ -167,7 +156,7 @@ ghcHandler state settings traceId =
       log.debug (unlines (coerce argv))
       let env = Env {log, state, args = args}
       dispatch hooks env buckArgs
-    processResult hooks log state result
+    processResult log state result
   where
     parseError msg =
       throwIO (userError ("Parsing Buck args failed: " ++ msg))

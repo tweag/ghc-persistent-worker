@@ -49,5 +49,7 @@ data Logger =
     infoD :: SDoc -> IO (),
     fatal :: SDoc -> IO (),
     ghcAction :: LogAction,
-    flush :: IO [String]
+    flush :: IO [String],
+    -- | The messages that 'flush' would return, without writing the log file or clearing the log.
+    peek :: IO [String]
   }

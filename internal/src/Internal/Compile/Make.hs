@@ -32,7 +32,7 @@ import GHC.Utils.Outputable (ppr, showPprUnsafe, text, (<+>))
 import GHC.Utils.Panic (throwGhcExceptionIO)
 import GHC.Utils.TmpFs (TmpFs, cleanCurrentModuleTempFiles, keepCurrentModuleTempFiles)
 import Internal.Compat.GHC914 (hscModuleGraph)
-import Internal.Compile.Phase (withPhaseEvents)
+import Internal.Compile.Phase (withPhaseEvents, withTaskEvents)
 import Internal.Debug (pprModuleFull)
 import Internal.DynFlags (mkTargetAsInterpreted)
 import Internal.Error (eitherMessages, noteGhc)
@@ -137,7 +137,7 @@ compileModuleWithDepsInHpt logger events target =
   logTimedD logger "Compiling" do
     initializeSessionPlugins
     hsc_env <- getSession
-    hmi <- liftIO do
+    hmi <- liftIO $ withTaskEvents logger events target do
       summary <- ensureSummary logger hsc_env target
       let hsc_env'
             | TargetModuleInterp _ <- target = mkTargetAsInterpreted (ms_mod summary) hsc_env

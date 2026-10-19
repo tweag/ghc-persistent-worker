@@ -83,7 +83,7 @@ runBuildTask env label tempName expectedCodes action =
 runMetadata :: SessionEnv -> (GenUnit BuildModule -> Args) -> GenUnit BuildModule -> IO RequestResult
 runMetadata env mkArgs unit = do
   runBuildTask env "metadata" (unitTmpDir unit.key) [] \ taskEnv -> do
-    fst <$> computeMetadata taskEnv {args = mkArgs unit}
+    fst <$> computeMetadata eventsNoop taskEnv {args = mkArgs unit}
 
 compileTarget :: ModuleKey -> ModuleTarget
 compileTarget key =

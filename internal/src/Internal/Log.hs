@@ -1,6 +1,6 @@
 module Internal.Log where
 
-import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_)
+import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, readMVar)
 import Control.Monad (unless)
 import Control.Monad.Catch (MonadCatch, onException)
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -151,6 +151,12 @@ logFlush =
     writeLogFile traceId target logLines
     pure [msg | (msg, level) <- logLines, LogInfo == level]
 
+-- | Return the log lines that 'logFlush' would return, leaving the log and the log file untouched.
+logPeek :: MVar Log -> IO [String]
+logPeek logVar = do
+  Log {other, diagnostics} <- readMVar logVar
+  pure [msg | (msg, LogInfo) <- reverse (other ++ [(msg, LogInfo) | msg <- diagnostics])]
+
 -- | Write the current session's log to stderr and clear the fields in the 'MVar'.
 logFlushDebug :: MVar Log -> IO ()
 logFlushDebug =
@@ -173,7 +179,8 @@ newLogger state =
         infoD = info . showPprUnsafe,
         fatal = info . showPprUnsafe,
         ghcAction = logGhcAction state,
-        flush = logFlush state
+        flush = logFlush state,
+        peek = logPeek state
       }
 
 dbg :: MonadIO m => String -> m ()

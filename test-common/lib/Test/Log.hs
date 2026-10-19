@@ -50,7 +50,8 @@ testLogger logVar =
     infoD = debug . showPprUnsafe,
     fatal = \ message -> modifyLog logVar \ log -> log {fatal = showPprUnsafe message : log.fatal},
     ghcAction = testGhcAction logVar,
-    flush = testLogFlush logVar
+    flush = testLogFlush logVar,
+    peek = testLogFlush logVar
   }
   where
     debug message = do

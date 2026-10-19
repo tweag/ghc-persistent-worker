@@ -1,6 +1,6 @@
 module Internal.Compile.Phase where
 
-import Control.Exception (finally)
+import Control.Exception (SomeException, displayException, finally, throwIO, try)
 import Data.Foldable (for_)
 import GHC (ModSummary (..))
 import GHC.Clock (getMonotonicTimeNSec)
@@ -12,6 +12,7 @@ import GHC.Driver.Pipeline (runPhase)
 import GHC.Driver.Pipeline.Phases (PhaseHook (..), TPhase (..))
 import GHC.Tc.Types (FrontendResult (..))
 import Types.Api (Event (..), Events (..), targetFromWorkerSpec)
+import Types.Log (Logger (..))
 import Types.Target (TargetSpec (..))
 
 phaseLabel :: TPhase a -> Maybe String
@@ -40,6 +41,26 @@ withPhase events spec phase act = do
         PhaseEnd {target, durationMs = fromIntegral ((endNs - startNs) `div` 1_000_000), requestId}
   pure result
   where
+    uiTarget = targetFromWorkerSpec spec
+
+-- | Wrap a task with 'CompileStart' and 'CompileEnd' events.
+-- The log accumulated so far is reported as the end event's stderr, without flushing it.
+-- An exception counts as a failure, which is also reported with the exception's message and rethrown.
+withTaskEvents :: Logger -> Events -> TargetSpec -> IO a -> IO a
+withTaskEvents logger events spec act = do
+  for_ uiTarget \ target ->
+    events.publish \ requestId -> CompileStart {target, debuggable = False, requestId}
+  try act >>= \case
+    Right a -> a <$ end 0 []
+    Left (e :: SomeException) -> end 1 [displayException e] *> throwIO e
+  where
+    end exitCode extra = do
+      logged <- logger.peek
+      let stderr = unlines (logged ++ extra)
+      for_ uiTarget \ target ->
+        events.publish \ requestId ->
+          CompileEnd {target, exitCode, stderr, requestId}
+
     uiTarget = targetFromWorkerSpec spec
 
 -- | Install a 'PhaseHook' on the given 'HscEnv' that send phase events for each phase matched by 'phaseLabel'.
