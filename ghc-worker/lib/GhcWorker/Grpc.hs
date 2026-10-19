@@ -3,7 +3,7 @@ module GhcWorker.Grpc where
 import BuckWorkerProto ()
 import Common.Grpc (GrpcHandler, execute, workerMethods)
 import Control.Concurrent.Chan (Chan, dupChan, readChan)
-import Control.Concurrent.MVar (MVar, readMVar)
+import Control.Concurrent.MVar (MVar, modifyMVar_, readMVar)
 import Control.Monad (forever)
 import Data.Aeson (eitherDecodeStrict, encode)
 import Data.Binary qualified as Binary
@@ -26,6 +26,9 @@ import Types.Api (
   TaskKind (..),
   TaskTrigger (..),
   )
+import Types.FeatureFlags (Feature (..))
+import Types.Settings (toggleFlag)
+import qualified Types.State as State
 import Types.State (WorkerState (..))
 
 -- | Fetch statistics about the current state of the RTS for instrumentation.
@@ -73,16 +76,24 @@ triggerTask = \case
   TaskTrigger {task = Execute} ->
     pure (ApiFailure "Cannot trigger execute")
 
+-- | Flip a single 'Feature' in 'WorkerState', shared by both 'GhcWorker.Grpc.apiRequest' and
+-- 'GhcServer.Grpc.runCommand'.
+toggleFeature :: MVar WorkerState -> Feature -> IO ()
+toggleFeature stateVar feature =
+  modifyMVar_ stateVar \ state -> pure state {State.settings = toggleFlag feature state.settings}
+
 -- | Dispatch a single decoded 'ApiRequest' to the appropriate handler.
 -- The worker doesn't support bytecode eviction yet.
-apiRequest :: ApiRequest a -> IO (ApiResponse a)
-apiRequest = \case
+apiRequest :: MVar WorkerState -> ApiRequest a -> IO (ApiResponse a)
+apiRequest stateVar = \case
   TriggerTask trigger ->
     triggerTask trigger
   EvictBytecode _ ->
     pure (ApiFailure "Evicting bytecode not supported")
   Clean _ ->
     pure (ApiFailure "Cleaning not supported")
+  ToggleFeature {feature} ->
+    ApiSuccess () <$ toggleFeature stateVar feature
 
 -- | Implementation of the @Api@ method: decodes the JSON payload, runs it via the supplied dispatcher, and
 -- JSON-encodes the resulting response.
@@ -108,6 +119,6 @@ ghcMethods ::
   Methods IO (ProtobufMethodsOf Worker)
 ghcMethods stateVar chan handler =
   workerMethods
-    (handleCommand apiRequest)
+    (handleCommand (apiRequest stateVar))
     (notifyMe stateVar chan)
     (execute handler)

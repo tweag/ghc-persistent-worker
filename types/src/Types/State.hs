@@ -5,6 +5,7 @@ import Data.Set (Set)
 import GHC (HscEnv)
 import System.OsPath (OsPath)
 import Types.Grpc (CommandEnv, RequestArgs)
+import Types.Settings (Settings)
 import Types.State.Make (MakeState (..))
 import Types.Target (TargetSpec)
 
@@ -20,5 +21,8 @@ data WorkerState =
     path :: BinPath,
     baseSession :: Maybe HscEnv,
     make :: MakeState,
+    -- | Runtime feature flags, initialized from the worker's CLI options/build config and mutable at runtime via
+    -- the @ToggleFeature@ API request.
+    settings :: Settings,
     targetArgs :: Map TargetSpec (CommandEnv, RequestArgs)
   }

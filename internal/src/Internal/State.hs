@@ -25,8 +25,8 @@ import Types.State.Make (
   emptyLibLoadState,
   )
 
-newState :: IO (MVar WorkerState)
-newState = do
+newState :: Settings -> IO (MVar WorkerState)
+newState settings = do
   initialPath <- lookupEnv "PATH"
   unitIndex <- newUnitIndex
   let bcoLoadState = M.empty
@@ -36,6 +36,7 @@ newState = do
       extra = mempty
     },
     baseSession = Nothing,
+    settings,
     make = MakeState {
       moduleGraphState = emptyEModuleGraph,
       moduleGraphNodes = M.empty,
