@@ -17,6 +17,7 @@ module Internal.Executor.Output where
 import Control.Concurrent (ThreadId, myThreadId)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Exception (bracket_)
+import Control.Monad (unless)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Char8 as Char8
@@ -152,3 +153,9 @@ attachTo router owner =
     bracket_ (modify (Map.insert thread owner)) (modify (Map.delete thread)) action
   where
     modify f = atomicModifyIORef' router.threads \ threads -> (f threads, ())
+
+-- | Publish the incomplete lines left at the end of a task.
+flushPartial :: OutputRouter -> Owner -> OutputStream -> IO ()
+flushPartial router owner stream = do
+  rest <- atomicModifyIORef' (selectLane stream owner).partial \ partial -> ("", partial)
+  unless (ByteString.null rest) (publishLines router owner stream [rest])
