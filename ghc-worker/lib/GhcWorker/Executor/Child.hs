@@ -13,9 +13,10 @@ module GhcWorker.Executor.Child where
 
 import Data.Text (pack)
 import GHC.Stats (RTSStats (..), getRTSStats)
+import Internal.Log (newLogger)
 import System.Mem (performMajorGC)
 import Types.Api (ProcessStats (..))
-import Types.Log (Logger (..))
+import Types.Log (Logger (..), newLog)
 import Types.Executor.Protocol (CallResult (..), Captured (..), EvalOutcome, SetupError (..))
 
 -- | Assemble the result of a call: the captured output, the log messages and the executor's RTS stats.
@@ -38,3 +39,9 @@ finishResult logger captured outcome = do
       maxLiveBytes = rtsStats.max_live_bytes
     }
   }
+
+-- | The result for a call that could not be run.
+setupFailure :: SetupError -> IO CallResult
+setupFailure err = do
+  logger <- newLogger <$> newLog Nothing
+  finishResult logger Captured {stdout = "", stderr = ""} (Left err)
