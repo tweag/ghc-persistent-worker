@@ -40,7 +40,7 @@ import Internal.State.Stats (logMemStats)
 import Internal.State.UnitIndex (restoreUnitIndex)
 import System.Directory (createDirectoryIfMissing)
 import qualified System.File.OsPath as OsPath
-import System.OsPath.Extra (OsPath, toOsPath)
+import System.OsPath.Extra (toOsPath)
 import Types.Api (Event (..), Events (..), targetFromWorkerSpec)
 import Types.Args (Args (..), buildPlanAll)
 import Types.BuildPlan (BuildPlan (..))
