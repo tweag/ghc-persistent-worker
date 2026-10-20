@@ -5,6 +5,8 @@
 -- Used by the @ghc-server@ ('GhcServer.Build.Executor') and by the worker's eval mode ('GhcWorker.Eval.Executor').
 module Internal.Executor.Client where
 
+import Types.Settings (Settings (..))
+
 -- | Wrap RTS options in @+RTS ... -RTS@, or nothing if there are none.
 rtsArgs :: [String] -> [String]
 rtsArgs = \case
@@ -15,3 +17,8 @@ rtsArgs = \case
 -- 'Types.Settings.Settings.executorCaptureStdio'.
 captureStdioArg :: String
 captureStdioArg = "--capture-stdio"
+
+-- | The extra executor arguments for the settings, to be passed to 'spawnExecutorWith'.
+captureStdioArgs :: Settings -> [String]
+captureStdioArgs settings =
+  [captureStdioArg | settings.executorCaptureStdio]
