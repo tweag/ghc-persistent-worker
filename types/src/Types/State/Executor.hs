@@ -3,7 +3,7 @@
 -- process, and 'GhcServer.Build.Executor' for the parent-side spawn\/dispatch\/terminate logic.
 module Types.State.Executor where
 
-import Control.Concurrent.QSemN (QSemN)
+import Control.Concurrent.QSemN (QSemN, newQSemN)
 import System.IO (Handle)
 import System.OsPath (OsPath)
 import System.Process (ProcessHandle)
@@ -12,6 +12,9 @@ import Types.Api (ProcessStats)
 -- | The number of calls that can hold an executor's 'ExecutorHandle.calls' at the same time.
 maxConcurrentCalls :: Int
 maxConcurrentCalls = 64
+
+newCallLock :: IO QSemN
+newCallLock = newQSemN maxConcurrentCalls
 
 -- | A running persistent executor child process: its OS process handle (for termination), the Unix socket
 -- path on which it serves the @Executor@ gRPC service, and the write end of its stdin pipe. The child exits when
