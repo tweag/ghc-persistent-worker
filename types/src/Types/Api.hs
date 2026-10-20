@@ -143,6 +143,14 @@ data ExecutorStatus =
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary, FromJSON, ToJSON)
 
+-- | Identify a stdio stream for processes.
+data OutputStream =
+  Stdout
+  |
+  Stderr
+  deriving stock (Eq, Ord, Show, Generic)
+  deriving anyclass (Binary, FromJSON, ToJSON)
+
 data TaskKind =
   Metadata
   |
