@@ -6,3 +6,6 @@ rtsArgs :: [String] -> [String]
 rtsArgs = \case
   [] -> []
   opts -> ["+RTS"] ++ opts ++ ["-RTS"]
+
+captureStdioArg :: String
+captureStdioArg = "--capture-stdio"
