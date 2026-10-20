@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package executor;
+
+message Encoded {
+  bytes payload = 1;
+}
+
+message Empty {}
+
+// A persistent executor subprocess spawned by the worker or server (see Internal.Executor.Client).
+// The payload of an Execute request is a JSON-encoded ExecutorRequest, the response a JSON-encoded CallResult.
+// Events streams JSON-encoded ExecutorEvents (task output, status snapshots).
+service Executor {
+  rpc Execute(Encoded) returns (Encoded) {};
+
+  rpc Events(Empty) returns (stream Encoded) {};
+}

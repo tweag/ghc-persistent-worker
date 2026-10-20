@@ -2,6 +2,8 @@ module Types.Log where
 
 import Control.Concurrent.MVar (MVar, newMVar)
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import qualified Data.Text as Text
+import Data.Text (Text)
 import GHC.Utils.Logger (LogAction)
 import GHC.Utils.Outputable (SDoc)
 import Prelude hiding (log)
@@ -43,6 +45,7 @@ newLog traceId =
 data Logger =
   Logger {
     setTarget :: TargetSpec -> IO (),
+    -- TODO change to Text
     debug :: String -> IO (),
     debugD :: SDoc -> IO (),
     info :: String -> IO (),
@@ -53,3 +56,7 @@ data Logger =
     -- | The messages that 'flush' would return, without writing the log file or clearing the log.
     peek :: IO [String]
   }
+
+debugT :: Logger -> Text -> IO ()
+debugT logger =
+  logger.debug . Text.unpack

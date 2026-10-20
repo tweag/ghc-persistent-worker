@@ -47,6 +47,8 @@ library
     Types.CachedDeps
     Types.Compat.GHC914
     Types.Env
+    Types.Executor.Protocol
+    Types.Executor.Transport
     Types.FeatureFlags
     Types.BuildPlan.Incremental
     Types.Grpc
@@ -55,6 +57,7 @@ library
     Types.Orchestration
     Types.Settings
     Types.State
+    Types.State.Executor
     Types.State.Make
     Types.Target
     Types.Text
@@ -71,6 +74,7 @@ library
     ghc,
     ghc-paths,
     os-string,
+    process,
     split,
     text
 

@@ -85,6 +85,7 @@ library
                       Internal.Compat.UnitIndex
                       Internal.Compile.Make
                       Internal.Compile.Phase
+                      Internal.Compile.TopEnv
                       Internal.Debug
                       Internal.DynFlags
                       Internal.DynFlags.Options
@@ -92,6 +93,11 @@ library
                       Internal.DynFlags.Update
                       Internal.Env
                       Internal.Error
+                      Internal.Evaluate
+                      Internal.Executor.CallbackHandle
+                      Internal.Executor.Client
+                      Internal.Executor.Lifecycle
+                      Internal.Executor.Output
                       Internal.Json
                       Internal.Log
                       Internal.Metadata
@@ -104,6 +110,7 @@ library
                       Internal.State.UnitIndex
                       Internal.State.UnitIndex.Update
                       Internal.ValidateNames
+                      Internal.Watch
 
     build-depends:    aeson,
                       array,
@@ -115,12 +122,15 @@ library
                       exceptions,
                       extra,
                       bytestring,
+                      fsnotify,
                       flatparse,
                       filepath,
                       file-io,
                       ghc,
                       ghc-boot,
+                      ghci,
                       hashable,
+                      process,
                       text,
                       time,
                       transformers

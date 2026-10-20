@@ -37,6 +37,7 @@
           "optparse-applicative"
           "os-string"
           "process"
+          "silently"
           "text"
           "time"
         ];
@@ -180,12 +181,16 @@
           "containers"
           "directory"
           "exceptions"
+          "extra"
           "flatparse"
           "filepath"
           "file-io"
+          "fsnotify"
           "ghc"
+          "ghci"
           "ghc-boot"
           "hashable"
+          "process"
           "text"
           "time"
           "transformers"
@@ -231,6 +236,7 @@
           "ghc"
           "ghc-paths"
           "os-string"
+          "process"
           "split"
           "text"
         ];
@@ -244,8 +250,10 @@
       library = {
         enable = true;
         dependencies = [
+          "aeson"
           "buck-worker-types"
           "buck-worker-proto"
+          "bytestring"
           "containers"
           "grapesy"
           "text"
@@ -270,7 +278,6 @@
           "directory"
           "exceptions"
           "extra"
-          "exceptions"
           "file-io"
           "filepath"
           "generic-lens"

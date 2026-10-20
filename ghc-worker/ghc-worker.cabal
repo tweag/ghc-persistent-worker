@@ -61,6 +61,7 @@ library
   hs-source-dirs: lib
   exposed-modules:
     GhcWorker.CompileResult
+    GhcWorker.Executor.Child
     GhcWorker.GhcHandler
     GhcWorker.Grpc
     GhcWorker.Instrumentation
@@ -85,6 +86,7 @@ library
     optparse-applicative,
     os-string,
     process,
+    silently,
     text,
     time
   if (flag(ghc-debug))
@@ -116,6 +118,7 @@ test-suite ghc-worker-test
     BuildPlanTest.Test2,
     BuildThTest,
     ByteCodeCacheTest,
+    CallbackHandleTest,
     DepFilesTest,
     FlagParserTest,
     InterfacePathTest,

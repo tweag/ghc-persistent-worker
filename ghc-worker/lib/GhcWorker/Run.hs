@@ -19,6 +19,7 @@ import Options.Applicative (
   ParserInfo,
   eitherReader,
   execParser,
+  flag,
   fullDesc,
   header,
   help,
@@ -29,13 +30,14 @@ import Options.Applicative (
   option,
   progDesc,
   strOption,
+  value,
   (<**>),
   )
 import System.OsPath.Extra (toOsPath)
 import Types.FeatureFlags (Feature (..), parseFeatureFlag)
 import Types.Log (TraceId (..))
 import Types.Orchestration (ServerSocketPath (..), serverSocketFromPath)
-import Types.Settings (Settings (..), defaultSettings, featureOn, parseByteSize, setFeature)
+import Types.Settings (Settings (..), defaultExecutorRts, defaultSettings, featureOn, parseByteSize, setFeature)
 import Types.State (WorkerState (..))
 
 -- | Global options for the worker, passed when the process is started, in contrast to request options stored in
@@ -61,9 +63,17 @@ featureFlagsParser =
   where
     applyFlags = flip foldr defaultSettings (uncurry setFeature)
 
-    flagOption value = do
-      flag <- eitherReader (first unpack . parseFeatureFlag . pack)
-      pure (flag, value)
+    flagOption enabled = do
+      feature <- eitherReader (first unpack . parseFeatureFlag . pack)
+      pure (feature, enabled)
+
+-- | Parser for '--executor-capture-stdio', which sets 'Types.Settings.Settings.executorCaptureStdio'.
+captureStdioParser :: Parser (Settings -> Settings)
+captureStdioParser =
+  flag id (\ settings -> settings {executorCaptureStdio = True}) (
+    long "executor-capture-stdio"
+    <> help "Attribute the stdout and stderr of persistent executors to their tasks"
+    )
 
 -- | Parser for '--max-bytecode', bounding the loader state size.
 maxBytecodeParser :: Parser (Maybe Int)
@@ -76,12 +86,24 @@ maxBytecodeParser =
       )
     )
 
+-- | Parser for '--executor-rts', the RTS options of persistent executor subprocesses.
+executorRtsParser :: Parser [String]
+executorRtsParser =
+  words <$> strOption (
+    long "executor-rts"
+    <> metavar "OPTS"
+    <> help "RTS options for persistent executor subprocesses, separated by spaces"
+    <> value (unwords defaultExecutorRts)
+    )
+
 cliOptionsParser :: Parser CliOptions
 cliOptionsParser = do
   serve <- serverSocketFromPath . toOsPath <$> strOption (long "serve" <> metavar "SOCKET" <> help "Socket path for the GHC server")
   features0 <- featureFlagsParser
+  captureStdio <- captureStdioParser
   maxBytecode <- maxBytecodeParser
-  pure CliOptions {serve, settings = features0 {lazyByteCodeCacheLimit = maxBytecode}}
+  executorRts <- executorRtsParser
+  pure CliOptions {serve, settings = (captureStdio features0) {lazyByteCodeCacheLimit = maxBytecode, executorRts}}
 
 cliOptionsParserInfo :: ParserInfo CliOptions
 cliOptionsParserInfo =

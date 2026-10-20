@@ -73,7 +73,7 @@ triggerTask = \case
     pure (ApiFailure "Cannot trigger metadata")
   TaskTrigger {task = Build _rebuild} ->
     pure (ApiFailure "Cannot trigger build")
-  TaskTrigger {task = Execute} ->
+  TaskTrigger {task = Execute {}} ->
     pure (ApiFailure "Cannot trigger execute")
 
 -- | Flip a single 'Feature' in 'WorkerState', shared by both 'GhcWorker.Grpc.apiRequest' and
@@ -82,9 +82,12 @@ toggleFeature :: MVar WorkerState -> Feature -> IO ()
 toggleFeature stateVar feature =
   modifyMVar_ stateVar \ state -> pure state {State.settings = toggleFlag feature state.settings}
 
--- | Dispatch a single decoded 'ApiRequest' to the appropriate handler.
--- The worker doesn't support bytecode eviction yet.
-apiRequest :: MVar WorkerState -> ApiRequest a -> IO (ApiResponse a)
+-- | Dispatch a single decoded 'Command' to the appropriate handler, producing the 'Response'
+-- to be JSON-encoded back into the @Send@ RPC's 'Instr.CommandResponse'.
+apiRequest ::
+  MVar WorkerState ->
+  ApiRequest a ->
+  IO (ApiResponse a)
 apiRequest stateVar = \case
   TriggerTask trigger ->
     triggerTask trigger
@@ -94,10 +97,12 @@ apiRequest stateVar = \case
     pure (ApiFailure "Cleaning not supported")
   ToggleFeature {feature} ->
     ApiSuccess () <$ toggleFeature stateVar feature
+  TerminateExecutor {} ->
+    pure (ApiFailure "Executor subprocesses not supported by this worker")
 
--- | Implementation of the @Api@ method: decodes the JSON payload, runs it via the supplied dispatcher, and
--- JSON-encodes the resulting response.
--- Exported (rather than kept local) so 'GhcServer.Grpc' can reuse it with its own dispatcher.
+-- | Implementation of the unified @Send@ RPC: decodes the JSON 'Instr.Command' payload, runs it via the supplied
+-- dispatcher, and JSON-encodes the resulting 'Response' back into an 'Instr.CommandResponse'. Exported
+-- (rather than kept local) so 'GhcServer.Grpc' can reuse it with its own 'runCommand'-shaped dispatcher.
 handleCommand ::
   (forall a . ApiRequest a -> IO (ApiResponse a)) ->
   Proto Encoded ->

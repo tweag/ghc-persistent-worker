@@ -9,6 +9,7 @@ import Data.Map (Map)
 import Data.String (IsString)
 import qualified Data.Text as Text
 import Data.Text (Text, unpack)
+import Data.Word (Word64)
 import qualified GHC
 import GHC.Generics (Generic)
 import GHC.Unit (Module, UnitId, mkModuleName, moduleName, moduleNameString, moduleUnitId, stringToUnitId, unitIdString)
@@ -33,6 +34,15 @@ newtype ModuleName =
   ModuleName { text :: Text }
   deriving stock (Eq, Show)
   deriving newtype (IsString, Ord, Binary, FromJSON, ToJSON)
+
+-- | Identifier for a persistent execute-task subprocess (see 'Types.State.WorkerState.executors' and
+-- 'GhcServer.Build.Executor'), specified by the client/UI when triggering an execute task. The @ghc-ui@ default
+-- is the target unit's name (see 'Ghc.Ui.Event.Main'), but any text is accepted, allowing multiple executors per
+-- unit or one executor shared across units.
+newtype ExecutorId =
+  ExecutorId { text :: Text }
+  deriving stock (Eq, Ord, Show)
+  deriving newtype (IsString, Binary, FromJSON, ToJSON)
 
 fromGhcModuleName :: GHC.ModuleName -> ModuleName
 fromGhcModuleName name =
@@ -114,12 +124,48 @@ targetFromWorkerSpec = \case
   Worker.TargetUnit UnitTarget {unit} -> Just TargetUnit {name = UnitName (Text.pack (unitIdString unit))}
   _ -> Nothing
 
+-- | RTS memory-usage stats reported by a subprocess execute task's child process (see
+-- 'GhcServer.Data.ProcessEval.ProcessEvalResult'), taken from 'GHC.Stats.RTSStats' right before the child
+-- exits.
+data ProcessStats =
+  ProcessStats {
+    maxMemInUseBytes :: Word64,
+    maxLiveBytes :: Word64
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (Binary, FromJSON, ToJSON)
+
+-- | Current state of a persistent executor, published periodically by the executor child (see
+-- 'GhcServer.Build.ExecutorChild') and forwarded to clients in 'ExecutorUpdate'.
+data ExecutorStatus =
+  ExecutorStatus {
+    -- | Memory currently in use by the RTS (@gcdetails_mem_in_use_bytes@) as of the last GC.
+    memInUseBytes :: Word64,
+    -- | Live data as of the last GC (@gcdetails_live_bytes@).
+    liveBytes :: Word64,
+    -- | Calls that were received and not yet answered, i.e. running plus queued ones.
+    activeTasks :: Int
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (Binary, FromJSON, ToJSON)
+
+-- | The standard stream a line of executor output was written to.
+data OutputStream =
+  Stdout
+  |
+  Stderr
+  deriving stock (Eq, Ord, Show, Generic)
+  deriving anyclass (Binary, FromJSON, ToJSON)
+
 data TaskKind =
   Metadata
   |
   Build { rebuild :: Bool }
   |
-  Execute
+  -- | Run this target's execute tasks via a persistent, gRPC-addressable subprocess (see
+  -- 'GhcServer.Build.Executor') identified by 'ExecutorId', instead of in-process. 'Nothing' runs in-process, as
+  -- before the executor subsystem was introduced.
+  Execute { executor :: Maybe ExecutorId }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary, FromJSON, ToJSON)
 
@@ -137,6 +183,9 @@ data ApiRequest a where
   Clean :: { target :: Target } -> ApiRequest ()
   -- | Toggle a single 'Feature', sent by the @ghc-ui@ feature-flags panel when a checkbox is toggled.
   ToggleFeature :: { feature :: Feature } -> ApiRequest ()
+  -- | Terminate a persistent executor subprocess (see 'GhcServer.Build.Executor.terminateExecutor'), sent by the
+  -- @ghc-ui@ executors panel. A no-op (successful) if no executor with the given id is currently running.
+  TerminateExecutor :: { executor :: ExecutorId } -> ApiRequest ()
 
 deriving stock instance Eq (ApiRequest a)
 deriving stock instance Show (ApiRequest a)
@@ -154,6 +203,8 @@ instance ToJSON SomeApiRequest where
       tagged "Clean" ["target" .= toJSON target]
     ToggleFeature {feature} ->
       tagged "ToggleFeatureFlag" ["feature" .= toJSON feature]
+    TerminateExecutor {executor} ->
+      tagged "TerminateExecutor" ["executor" .= toJSON executor]
     where
       tagged (tag :: Text) fields = object $ ("tag" .= tag) : fields
 
@@ -173,6 +224,9 @@ instance FromJSON SomeApiRequest where
         "ToggleFeatureFlag" -> do
           feature <- o .: "feature"
           pure (SomeApiRequest ToggleFeature {feature})
+        "TerminateExecutor" -> do
+          executor <- o .: "executor"
+          pure (SomeApiRequest TerminateExecutor {executor})
         tag ->
           fail (unpack ("Invalid tag: " <> tag))
 
@@ -181,7 +235,7 @@ data ApiResponse a =
   |
   ApiFailure { message :: Text }
   deriving stock (Eq, Show, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, Binary)
 
 newtype RequestId =
   RequestId { number :: Int }
@@ -193,6 +247,8 @@ data Event =
   CompileStart {
     target :: Target,
     debuggable :: Bool,
+    -- | Whether this task is running (or about to run) in a self-relaunched subprocess rather than in-process.
+    process :: Bool,
     requestId :: RequestId
   }
   |
@@ -200,6 +256,15 @@ data Event =
     target :: Target,
     exitCode :: Int,
     stderr :: String,
+    result :: Maybe String,
+    -- | 'True' only for an execute task whose module has no @main@ binding, in which case no execution ever
+    -- took place; 'False' for every other task kind and for execute tasks that did run (whether they succeeded
+    -- or failed). Lets clients (the @ghc-ui@ tasks view) distinguish this from an ordinary successful/failed
+    -- run, since 'result' being 'Nothing' alone is ambiguous (a normal run that didn't exfiltrate a value also
+    -- reports 'Nothing').
+    noMain :: Bool,
+    -- | RTS memory stats reported by a subprocess execute task, 'Nothing' for every other task kind.
+    processStats :: Maybe ProcessStats,
     requestId :: RequestId
   }
   |
@@ -236,22 +301,58 @@ data Event =
   |
   -- | Indicates that all scheduled tasks have concluded.
   RequestCompleted { statusMessage :: Text }
+  |
+  -- | Periodic status of a running executor.
+  ExecutorUpdate {
+    executor :: ExecutorId,
+    pid :: Maybe Int,
+    status :: ExecutorStatus
+  }
+  |
+  -- | The executor process has stopped or was terminated.
+  ExecutorGone { executor :: ExecutorId }
+  |
+  -- | A line written to stdout or stderr in an executor process.
+  -- It is attributed to the task that was running in the writing thread, if any; all other output has no task.
+  ExecutorOutput {
+    executor :: ExecutorId,
+    task :: Maybe RequestId,
+    stream :: OutputStream,
+    line :: Text
+  }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary)
 
 data Events =
   Events {
     publish :: (RequestId -> Event) -> IO ()
+    ,
+    -- | The id that 'publish' passes to events, to identify the request in other channels (like executor calls).
+    requestId :: RequestId
   }
 
 eventsNoop :: Events
 eventsNoop =
   Events {
-    publish = \ _ -> pure ()
+    publish = \ _ -> pure (),
+    requestId = RequestId 0
+  }
+
+-- | Drop the 'CompileStart' and 'CompileEnd' events, for callers that report task boundaries themselves.
+eventsWithoutTasks :: Events -> Events
+eventsWithoutTasks events =
+  Events {
+    publish = \ event ->
+      case event (RequestId 0) of
+        CompileStart {} -> pure ()
+        CompileEnd {} -> pure ()
+        _ -> events.publish event,
+    requestId = events.requestId
   }
 
 eventsForRequest :: RequestId -> (Event -> IO ()) -> Events
 eventsForRequest requestId publish =
   Events {
-    publish = \ event -> publish (event requestId)
+    publish = \ event -> publish (event requestId),
+    requestId
   }

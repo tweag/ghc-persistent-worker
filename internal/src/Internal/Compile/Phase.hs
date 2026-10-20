@@ -49,7 +49,7 @@ withPhase events spec phase act = do
 withTaskEvents :: Logger -> Events -> TargetSpec -> IO a -> IO a
 withTaskEvents logger events spec act = do
   for_ uiTarget \ target ->
-    events.publish \ requestId -> CompileStart {target, debuggable = False, requestId}
+    events.publish \ requestId -> CompileStart {target, debuggable = False, process = False, requestId}
   try act >>= \case
     Right a -> a <$ end 0 []
     Left (e :: SomeException) -> end 1 [displayException e] *> throwIO e
@@ -59,7 +59,7 @@ withTaskEvents logger events spec act = do
       let stderr = unlines (logged ++ extra)
       for_ uiTarget \ target ->
         events.publish \ requestId ->
-          CompileEnd {target, exitCode, stderr, requestId}
+          CompileEnd {target, exitCode, stderr, result = Nothing, processStats = Nothing, noMain = False, requestId}
 
     uiTarget = targetFromWorkerSpec spec
 

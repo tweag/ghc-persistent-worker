@@ -40,6 +40,8 @@ data Mode =
   |
   ModeMetadata
   |
+  ModeEval
+  |
   ModeUnknown String
   deriving stock (Eq, Show)
 
@@ -48,6 +50,7 @@ parseMode = \case
   "compile" -> ModeCompile
   "link" -> ModeLink
   "metadata" -> ModeMetadata
+  "eval" -> ModeEval
   mode -> ModeUnknown mode
 
 data IsInterpreted =
@@ -92,7 +95,15 @@ data BuckArgs =
     isBinary :: Bool,
     interp :: IsInterpreted,
     unitBuckArgsPath :: Maybe String,
-    depUnitsPath :: Maybe String
+    depUnitsPath :: Maybe String,
+    -- | Expression to evaluate in "eval mode" (@ModeEval@, see @GhcWorker.GhcHandler.dispatch@), mirroring the
+    -- worker's @--expr@ CLI flag. Handled like a module's @main@ in the ghc-server (see
+    -- @Internal.Evaluate.runExpression@), so it must be of type @IO a@.
+    expr :: Maybe String,
+    -- | Name used to tag log output for the eval-mode target (see @Internal.Log.setTarget@); purely cosmetic.
+    evalTargetName :: Maybe String,
+    -- | Interpret an @IO (Int, Int)@ result of 'expr' as @(total, failed)@, failing the evaluation if @failed /= 0@.
+    evalCountFailures :: Bool
   }
   deriving stock (Eq, Show)
 
@@ -131,7 +142,10 @@ emptyBuckArgs env =
     isBinary = False,
     interp = Compiled,
     unitBuckArgsPath = Nothing,
-    depUnitsPath = Nothing
+    depUnitsPath = Nothing,
+    expr = Nothing,
+    evalTargetName = Nothing,
+    evalCountFailures = False
   }
 
 options :: Map String ([String] -> BuckArgs -> Either String ([String], BuckArgs))
@@ -169,6 +183,9 @@ options =
     withArg "--close-input" \z a -> z {closeInput = Just a},
     withArg "--close-output" \z a -> z {closeOutput = Just a},
     flag "--interp" \ z -> z {interp = Interpreted},
+    withArg "--expr" \ z a -> z {expr = Just a},
+    withArg "--eval-target-name" \ z a -> z {evalTargetName = Just a},
+    flag "--eval-count-failures" \ z -> z {evalCountFailures = True},
     ("-c", \ rest z -> Right (rest, z {mode = Just ModeCompile})),
     ("-M", \ rest z -> Right (rest, z {mode = Just ModeMetadata}))
   ]
