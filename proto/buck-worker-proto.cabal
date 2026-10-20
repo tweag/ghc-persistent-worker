@@ -28,13 +28,16 @@ library
   exposed-modules:
     BuckWorkerProto,
     Proto.Worker,
-    Proto.Worker_Fields
+    Proto.Worker_Fields,
+    Proto.Executor,
+    Proto.Executor_Fields
   build-depends:
     base ==4.*,
     bytestring,
     containers,
     deepseq,
-    grapesy >=1.0.1,
+    exceptions,
+    grapesy ^>=1.1,
     lens-family,
     proto-lens,
     text,
