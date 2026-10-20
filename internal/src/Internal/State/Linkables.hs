@@ -11,7 +11,7 @@ import Types.State (WorkerState)
 
 import Control.Concurrent (modifyMVar, modifyMVar_)
 import Control.Monad (foldM)
-import Data.Foldable (for_, traverse_)
+import Data.Foldable (for_)
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
 import GHC (Module)
@@ -68,6 +68,18 @@ withFinder hsc_env hug f =
   where
     other_fopts = initFinderOpts . homeUnitEnv_dflags <$> hug
 
+-- | Overwrite a 'HomeModInfo''s bytecode with the given 'Linkable' and insert the updated entry into the HPT of
+-- its unit in the given 'WorkerState'.
+insertIntoHpt :: WorkerState -> HomeModInfo -> Linkable -> IO WorkerState
+insertIntoHpt state hmi bytecode = do
+  for_ (unitEnv_lookup_maybe unit state.make.hug) \ hue ->
+    addHomeModInfoToHpt new (homeUnitEnv_hpt hue)
+  pure state
+  where
+    new = hmi {hm_linkable = hmi.hm_linkable {homeMod_bytecode = Just bytecode}}
+
+    unit = moduleUnitId (mi_module hmi.hm_iface)
+
 -- | Load bytecode from an interface given an HPT entry.
 --
 -- Query the Finder for a 'ModLocation', since we don't have a file path available, which is normally used when loading
@@ -105,13 +117,8 @@ lazyLoadByteCode logger stateVar hsc_env hmi = do
     loadBytecode location iface = loadCachedByteCodeFrom hsc_env location iface (hm_details hmi)
 
     insertBytecode state bytecode = do
-      let hm_iface = hmi.hm_iface
-          new = hmi {hm_iface, hm_linkable = hmi.hm_linkable {homeMod_bytecode = Just bytecode}}
-          unit = moduleUnitId (mi_module hm_iface)
-      traverse_ (insertIntoHpt new) (unitEnv_lookup_maybe unit state.make.hug)
-      pure (state, Just bytecode)
-
-    insertIntoHpt new hue = addHomeModInfoToHpt new (homeUnitEnv_hpt hue)
+      state' <- insertIntoHpt state hmi bytecode
+      pure (state', Just bytecode)
 
     homeUnit = hsc_home_unit hsc_env
 
