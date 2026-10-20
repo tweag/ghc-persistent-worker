@@ -11,11 +11,12 @@
 -- it considers the executor alive, so the child also exits when the parent dies without terminating it.
 module GhcWorker.Executor.Child where
 
+import Data.IORef (IORef, readIORef)
 import Data.Text (pack)
-import GHC.Stats (RTSStats (..), getRTSStats)
+import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats, getRTSStatsEnabled)
 import Internal.Log (newLogger)
 import System.Mem (performMajorGC)
-import Types.Api (ProcessStats (..))
+import Types.Api (ExecutorStatus (..), ProcessStats (..))
 import Types.Log (Logger (..), newLog)
 import Types.Executor.Protocol (CallResult (..), Captured (..), EvalOutcome, SetupError (..))
 
@@ -49,3 +50,15 @@ setupFailure err = do
 -- | Interval between two status snapshots published by 'statusEvents', in microseconds.
 statusIntervalUs :: Int
 statusIntervalUs = 1_000_000
+
+-- | Snapshot the executor's RTS memory (as of the last GC, so no GC is forced) and its number of active calls.
+-- Memory is reported as zero if the RTS was not started with @-T@.
+currentStatus :: IORef Int -> IO ExecutorStatus
+currentStatus active = do
+  activeTasks <- readIORef active
+  enabled <- getRTSStatsEnabled
+  (memInUseBytes, liveBytes) <-
+    if enabled
+    then (\ stats -> (stats.gc.gcdetails_mem_in_use_bytes, stats.gc.gcdetails_live_bytes)) <$> getRTSStats
+    else pure (0, 0)
+  pure ExecutorStatus {memInUseBytes, liveBytes, activeTasks}
