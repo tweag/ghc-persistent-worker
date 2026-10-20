@@ -4,6 +4,18 @@ module Types.Executor.Protocol where
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import GHC.Generics (Generic)
+import Types.Api (OutputStream, RequestId)
+
+-- | A line written to stdio by an executor process.
+-- If possible, the corresponding task is determined by thread ID.
+data OutputLine =
+  OutputLine {
+    task :: Maybe RequestId,
+    stream :: OutputStream,
+    line :: Text
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | The result of executing a module in an executor process.
 data EvalOutcome =
