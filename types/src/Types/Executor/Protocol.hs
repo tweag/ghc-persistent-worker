@@ -6,7 +6,7 @@ module Types.Executor.Protocol where
 import Data.Aeson (FromJSON, ToJSON, Value)
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import Types.Api (OutputStream, RequestId)
+import Types.Api (ExecutorStatus, OutputStream, RequestId)
 
 -- | A line the executor's process wrote to stdout or stderr, with the task it was attributed to, if any.
 data OutputLine =
@@ -15,6 +15,14 @@ data OutputLine =
     stream :: OutputStream,
     line :: Text
   }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
+-- | The elements of the executor's @Events@ stream (JSON-encoded).
+data ExecutorEvent =
+  StatusEvent ExecutorStatus
+  |
+  OutputEvent OutputLine
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
