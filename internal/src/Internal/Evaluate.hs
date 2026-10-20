@@ -71,3 +71,17 @@ data TupleMode
   | -- | The pair is an ordinary showable result, like any other.
     TuplePlain
   deriving stock (Eq, Show)
+
+-- | Classifies a module's @main@ result type for return-value propagation. 'IO a' where @a@ is a stringly or
+-- numeric type has its value surfaced (via 'ResultString'/'ResultShowable', see 'executeMain'); any other result
+-- type (in particular, the common @main :: IO ()@) is not, and evaluation falls back to running @main@ bare with
+-- its result discarded, as before this feature was added.
+data MainResultKind
+  = -- | @main :: IO String@ -- printed directly (no quoting/escaping) via @putStr@.
+    ResultString
+  | -- | @main :: IO a@ for another stringly/numeric @a@ (currently: 'Int', 'Integer', 'Double', 'Float', 'Char',
+    -- 'Bool') -- printed via @print@ (i.e. its 'Show' instance).
+    ResultShowable
+  | -- | @IO (Int, Int)@ -- shown like 'ResultShowable', and additionally interpreted as @(total, failed)@ if the
+    -- caller asks for it with 'TupleFailureCount'.
+    ResultCounts
