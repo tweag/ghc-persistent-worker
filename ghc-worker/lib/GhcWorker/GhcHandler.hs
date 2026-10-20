@@ -196,9 +196,10 @@ processResult logger _stateVar result = do
 -- EPS for local dependency lookup.
 --
 -- Parses the request args from Buck, creates a new 'Log' and 'Env', and passes all of that to 'dispatch'.
--- Afterwards, extracts the log messages that GHC wrote to 'Log' and returns them with the exit code.
+-- Afterwards, extracts the log messages that GHC wrote to 'Log' and calls the instrumentation hook 'compileFinish',
+-- providing the log and exit code.
 --
--- Task events are published by the compilation and metadata functions themselves, via 'Hooks.events'.
+-- If an exception was thrown, the hook is called without data.
 ghcHandler ::
   -- | first req lock hack
   MVar WorkerState ->
