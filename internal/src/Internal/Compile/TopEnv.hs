@@ -9,7 +9,10 @@
 -- and use it to patch the interface after the fact.
 module Internal.Compile.TopEnv where
 
-import GHC.Tc.Types (ImportUserSpec)
+import Control.Monad.IO.Class (liftIO)
+import Data.IORef (IORef, writeIORef)
+import GHC.Driver.Plugins (Plugin (typeCheckResultAction), defaultPlugin)
+import GHC.Tc.Types (ImportUserSpec, TcGblEnv (tcg_import_decls, tcg_rdr_env))
 import GHC.Types.Name.Reader (GlobalRdrEnv)
 
 -- | The data captured from a module's 'TcGblEnv' that is sufficient to reconstruct its top-level environment, mirroring
@@ -18,3 +21,13 @@ data CapturedTopEnv = CapturedTopEnv {
   rdrEnv :: GlobalRdrEnv,
   importDecls :: [ImportUserSpec]
 }
+
+-- | A 'Plugin' that stores the module's 'GlobalRdrEnv' and import declarations into the given 'IORef' as soon as
+-- typechecking completes, regardless of backend.
+captureTopEnvPlugin :: IORef (Maybe CapturedTopEnv) -> Plugin
+captureTopEnvPlugin ref =
+  defaultPlugin {
+    typeCheckResultAction = \ _ _ tc_gbl -> do
+      liftIO (writeIORef ref (Just CapturedTopEnv {rdrEnv = tcg_rdr_env tc_gbl, importDecls = tcg_import_decls tc_gbl}))
+      pure tc_gbl
+  }
