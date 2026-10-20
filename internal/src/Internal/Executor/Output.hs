@@ -28,6 +28,8 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
 import Data.Text.Encoding.Error (lenientDecode)
+import Internal.Executor.CallbackHandle (Stdio (..))
+import qualified System.IO as IO
 import Types.Api (OutputStream (..), RequestId)
 import Types.Executor.Protocol (ExecutorEvent (..))
 
@@ -90,6 +92,11 @@ withSubscription router use = do
 
 selectLane :: OutputStream -> Owner -> Lane
 selectLane = \case
+  Stdout -> (.out)
+  Stderr -> (.err)
+
+selectHandle :: OutputStream -> Stdio -> IO.Handle
+selectHandle = \case
   Stdout -> (.out)
   Stderr -> (.err)
 
