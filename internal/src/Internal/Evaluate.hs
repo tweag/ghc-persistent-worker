@@ -2,11 +2,12 @@ module Internal.Evaluate where
 
 import Control.Concurrent (withMVar)
 import Control.Monad.IO.Class (liftIO)
-import GHC (Ghc, getSession, getSessionDynFlags, setInteractiveDynFlags, setSession)
+import GHC (Ghc, getSession, getSessionDynFlags, moduleNameString, setInteractiveDynFlags, setSession)
 import GHC.Driver.Env (hscSetActiveUnitId)
 import GHC.Driver.Env.Types (HscEnv, hsc_mod_graph)
 import GHC.Unit (moduleUnitId)
 import Internal.Cache.Hpt (loadHomeUnit)
+import Language.Haskell.Syntax.Module.Name (ModuleName (..))
 import System.OsPath.Extra (toOsPath)
 import Types.Args (Args (..))
 import Types.Env (Env (..))
@@ -42,3 +43,12 @@ data ModuleLookupError =
   ModulePackageNotFound
   |
   ModuleAmbiguous
+
+renderModuleLookupError :: ModuleName -> ModuleLookupError -> String
+renderModuleLookupError modName err =
+  reason err ++ moduleNameString modName
+  where
+    reason = \case
+      ModuleNotFound -> "Module not found: "
+      ModulePackageNotFound -> "Package not found for module "
+      ModuleAmbiguous -> "Multiple candidate modules found for "
