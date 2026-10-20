@@ -27,6 +27,7 @@ import Network.GRPC.Common (NextElem (..))
 import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
 import Proto.Executor (Empty, Encoded)
 import qualified Proto.Executor_Fields as Fields
+import qualified System.IO as IO
 import System.Mem (performMajorGC)
 import Types.Api (ExecutorStatus (..), ProcessStats (..))
 import Types.Log (Logger (..), newLog)
@@ -118,3 +119,10 @@ executeCall router active handler request = do
       pure result {captured}
 
     bump n = atomicModifyIORef' active \ count -> (count + n, ())
+
+-- | Block until stdin is closed by the parent.
+awaitStdinEof :: IO ()
+awaitStdinEof =
+  IO.hIsEOF IO.stdin >>= \case
+    True -> pure ()
+    False -> IO.hGetLine IO.stdin >> awaitStdinEof
