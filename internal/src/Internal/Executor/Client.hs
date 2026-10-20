@@ -2,10 +2,13 @@
 module Internal.Executor.Client where
 
 import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (async)
+import Control.Concurrent.MVar (MVar, readMVar)
 import Control.Exception (SomeException, throwIO, try)
-import Control.Monad (void)
+import Control.Monad (unless, void, when)
 import Control.Monad.Extra (loopM)
 import Data.Foldable (traverse_)
+import qualified Data.Map.Strict as Map
 import System.Directory.OsPath (doesFileExist, removeFile)
 import System.IO (hClose)
 import System.OsPath.Extra (OsPath, fromOsPath)
@@ -13,12 +16,17 @@ import System.Process (
   CreateProcess (..),
   StdStream (..),
   createProcess,
+  getPid,
   getProcessExitCode,
   proc,
   terminateProcess,
   waitForProcess,
   )
+import Types.Api (Event (..), ExecutorId)
+import Types.Executor.Protocol (ExecutorEvent (..), OutputLine (..))
+import Types.Executor.Transport (ExecutorTransport (..))
 import Types.Settings (Settings (..))
+import Types.State (WorkerState (..))
 import Types.State.Executor (ExecutorHandle (..), newCallLock)
 
 -- | Wrap RTS options in @+RTS ... -RTS@, or nothing if there are none.
@@ -84,3 +92,36 @@ stopExecutor handle = do
   terminateProcess handle.process
   void (waitForProcess handle.process)
   removeIfExists handle.socket
+
+-- | Run the event stream subscriber for an executor, transform received 'ExecutorEvent's to 'Event' and publish them
+-- with the provided callback.
+--
+-- When the executor's stream terminates, publish 'ExecutorGone'.
+--
+-- TODO monitor Async handle?
+watchExecutor :: ExecutorTransport -> (Event -> IO ()) -> MVar WorkerState -> ExecutorId -> ExecutorHandle -> IO ()
+watchExecutor transport publish stateVar executorId handle =
+  void $ async do
+    pid <- fmap fromIntegral <$> getPid handle.process
+    subscribe pid (20 :: Int)
+    announceGone
+  where
+    -- The socket file exists slightly before the child accepts connections, so connecting is retried.
+    subscribe pid retries =
+      try @SomeException (streamStatus pid) >>= \case
+        Left _ | retries > 0 -> do
+          running <- isRunning handle
+          when running (threadDelay 100_000 >> subscribe pid (retries - 1))
+        _ -> pure ()
+
+    streamStatus pid =
+      transport.subscribe handle.socket \case
+        StatusEvent status ->
+          publish ExecutorUpdate {executor = executorId, pid, status}
+        OutputEvent OutputLine {task, stream, line} ->
+          publish ExecutorOutput {executor = executorId, task, stream, line}
+
+    announceGone = do
+      current <- Map.lookup executorId . (.executors) <$> readMVar stateVar
+      unless (any (\ newer -> newer.incarnation > handle.incarnation) current) do
+        publish ExecutorGone {executor = executorId}
