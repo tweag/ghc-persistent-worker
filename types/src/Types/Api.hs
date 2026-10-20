@@ -9,6 +9,7 @@ import Data.Map (Map)
 import Data.String (IsString)
 import qualified Data.Text as Text
 import Data.Text (Text, unpack)
+import Data.Word (Word64)
 import qualified GHC
 import GHC.Generics (Generic)
 import GHC.Unit (Module, UnitId, mkModuleName, moduleName, moduleNameString, moduleUnitId, stringToUnitId, unitIdString)
@@ -132,6 +133,22 @@ targetFromWorkerSpec = \case
   Worker.TargetModuleInterp ModuleTarget {module_} -> Just TargetModule {key = homeModuleFromGhc module_}
   Worker.TargetUnit UnitTarget {unit} -> Just TargetUnit {name = UnitName (Text.pack (unitIdString unit))}
   _ -> Nothing
+
+-- | RTS memory-usage stats reported by a subprocess execute task's child process (see
+-- 'GhcServer.Data.ProcessEval.ProcessEvalResult'), taken from 'GHC.Stats.RTSStats' right before the child
+-- exits.
+--
+-- TODO: This documentation needs to link to explanations of the concepts in question.
+--    * What is a subprocess execute task's child process?
+-- TODO: 'GhcServer.Data.ProcessEval.ProcessEvalResult' does not exist.
+-- TODO: This data type is not used for anything at the commit where it is introduced.
+data ProcessStats =
+  ProcessStats {
+    maxMemInUseBytes :: Word64,
+    maxLiveBytes :: Word64
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (Binary, FromJSON, ToJSON)
 
 data TaskKind =
   Metadata
