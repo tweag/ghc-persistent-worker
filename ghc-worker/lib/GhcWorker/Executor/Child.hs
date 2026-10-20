@@ -53,3 +53,7 @@ setupFailure :: SetupError -> IO CallResult
 setupFailure err = do
   logger <- newLogger <$> newLog Nothing
   finishResult logger Captured {stdout = "", stderr = ""} (Left err)
+
+-- | Interval between two status snapshots published by 'statusEvents', in microseconds.
+statusIntervalUs :: Int
+statusIntervalUs = 1_000_000
