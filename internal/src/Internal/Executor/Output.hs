@@ -20,6 +20,7 @@ import qualified Data.ByteString.Char8 as Char8
 import Data.IORef (IORef, newIORef)
 import Data.Maybe (isJust)
 import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
 import Data.Text.Encoding.Error (lenientDecode)
@@ -61,6 +62,13 @@ newOwner task = do
   out <- newLane (isJust task)
   err <- newLane (isJust task)
   pure Owner {task, out, err}
+
+newOutputRouter :: IO OutputRouter
+newOutputRouter = do
+  threads <- newIORef Map.empty
+  subscribers <- newIORef []
+  unattributed <- newOwner Nothing
+  pure OutputRouter {threads, subscribers, unattributed}
 
 -- | The remainder and the complete lines of the bytes.
 splitLines :: ByteString -> (ByteString, [ByteString])
