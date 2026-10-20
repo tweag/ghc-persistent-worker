@@ -132,6 +132,17 @@ data MemoryUsage =
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary, FromJSON, ToJSON)
 
+-- | Status of an executor, for periodic publishing.
+data ExecutorStatus =
+  ExecutorStatus {
+    -- | Current memory usage.
+    memory :: MemoryUsage,
+    -- | Number of running and queued tasks.
+    activeTasks :: Int
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (Binary, FromJSON, ToJSON)
+
 data TaskKind =
   Metadata
   |
