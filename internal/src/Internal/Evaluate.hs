@@ -33,3 +33,10 @@ setupEvaluationSession env (Just homeUnit) target = do
   dflags <- getSessionDynFlags
   setInteractiveDynFlags dflags
   pure (Just hsc_env)
+
+-- | Reasons 'GHC.Unit.Finder.findImportedModule' can fail to resolve a target module, retained distinctly so
+-- callers can report an actionable message rather than a generic failure.
+data ModuleLookupError
+  = ModuleNotFound
+  | ModulePackageNotFound
+  | ModuleAmbiguous
