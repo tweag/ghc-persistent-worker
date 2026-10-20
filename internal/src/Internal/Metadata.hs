@@ -197,7 +197,7 @@ computeMetadata events env = do
         liftIO do
           writeIORef started (Just target)
           for_ (targetFromWorkerSpec target) \ uiTarget ->
-            events.publish \ requestId -> CompileStart {target = uiTarget, debuggable = False, requestId}
+            events.publish \ requestId -> CompileStart {target = uiTarget, debuggable = False, process = False, requestId}
         module_graph <- writeMetadata env.args env.log staticUnits (fst <$> srcs)
         liftIO do
           unless (transientUnit env) $
