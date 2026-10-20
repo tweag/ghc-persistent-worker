@@ -6,6 +6,17 @@ module Types.Executor.Protocol where
 import Data.Aeson (FromJSON, ToJSON, Value)
 import Data.Text (Text)
 import GHC.Generics (Generic)
+import Types.Api (OutputStream, RequestId)
+
+-- | A line the executor's process wrote to stdout or stderr, with the task it was attributed to, if any.
+data OutputLine =
+  OutputLine {
+    task :: Maybe RequestId,
+    stream :: OutputStream,
+    line :: Text
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | The payload of the executor's @Execute@ RPC.
 data ExecutorCall =
