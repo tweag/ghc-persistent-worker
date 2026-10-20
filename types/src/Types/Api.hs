@@ -171,6 +171,19 @@ data ExecutorStatus =
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary, FromJSON, ToJSON)
 
+-- | The standard stream a line of executor output was written to.
+--
+-- TODO: This documentation needs to link to explanations of the concepts in question.
+--   * What is an executor?
+--   * What is an executor output?
+-- TODO: This data type is not used for anything at the commit where it is introduced.
+data OutputStream =
+  Stdout
+  |
+  Stderr
+  deriving stock (Eq, Ord, Show, Generic)
+  deriving anyclass (Binary, FromJSON, ToJSON)
+
 data TaskKind =
   Metadata
   |
