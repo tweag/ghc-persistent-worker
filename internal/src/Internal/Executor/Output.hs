@@ -18,7 +18,7 @@ import Control.Exception (bracket_)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Char8 as Char8
-import Data.Foldable (traverse_)
+import Data.Foldable (for_, traverse_)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.Maybe (isJust)
 import Data.Map.Strict (Map)
@@ -95,6 +95,13 @@ selectHandle :: OutputStream -> Stdio -> IO.Handle
 selectHandle = \case
   Stdout -> (.out)
   Stderr -> (.err)
+
+-- | Append a chunk to the lane and return the lines it completed.
+-- Incomplete lines are kept as bytes, since a multi-byte character may be split between two chunks.
+completeLines :: Lane -> ByteString -> IO [ByteString]
+completeLines lane chunk = do
+  for_ lane.collected \ chunks -> atomicModifyIORef' chunks \ old -> (chunk : old, ())
+  atomicModifyIORef' lane.partial \ partial -> splitLines (partial <> chunk)
 
 -- | The remainder and the complete lines of the bytes.
 splitLines :: ByteString -> (ByteString, [ByteString])
