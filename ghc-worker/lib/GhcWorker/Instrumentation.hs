@@ -61,6 +61,11 @@ failedEval :: String -> EvalReport
 failedEval err =
   EvalReport {outcome = Left err, result = Nothing, maxMemory = Nothing}
 
+-- | Publish an event that doesn't depend on the request.
+publishEvent :: Hooks -> Event -> IO ()
+publishEvent hooks event =
+  hooks.events.publish \ (_ :: RequestId) -> event
+
 -- | A request handler that is aware of instrumentation.
 newtype InstrumentedHandler =
   InstrumentedHandler { create :: Hooks -> GrpcHandler }
