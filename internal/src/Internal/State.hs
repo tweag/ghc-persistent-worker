@@ -47,7 +47,8 @@ newState settings = do
       bcoLoadState,
       extraLib = emptyLibLoadState,
       bcoCache = M.empty,
-      bcoAccessCounter = 0
+      bcoAccessCounter = 0,
+      bytecodeImport = M.empty
     },
     targetArgs = mempty,
     executors = Types.State.emptyExecutors
