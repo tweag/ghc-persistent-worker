@@ -61,9 +61,9 @@ featureFlagsParser =
   where
     applyFlags = flip foldr defaultSettings (uncurry setFeature)
 
-    flagOption value = do
-      flag <- eitherReader (first unpack . parseFeatureFlag . pack)
-      pure (flag, value)
+    flagOption enabled = do
+      feature <- eitherReader (first unpack . parseFeatureFlag . pack)
+      pure (feature, enabled)
 
 -- | Parser for '--max-bytecode', bounding the loader state size.
 maxBytecodeParser :: Parser (Maybe Int)
