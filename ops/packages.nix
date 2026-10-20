@@ -230,7 +230,6 @@
           "filepath"
           "ghc"
           "ghc-paths"
-          "optparse-applicative"
           "os-string"
           "split"
           "text"
