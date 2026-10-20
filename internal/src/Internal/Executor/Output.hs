@@ -15,12 +15,13 @@
 module Internal.Executor.Output where
 
 import Control.Concurrent (ThreadId)
-import Control.Concurrent.Chan (Chan, writeChan)
+import Control.Concurrent.Chan (Chan, newChan, writeChan)
+import Control.Exception (bracket_)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Char8 as Char8
 import Data.Foldable (traverse_)
-import Data.IORef (IORef, newIORef, readIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.Maybe (isJust)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -76,6 +77,16 @@ newOutputRouter = do
 publish :: OutputRouter -> ExecutorEvent -> IO ()
 publish router event =
   readIORef router.subscribers >>= traverse_ (`writeChan` event)
+
+-- | Receive the events published while the action runs.
+--
+-- TODO what's it doing with @subscribers@?
+withSubscription :: OutputRouter -> (Chan ExecutorEvent -> IO a) -> IO a
+withSubscription router use = do
+  chan <- newChan
+  bracket_ (modify (chan :)) (modify (filter (/= chan))) (use chan)
+  where
+    modify f = atomicModifyIORef' router.subscribers \ chans -> (f chans, ())
 
 -- | The remainder and the complete lines of the bytes.
 splitLines :: ByteString -> (ByteString, [ByteString])
