@@ -8,7 +8,7 @@ import GhcWorker.Grpc (mkStats)
 import GhcWorker.LogEvents (instrumentLoggerWith)
 import Internal.Log (dbg)
 import Prelude hiding (log)
-import Types.Api (Event (..), Events (..), RequestId, eventsForRequest, eventsNoop)
+import Types.Api (Event (..), Events (..), MemoryUsage, RequestId, eventsForRequest, eventsNoop)
 import Types.Log (Logger)
 import Types.State (WorkerState)
 
@@ -43,6 +43,17 @@ hooksNoop =
   Hooks {
     events = eventsNoop,
     instrumentLogger = const id
+  }
+
+-- | The outcome of an eval request.
+data EvalReport =
+  EvalReport {
+    -- | An error message for a failure to evaluate, as opposed to a successful evaluation of a failing test.
+    outcome :: Either String Bool,
+    -- | The return value of the evaluated expression produced.
+    result :: Maybe String,
+    -- | Memory usage of the executor, if the evaluation ran in one.
+    maxMemory :: Maybe MemoryUsage
   }
 
 -- | A request handler that is aware of instrumentation.
