@@ -9,13 +9,16 @@ import GHC.Core.TyCo.Compare (eqType)
 import GHC.Core.Type (Type)
 import GHC.Driver.Env (hscSetActiveUnitId)
 import GHC.Driver.Env.Types (HscEnv, hsc_mod_graph)
+import GHC.Hs.ImpExp (simpleImportDecl)
+import GHC.Runtime.Context (InteractiveImport (..))
 import GHC.Tc.Utils.TcType (tcSplitIOType_maybe)
 import GHC.Types.PkgQual (PkgQual)
 import GHC.Unit (moduleUnitId)
 import GHC.Unit.Finder (findImportedModule)
 import GHC.Unit.Finder.Types (FindResult (..))
 import Internal.Cache.Hpt (loadHomeUnit)
-import Language.Haskell.Syntax.Module.Name (ModuleName (..))
+import Language.Haskell.Syntax.ImpExp (ImportDecl (..), ImportDeclQualifiedStyle (..))
+import Language.Haskell.Syntax.Module.Name (ModuleName (..), mkModuleName)
 import System.OsPath.Extra (toOsPath)
 import Text.Read (readMaybe)
 import Types.Args (Args (..))
@@ -128,3 +131,8 @@ resultSucceeded TupleFailureCount (Just ResultCounts) result =
     Just (_total, failed) -> failed == 0
     Nothing -> False
 resultSucceeded _ _ _ = True
+
+-- | A qualified import of "Prelude" for the interpreter.
+qualifiedPrelude :: InteractiveImport
+qualifiedPrelude =
+  IIDecl (simpleImportDecl (mkModuleName "Prelude")) {ideclQualified = QualifiedPre}
