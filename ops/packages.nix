@@ -183,6 +183,7 @@
           "flatparse"
           "filepath"
           "file-io"
+          "fsnotify"
           "ghc"
           "ghc-boot"
           "hashable"
