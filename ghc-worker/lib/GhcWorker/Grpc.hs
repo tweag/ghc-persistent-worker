@@ -100,9 +100,9 @@ apiRequest stateVar = \case
   TerminateExecutor {} ->
     pure (ApiFailure "Executor subprocesses not supported by this worker")
 
--- | Implementation of the @Api@ method: decodes the JSON payload, runs it via the supplied dispatcher, and
--- JSON-encodes the resulting response.
--- Exported (rather than kept local) so 'GhcServer.Grpc' can reuse it with its own dispatcher.
+-- | Implementation of the unified @Send@ RPC: decodes the JSON 'Instr.Command' payload, runs it via the supplied
+-- dispatcher, and JSON-encodes the resulting 'Response' back into an 'Instr.CommandResponse'. Exported
+-- (rather than kept local) so 'GhcServer.Grpc' can reuse it with its own 'runCommand'-shaped dispatcher.
 handleCommand ::
   (forall a . ApiRequest a -> IO (ApiResponse a)) ->
   Proto Encoded ->
