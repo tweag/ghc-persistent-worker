@@ -2,16 +2,17 @@
 module Internal.Watch where
 
 import Control.Concurrent (threadDelay)
-import Control.Monad (forever, when)
+import Control.Concurrent.MVar (newEmptyMVar, takeMVar, tryPutMVar)
+import Control.Monad (forever, void, when)
 import Control.Monad.Extra (whenM)
 import Data.Foldable (traverse_)
 import Data.IORef (atomicModifyIORef', newIORef)
 import Data.List (isInfixOf)
 import Data.Set qualified as Set
-import System.Directory.OsPath (createDirectoryIfMissing, listDirectory)
+import System.Directory.OsPath (createDirectoryIfMissing, doesPathExist, listDirectory)
 import System.Environment (lookupEnv)
 import System.FSNotify (Event (..), EventIsDirectory (..), StopListening, WatchManager, watchDir, withManager)
-import System.OsPath.Extra (OsPath, fromOsPath, takeFileName, toOsPath, (</>))
+import System.OsPath.Extra (OsPath, fromOsPath, takeDirectory, takeFileName, toOsPath, (</>))
 import Types.Orchestration (primarySocketName)
 
 -- | Directory in which workers create one subdirectory each, configurable with @WORKER_PATH@.
@@ -45,3 +46,22 @@ watchWorkerSockets dir onSocket = do
     existing <- listDirectory dir
     traverse_ (visit . (dir </>)) existing
     forever (threadDelay maxBound)
+
+-- | Block until something exists at the given path, creating the parent directory if necessary.
+-- Waits indefinitely; the existence check happens after the watch is established so that creation between the two
+-- cannot be missed.
+waitForPath :: OsPath -> IO ()
+waitForPath path = do
+  createDirectoryIfMissing True parent
+  found <- newEmptyMVar
+  let signal = void (tryPutMVar found ())
+  withManager \ manager -> do
+    stop <- watchDir manager (fromOsPath parent) (const True) \case
+      Added added _ _ | takeFileName (toOsPath added) == name -> signal
+      _ -> pure ()
+    whenM (doesPathExist path) signal
+    takeMVar found
+    stop
+  where
+    parent = takeDirectory path
+    name = takeFileName path
