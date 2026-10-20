@@ -9,6 +9,7 @@ import Data.Map (Map)
 import Data.String (IsString)
 import qualified Data.Text as Text
 import Data.Text (Text, unpack)
+import Data.Word (Word64)
 import qualified GHC
 import GHC.Generics (Generic)
 import GHC.Unit (Module, UnitId, mkModuleName, moduleName, moduleNameString, moduleUnitId, stringToUnitId, unitIdString)
@@ -119,6 +120,17 @@ targetFromWorkerSpec = \case
   Worker.TargetModuleInterp ModuleTarget {module_} -> Just TargetModule {key = homeModuleFromGhc module_}
   Worker.TargetUnit UnitTarget {unit} -> Just TargetUnit {name = UnitName (Text.pack (unitIdString unit))}
   _ -> Nothing
+
+-- | RTS memory usage stats.
+data MemoryUsage =
+  MemoryUsage {
+    -- | Total allocated memory, roughly corresponding to what the OS would report.
+    allocated :: Word64,
+    -- | Size of the memory containing live data, not including the GC's copies or reserved empty memory.
+    live :: Word64
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (Binary, FromJSON, ToJSON)
 
 data TaskKind =
   Metadata
