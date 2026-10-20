@@ -11,14 +11,25 @@
 -- it considers the executor alive, so the child also exits when the parent dies without terminating it.
 module GhcWorker.Executor.Child where
 
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (withAsync)
+import Control.Concurrent.Chan (readChan, writeChan)
+import Control.Monad (forever)
+import qualified Data.Aeson as Aeson
+import Data.ByteString (toStrict)
 import Data.IORef (IORef, readIORef)
 import Data.Text (pack)
 import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats, getRTSStatsEnabled)
+import Internal.Executor.Output (OutputRouter, withSubscription)
 import Internal.Log (newLogger)
+import Network.GRPC.Common (NextElem (..))
+import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
+import Proto.Executor (Empty, Encoded)
+import qualified Proto.Executor_Fields as Fields
 import System.Mem (performMajorGC)
 import Types.Api (ExecutorStatus (..), ProcessStats (..))
 import Types.Log (Logger (..), newLog)
-import Types.Executor.Protocol (CallResult (..), Captured (..), EvalOutcome, SetupError (..))
+import Types.Executor.Protocol (CallResult (..), Captured (..), EvalOutcome, ExecutorEvent (..), SetupError (..))
 
 -- | Assemble the result of a call: the captured output, the log messages and the executor's RTS stats.
 finishResult :: Logger -> Captured -> Either SetupError EvalOutcome -> IO CallResult
@@ -62,3 +73,19 @@ currentStatus active = do
     then (\ stats -> (stats.gc.gcdetails_mem_in_use_bytes, stats.gc.gcdetails_live_bytes)) <$> getRTSStats
     else pure (0, 0)
   pure ExecutorStatus {memInUseBytes, liveBytes, activeTasks}
+
+-- | Implementation of the @Events@ RPC: publish a JSON-encoded 'StatusEvent' every 'statusIntervalUs', and an
+-- 'OutputEvent' for every line the executor writes, until the client disconnects.
+statusEvents :: OutputRouter -> IORef Int -> Proto Empty -> (NextElem (Proto Encoded) -> IO ()) -> IO ()
+statusEvents router active _ callback =
+  withSubscription router \ events ->
+    withAsync (publishStatus events) \ _ ->
+      forever (readChan events >>= callback . NextElem . encodeEvent)
+  where
+    publishStatus events =
+      forever do
+        status <- currentStatus active
+        writeChan events (StatusEvent status)
+        threadDelay statusIntervalUs
+
+    encodeEvent event = defMessage & Fields.payload .~ toStrict (Aeson.encode event)
