@@ -6,7 +6,7 @@ module Types.Executor.Protocol where
 import Data.Aeson (FromJSON, ToJSON, Value)
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import Types.Api (ExecutorStatus, OutputStream, RequestId)
+import Types.Api (ExecutorStatus, OutputStream, ProcessStats, RequestId)
 
 -- | The payload of the executor's @Execute@ RPC: a call, and the task on whose behalf it runs, to which the child
 -- attributes the output written during the call.
@@ -81,4 +81,17 @@ data Captured =
     stderr :: Text
   }
   deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
+-- | The child's answer to a call.
+data CallResult =
+  CallResult {
+    captured :: Captured,
+    -- | The messages the child's in-memory logger accumulated.
+    logMessages :: [Text],
+    -- | RTS memory-usage stats collected via 'GHC.Stats.getRTSStats' right before the child answers.
+    stats :: ProcessStats,
+    outcome :: Either SetupError EvalOutcome
+  }
+  deriving stock (Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
