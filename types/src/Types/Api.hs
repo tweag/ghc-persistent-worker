@@ -149,6 +149,14 @@ data ExecutorStatus =
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary, FromJSON, ToJSON)
 
+-- | The standard stream a line of executor output was written to.
+data OutputStream =
+  Stdout
+  |
+  Stderr
+  deriving stock (Eq, Ord, Show, Generic)
+  deriving anyclass (Binary, FromJSON, ToJSON)
+
 data TaskKind =
   Metadata
   |
