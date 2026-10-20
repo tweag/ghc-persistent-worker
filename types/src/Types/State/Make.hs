@@ -7,7 +7,7 @@ import Data.IntMap qualified as IM
 import Data.IntSet qualified as IS
 import Data.Map.Strict qualified as M
 import Data.Set qualified as S
-import GHC (ModuleGraph, ModuleName, emptyMG)
+import GHC (HscEnv, ModuleGraph, ModuleName, emptyMG)
 import GHC.Data.Graph.Directed (Node)
 import GHC.Linker.Types (Linkable)
 import GHC.Runtime.Interpreter (Interp)
@@ -122,5 +122,11 @@ data MakeState =
     bcoCache :: M.Map Module BcoCacheEntry,
 
     -- | Monotonic counter bumped every time bytecode dependencies are loaded, used as the age of loader state entries.
-    bcoAccessCounter :: Int
+    bcoAccessCounter :: Int,
+
+    -- | Bytecode from an external source that hasn't been loaded yet.
+    -- This is used in executor processes to store bytecode received from the main process.
+    --
+    -- TODO Use separate state for this
+    bytecodeImport :: M.Map (UnitId, ModuleName) (HscEnv -> Module -> IO Linkable)
   }
