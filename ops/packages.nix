@@ -187,6 +187,7 @@
           "file-io"
           "fsnotify"
           "ghc"
+          "ghci"
           "ghc-boot"
           "hashable"
           "process"

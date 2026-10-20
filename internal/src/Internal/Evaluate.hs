@@ -7,16 +7,27 @@ import GHC (Ghc, getSession, getSessionDynFlags, moduleNameString, setInteractiv
 import GHC.Builtin.Types (boolTy, charTy, doubleTy, floatTy, intTy, integerTy, mkBoxedTupleTy, stringTy)
 import GHC.Core.TyCo.Compare (eqType)
 import GHC.Core.Type (Type)
-import GHC.Driver.Env (hscSetActiveUnitId)
-import GHC.Driver.Env.Types (HscEnv, hsc_mod_graph)
+import GHC.Driver.Config (initEvalOpts)
+import GHC.Driver.DynFlags (wopt_unset)
+import GHC.Driver.Env (hscInterp, hscSetActiveUnitId, mkInteractiveHscEnv)
+import GHC.Driver.Env.Types (HscEnv (hsc_IC), hsc_mod_graph)
+import GHC.Driver.Flags (WarningFlag (Opt_WarnUnusedLocalBinds))
+import GHC.Driver.Main (hscParsedStmt)
+import GHC.Driver.Monad (GhcMonad)
+import GHC.Hs.Extension (GhcPs)
 import GHC.Hs.ImpExp (simpleImportDecl)
-import GHC.Runtime.Context (InteractiveImport (..))
+import GHC.Runtime.Context (InteractiveContext (..), InteractiveImport (..))
+import GHC.Runtime.Eval.Types (ExecOptions (..), isStep)
+import GHC.Runtime.Interpreter (evalStmt)
 import GHC.Tc.Utils.TcType (tcSplitIOType_maybe)
 import GHC.Types.PkgQual (PkgQual)
 import GHC.Unit (moduleUnitId)
 import GHC.Unit.Finder (findImportedModule)
 import GHC.Unit.Finder.Types (FindResult (..))
+import GHCi.Message (EvalResult (..), EvalStatus_ (..))
+import GHCi.RemoteTypes (ForeignHValue, HValueRef)
 import Internal.Cache.Hpt (loadHomeUnit)
+import Language.Haskell.Syntax.Expr (GhciLStmt)
 import Language.Haskell.Syntax.ImpExp (ImportDecl (..), ImportDeclQualifiedStyle (..))
 import Language.Haskell.Syntax.Module.Name (ModuleName (..), mkModuleName)
 import System.OsPath.Extra (toOsPath)
@@ -136,3 +147,26 @@ resultSucceeded _ _ _ = True
 qualifiedPrelude :: InteractiveImport
 qualifiedPrelude =
   IIDecl (simpleImportDecl (mkModuleName "Prelude")) {ideclQualified = QualifiedPre}
+
+-- | Evaluate a single parsed statement as bytecode.
+--
+-- Unlike 'GHC.Runtime.Eval.execStmt'', this does not update the session's 'InteractiveContext' with the statement's
+-- bound identifiers or fixity declarations afterwards: every caller in this module runs at most one statement
+-- per session (either an expression in 'evaluateExpr', or a module's @main@ in 'executeMain'), so there
+-- is no subsequent statement in the same session that would need to see those bindings.
+--
+-- TODO Examine more closely later
+evalStmt' :: GhcMonad m => GhciLStmt GhcPs -> String -> ExecOptions -> m (EvalStatus_ [ForeignHValue] [HValueRef])
+evalStmt' stmt _stmt_text ExecOptions{..} = do
+    hsc_env <- getSession
+    let interp = hscInterp hsc_env
+        -- Turn off -fwarn-unused-local-binds when running a statement, to hide warnings about the implicit bindings
+        -- introduced by the statement's own desugaring.
+        idflags' = ic_dflags hsc_env.hsc_IC `wopt_unset` Opt_WarnUnusedLocalBinds
+        hsc_env' = mkInteractiveHscEnv hsc_env {hsc_IC = hsc_env.hsc_IC {ic_dflags = idflags'}}
+    liftIO $ hscParsedStmt hsc_env' stmt >>= \case
+      -- Empty statement / comment: nothing to run, so trivially succeed with no bound values.
+      Nothing -> pure (EvalComplete 0 (EvalSuccess []))
+      Just (_ids, hval, _fix_env) -> liftIO do
+        let eval_opts = initEvalOpts idflags' (isStep execSingleStep)
+        evalStmt interp eval_opts (execWrap hval)
