@@ -48,7 +48,8 @@ newState settings = do
       bcoCache = M.empty,
       bcoAccessCounter = 0
     },
-    targetArgs = mempty
+    targetArgs = mempty,
+    executors = []
   }
 
 modifyMakeState :: MVar WorkerState -> (MakeState -> IO (MakeState, a)) -> IO a
