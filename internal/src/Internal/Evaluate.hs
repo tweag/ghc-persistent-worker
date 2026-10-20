@@ -4,8 +4,12 @@ module Internal.Evaluate where
 import Control.Concurrent (withMVar)
 import Control.Monad.IO.Class (liftIO)
 import GHC (Ghc, getSession, getSessionDynFlags, moduleNameString, setInteractiveDynFlags, setSession)
+import GHC.Builtin.Types (boolTy, charTy, doubleTy, floatTy, intTy, integerTy, mkBoxedTupleTy, stringTy)
+import GHC.Core.TyCo.Compare (eqType)
+import GHC.Core.Type (Type)
 import GHC.Driver.Env (hscSetActiveUnitId)
 import GHC.Driver.Env.Types (HscEnv, hsc_mod_graph)
+import GHC.Tc.Utils.TcType (tcSplitIOType_maybe)
 import GHC.Types.PkgQual (PkgQual)
 import GHC.Unit (moduleUnitId)
 import GHC.Unit.Finder qualified as Finder
@@ -85,3 +89,20 @@ data MainResultKind
   | -- | @IO (Int, Int)@ -- shown like 'ResultShowable', and additionally interpreted as @(total, failed)@ if the
     -- caller asks for it with 'TupleFailureCount'.
     ResultCounts
+
+-- | Inspect a type of the shape @IO a@ (as returned by 'GHC.Runtime.Eval.exprType') and classify @a@ per
+-- 'MainResultKind', or 'Nothing' if the type isn't @IO@-shaped at all or @a@ isn't one of the small set of
+-- wired-in stringly/numeric types checked here. Deliberately does not attempt to support arbitrary
+-- user-defined 'Show' instances (e.g. custom result records) -- that would require a real type-directed dispatch
+-- mechanism (dictionary-passing), not just an equality check against wired-in types, which is a substantially
+-- larger feature.
+classifyMainResultType :: Type -> Maybe MainResultKind
+classifyMainResultType ty = do
+  (_ioTyCon, resTy) <- tcSplitIOType_maybe ty
+  if eqType resTy stringTy
+    then Just ResultString
+    else if eqType resTy (mkBoxedTupleTy [intTy, intTy])
+      then Just ResultCounts
+    else if any (eqType resTy) ([intTy, integerTy, doubleTy, floatTy, charTy, boolTy] :: [Type])
+      then Just ResultShowable
+      else Nothing
