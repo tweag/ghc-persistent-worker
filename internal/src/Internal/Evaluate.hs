@@ -63,3 +63,11 @@ resolveTargetModule hsc_env modname pkgqual = do
     NoPackage _ -> Left ModulePackageNotFound
     FoundMultiple _ -> Left ModuleAmbiguous
     NotFound {} -> Left ModuleNotFound
+
+-- | How an @IO (Int, Int)@ result ('ResultCounts') is interpreted.
+data TupleMode
+  = -- | The pair is @(total, failed)@, and the evaluation fails if @failed /= 0@.
+    TupleFailureCount
+  | -- | The pair is an ordinary showable result, like any other.
+    TuplePlain
+  deriving stock (Eq, Show)
