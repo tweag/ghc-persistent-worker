@@ -4,7 +4,7 @@ module Types.Executor.Protocol where
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import Types.Api (OutputStream, RequestId)
+import Types.Api (ExecutorStatus, OutputStream, RequestId)
 
 -- | A line written to stdio by an executor process.
 -- If possible, the corresponding task is determined by thread ID.
@@ -14,6 +14,14 @@ data OutputLine =
     stream :: OutputStream,
     line :: Text
   }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
+-- | The payload of the streaming @Events@ method of the gRPC service @executor@.
+data ExecutorEvent =
+  StatusEvent ExecutorStatus
+  |
+  OutputEvent OutputLine
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
