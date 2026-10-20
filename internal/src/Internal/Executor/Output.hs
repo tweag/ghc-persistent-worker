@@ -133,3 +133,7 @@ route router original stream chunk = do
 -- | Replace @stdout@ and @stderr@ for the duration of the action.
 withOutputRouter :: OutputRouter -> IO a -> IO a
 withOutputRouter router = withStdioCallback (route router)
+
+-- | Registers the current thread as a writer for a task while running an action.
+-- This is for threads that run code on behalf of a task other than the one that started it.
+newtype Attach = Attach (forall b. IO b -> IO b)
