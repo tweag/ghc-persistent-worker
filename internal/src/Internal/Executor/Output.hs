@@ -14,14 +14,18 @@
 -- TODO refactor, reword, make optional. maybe not necessary to include in the initial set of changes
 module Internal.Executor.Output where
 
+import Control.Concurrent (ThreadId)
+import Control.Concurrent.Chan (Chan)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Char8 as Char8
 import Data.IORef (IORef)
+import Data.Map.Strict (Map)
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
 import Data.Text.Encoding.Error (lenientDecode)
 import Types.Api (RequestId)
+import Types.Executor.Protocol (ExecutorEvent (..))
 
 -- | The buffers for one stream of one owner.
 data Lane =
@@ -38,6 +42,13 @@ data Owner =
     task :: Maybe RequestId,
     out :: Lane,
     err :: Lane
+  }
+
+data OutputRouter =
+  OutputRouter {
+    threads :: IORef (Map ThreadId Owner),
+    subscribers :: IORef [Chan ExecutorEvent],
+    unattributed :: Owner
   }
 
 -- | The remainder and the complete lines of the bytes.
