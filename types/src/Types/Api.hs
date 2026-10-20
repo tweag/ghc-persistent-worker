@@ -295,6 +295,25 @@ data Event =
   |
   -- | Indicates that all scheduled tasks have concluded.
   RequestCompleted { statusMessage :: Text }
+  |
+  -- | Periodic status of a running executor.
+  ExecutorUpdate {
+    executor :: ExecutorId,
+    pid :: Maybe Int,
+    status :: ExecutorStatus
+  }
+  |
+  -- | The executor process has stopped or was terminated.
+  ExecutorGone { executor :: ExecutorId }
+  |
+  -- | A line written to stdout or stderr in an executor process.
+  -- If possible, the corresponding task is determined by thread ID.
+  ExecutorOutput {
+    executor :: ExecutorId,
+    task :: Maybe RequestId,
+    stream :: OutputStream,
+    line :: Text
+  }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary)
 
