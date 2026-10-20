@@ -1,11 +1,14 @@
 module Types.State where
 
 import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import GHC (HscEnv)
 import System.OsPath (OsPath)
+import Types.Api (ExecutorId)
 import Types.Grpc (CommandEnv, RequestArgs)
 import Types.Settings (Settings)
+import Types.State.Executor (ExecutorHandle)
 import Types.State.Make (MakeState (..))
 import Types.Target (TargetSpec)
 
@@ -26,3 +29,7 @@ data WorkerState =
     settings :: Settings,
     targetArgs :: Map TargetSpec (CommandEnv, RequestArgs)
   }
+
+-- | The empty executor map, for constructing a fresh 'WorkerState'.
+emptyExecutors :: Map ExecutorId ExecutorHandle
+emptyExecutors = Map.empty
