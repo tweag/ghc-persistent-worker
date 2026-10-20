@@ -11,6 +11,7 @@
 -- it considers the executor alive, so the child also exits when the parent dies without terminating it.
 module GhcWorker.Executor.Child where
 
+import BuckWorkerProto ()
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (withAsync)
 import Control.Concurrent.Chan (readChan, writeChan)
@@ -25,7 +26,9 @@ import Internal.Executor.Output (Attach, OutputRouter, scopedTask, withSubscript
 import Internal.Log (newLogger)
 import Network.GRPC.Common (NextElem (..))
 import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
-import Proto.Executor (Empty, Encoded)
+import Network.GRPC.Server.Protobuf (ProtobufMethodsOf)
+import Network.GRPC.Server.StreamType (Methods, mkNonStreaming, mkServerStreaming, simpleMethods)
+import Proto.Executor (Empty, Encoded, Executor)
 import qualified Proto.Executor_Fields as Fields
 import qualified System.IO as IO
 import System.Mem (performMajorGC)
@@ -126,3 +129,14 @@ awaitStdinEof =
   IO.hIsEOF IO.stdin >>= \case
     True -> pure ()
     False -> IO.hGetLine IO.stdin >> awaitStdinEof
+
+-- | The generated method list is alphabetical: @events@, @execute@.
+executorMethods ::
+  OutputRouter ->
+  IORef Int ->
+  (Attach -> ExecutorCall -> IO CallResult) ->
+  Methods IO (ProtobufMethodsOf Executor)
+executorMethods router active handler =
+  simpleMethods
+    (mkServerStreaming (statusEvents router active))
+    (mkNonStreaming (executeCall router active handler))
