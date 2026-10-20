@@ -183,7 +183,7 @@ addLazyByteCode ::
   IO LinkModule
 addLazyByteCode logger stateVar hsc_env = \case
   LinkHomeModule hmi@HomeModInfo {hm_linkable = HomeModLinkable {homeMod_bytecode = Nothing}} -> do
-    homeMod_bytecode <- lazyLoadByteCode logger stateVar hsc_env hmi
+    homeMod_bytecode <- loadImportedByteCode logger stateVar hsc_env hmi
     pure (LinkHomeModule hmi {hm_linkable = hmi.hm_linkable {homeMod_bytecode}})
   lm -> pure lm
 
