@@ -1,6 +1,7 @@
 module Types.State.Executor where
 
-import Control.Concurrent.QSemN (QSemN, newQSemN)
+import Control.Concurrent.QSemN (QSemN, newQSemN, signalQSemN, waitQSemN)
+import Control.Exception (bracket_)
 import System.IO (Handle)
 import System.OsPath (OsPath)
 import System.Process (ProcessHandle)
@@ -14,6 +15,13 @@ maxConcurrentCalls = 64
 
 newCallLock :: IO QSemN
 newCallLock = newQSemN maxConcurrentCalls
+
+-- | Run a call to the executor, concurrently with other calls, but not while 'withoutCalls' runs.
+--
+-- TODO unclear, reword later
+withCall :: ExecutorHandle -> IO a -> IO a
+withCall handle =
+  bracket_ (waitQSemN handle.calls 1) (signalQSemN handle.calls 1)
 
 -- | Resources and state for an executor process.
 --
