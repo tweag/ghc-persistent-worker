@@ -6,6 +6,12 @@ import System.OsPath (OsPath)
 import System.Process (ProcessHandle)
 import Types.Api (MemoryUsage)
 
+-- | The number of calls that can hold an executor's 'ExecutorHandle.calls' at the same time.
+--
+-- TODO unclear, reword later
+maxConcurrentCalls :: Int
+maxConcurrentCalls = 64
+
 -- | Resources and state for an executor process.
 --
 -- TODO split in resources and state?
