@@ -17,6 +17,7 @@ import GHC.Unit.Finder.Types (FindResult (..))
 import Internal.Cache.Hpt (loadHomeUnit)
 import Language.Haskell.Syntax.Module.Name (ModuleName (..))
 import System.OsPath.Extra (toOsPath)
+import Text.Read (readMaybe)
 import Types.Args (Args (..))
 import Types.Env (Env (..))
 import Types.State (WorkerState (..))
@@ -116,3 +117,14 @@ classifyMainResultType ty = do
     else if any (eqType resTy) ([intTy, integerTy, doubleTy, floatTy, charTy, boolTy] :: [Type])
       then Just ResultShowable
       else Nothing
+
+-- | Decide whether the result of an evaluation counts as a success.
+--
+-- If the user enabled 'TupleFailureCount' and the main function's type is @IO (Int, Int)@, parse a tuple and treat its
+-- second element as the number of failures.
+resultSucceeded :: TupleMode -> Maybe MainResultKind -> Maybe String -> Bool
+resultSucceeded TupleFailureCount (Just ResultCounts) result =
+  case result >>= readMaybe @(Int, Int) of
+    Just (_total, failed) -> failed == 0
+    Nothing -> False
+resultSucceeded _ _ _ = True
