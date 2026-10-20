@@ -17,9 +17,15 @@ module Internal.Executor.Output where
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Char8 as Char8
+import Data.Text (Text)
+import qualified Data.Text.Encoding as Text
+import Data.Text.Encoding.Error (lenientDecode)
 
 -- | The remainder and the complete lines of the bytes.
 splitLines :: ByteString -> (ByteString, [ByteString])
 splitLines bytes = (rest, Char8.lines complete)
   where
     (complete, rest) = ByteString.breakEnd (== 10) bytes
+
+decode :: ByteString -> Text
+decode = Text.decodeUtf8With lenientDecode
