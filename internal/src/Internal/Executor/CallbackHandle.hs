@@ -2,6 +2,7 @@
 -- This is used to associate stdio with the executor task that emitted it.
 module Internal.Executor.CallbackHandle where
 
+import Control.Concurrent.MVar (MVar)
 import qualified Data.ByteString as ByteString
 import Data.ByteString (ByteString)
 import Data.Word (Word8)
@@ -11,7 +12,7 @@ import GHC.IO.BufferedIO (BufferedIO (..), readBuf, readBufNonBlocking, writeBuf
 import GHC.IO.Device (IODevice (..), IODeviceType (Stream), RawIO (..))
 import GHC.IO.Encoding (getLocaleEncoding)
 import GHC.IO.Handle.Internals (mkFileHandle)
-import GHC.IO.Handle.Types (Handle (..), Newline (..), NewlineMode (..))
+import GHC.IO.Handle.Types (Handle (..), Handle__, Newline (..), NewlineMode (..))
 import System.IO (BufferMode (..), IOMode (..), hSetBuffering)
 
 -- | A device whose reads and writes are delegated to callbacks.
@@ -61,3 +62,8 @@ sinkHandle sink = do
   where
     cbWrite ptr len = ByteString.packCStringLen (castBytes ptr, len) >>= sink
     castBytes = castPtr
+
+handleVar :: Handle -> MVar Handle__
+handleVar = \case
+  FileHandle _ var -> var
+  DuplexHandle _ var _ -> var
