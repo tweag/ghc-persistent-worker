@@ -6,7 +6,7 @@ import Control.Monad (when)
 import Data.Char (isAlphaNum)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as Text
-import Internal.Executor.Client (awaitExecutor, stopExecutor, watchExecutor)
+import Internal.Executor.Client (awaitExecutor, isRunning, stopExecutor, watchExecutor)
 import Types.Api (Event, ExecutorId (..))
 import Types.Executor.Transport (ExecutorTransport)
 import Types.State (WorkerState (..))
@@ -59,3 +59,8 @@ acquireExecutor canReuse env executorId = do
 
     withHandle state handle =
       pure (state {executors = Map.insert executorId handle state.executors}, (handle, True))
+
+-- | Look up or spawn an executor with the given id.
+ensureExecutor :: ExecutorEnv -> ExecutorId -> IO ExecutorHandle
+ensureExecutor =
+  acquireExecutor isRunning
