@@ -7,8 +7,17 @@ import Control.Monad (void)
 import Control.Monad.Extra (loopM)
 import Data.Foldable (traverse_)
 import System.Directory.OsPath (doesFileExist, removeFile)
+import System.IO (hClose)
 import System.OsPath.Extra (OsPath, fromOsPath)
-import System.Process (CreateProcess (..), StdStream (..), createProcess, getProcessExitCode, proc)
+import System.Process (
+  CreateProcess (..),
+  StdStream (..),
+  createProcess,
+  getProcessExitCode,
+  proc,
+  terminateProcess,
+  waitForProcess,
+  )
 import Types.Settings (Settings (..))
 import Types.State.Executor (ExecutorHandle (..), newCallLock)
 
@@ -66,3 +75,12 @@ awaitExecutor handle = do
             doesFileExist handle.socket >>= \case
               True -> pure (Right Nothing)
               False -> Left (n - 1) <$ threadDelay 100_000
+
+-- | Close the executor's stdin (which makes it exit on its own), terminate it for good measure, reap it and remove
+-- its socket.
+stopExecutor :: ExecutorHandle -> IO ()
+stopExecutor handle = do
+  void (try @SomeException (hClose handle.stdin))
+  terminateProcess handle.process
+  void (waitForProcess handle.process)
+  removeIfExists handle.socket
