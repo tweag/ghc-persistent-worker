@@ -116,6 +116,7 @@ test-suite ghc-worker-test
     BuildPlanTest.Test2,
     BuildThTest,
     ByteCodeCacheTest,
+    CallbackHandleTest,
     DepFilesTest,
     FlagParserTest,
     InterfacePathTest,
