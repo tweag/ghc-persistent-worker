@@ -241,6 +241,8 @@ data Event =
   CompileStart {
     target :: Target,
     debuggable :: Bool,
+    -- | For execute tasks, indicate whether the task is run in a subprocess executor.
+    process :: Bool,
     requestId :: RequestId
   }
   |
