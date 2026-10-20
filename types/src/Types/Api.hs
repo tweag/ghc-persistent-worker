@@ -268,7 +268,7 @@ data ApiResponse a =
   |
   ApiFailure { message :: Text }
   deriving stock (Eq, Show, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, Binary)
 
 newtype RequestId =
   RequestId { number :: Int }
