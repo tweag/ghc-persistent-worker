@@ -207,3 +207,14 @@ moduleHasMain hsc_env modname pkgqual = do
     isMain = \case
       Avail n -> nameOccName n == mkVarOcc "main"
       AvailTC _ _ -> False
+
+-- | A statement that binds an expression's result to @execResult@.
+--
+-- The interpreter unconditionally prints results to stdout unless they're bound.
+statementText :: String -> Maybe MainResultKind -> String
+statementText expr = \case
+  Just ResultShowable -> shown
+  Just ResultCounts -> shown
+  _ -> "execResult <- (" ++ expr ++ ")"
+  where
+    shown = "execResult <- Prelude.fmap Prelude.show (" ++ expr ++ ")"
