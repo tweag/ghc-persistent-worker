@@ -290,6 +290,15 @@ data Event =
     target :: Target,
     exitCode :: Int,
     stderr :: String,
+    result :: Maybe String,
+    -- | 'True' only for an execute task whose module has no @main@ binding, in which case no execution ever
+    -- took place; 'False' for every other task kind and for execute tasks that did run (whether they succeeded
+    -- or failed). Lets clients (the @ghc-ui@ tasks view) distinguish this from an ordinary successful/failed
+    -- run, since 'result' being 'Nothing' alone is ambiguous (a normal run that didn't exfiltrate a value also
+    -- reports 'Nothing').
+    noMain :: Bool,
+    -- | RTS memory stats reported by a subprocess execute task, 'Nothing' for every other task kind.
+    processStats :: Maybe ProcessStats,
     requestId :: RequestId
   }
   |
