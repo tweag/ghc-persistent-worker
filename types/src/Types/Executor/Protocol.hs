@@ -15,6 +15,15 @@ data ExecutorCall =
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
+-- | The payload of the @Execute@ method of the gRPC service @executor@.
+data ExecutorRequest =
+  ExecutorRequest {
+    requestId :: RequestId,
+    call :: ExecutorCall
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
 -- | A line written to stdio by an executor process.
 -- If possible, the corresponding task is determined by thread ID.
 data OutputLine =
