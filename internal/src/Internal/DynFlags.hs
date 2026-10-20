@@ -7,15 +7,7 @@ import Data.List.NonEmpty (nonEmpty)
 import Data.Maybe (maybeToList)
 import qualified Data.Set as Set
 import qualified GHC
-import GHC (
-  DynFlags (..),
-  GhcException (..),
-  GhcLink (LinkBinary),
-  GhcMonad,
-  Phase,
-  parseDynamicFlags,
-  parseTargetFiles,
-  )
+import GHC (DynFlags (..), GhcException (..), GhcLink (LinkBinary), GhcMonad, Phase, parseDynamicFlags, parseTargetFiles)
 import GHC.Driver.Config.Diagnostic (initDiagOpts, initPrintConfig)
 import GHC.Driver.Config.Logger (initLogFlags)
 import GHC.Driver.Env (HscEnv (..))
