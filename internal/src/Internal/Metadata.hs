@@ -214,6 +214,9 @@ computeMetadata events env = do
           target = uiTarget,
           exitCode = if isJust res then 0 else 1,
           stderr = unlines logged,
+          result = Nothing,
+          maxMemory = Nothing,
+          noMain = False,
           requestId
         }
   logMemStats "after metadata" env.log

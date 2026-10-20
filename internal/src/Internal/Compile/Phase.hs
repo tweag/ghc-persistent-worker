@@ -59,7 +59,7 @@ withTaskEvents logger events spec act = do
       let stderr = unlines (logged ++ extra)
       for_ uiTarget \ target ->
         events.publish \ requestId ->
-          CompileEnd {target, exitCode, stderr, requestId}
+          CompileEnd {target, exitCode, stderr, result = Nothing, maxMemory = Nothing, noMain = False, requestId}
 
     uiTarget = targetFromWorkerSpec spec
 

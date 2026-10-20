@@ -250,6 +250,15 @@ data Event =
     target :: Target,
     exitCode :: Int,
     stderr :: String,
+    -- | For execute tasks, contains the return value of the executed function.
+    result :: Maybe String,
+    -- | For execute tasks, indicate whether the task was skipped because the module didn't have a 'main' function.
+    -- When a target containing multiple modules is executed (e.g. a unit), every module sends such an event, because
+    -- the presence of 'main' can only be determined after the task was started.
+    -- This field allows ignoring these events.
+    noMain :: Bool,
+    -- | For execute tasks, contains the maximum memory usage during their runtime.
+    maxMemory :: Maybe MemoryUsage,
     requestId :: RequestId
   }
   |
