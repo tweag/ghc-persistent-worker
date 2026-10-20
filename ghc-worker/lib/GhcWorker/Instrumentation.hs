@@ -56,6 +56,11 @@ data EvalReport =
     maxMemory :: Maybe MemoryUsage
   }
 
+-- | The report for an evaluation that failed with an error message.
+failedEval :: String -> EvalReport
+failedEval err =
+  EvalReport {outcome = Left err, result = Nothing, maxMemory = Nothing}
+
 -- | A request handler that is aware of instrumentation.
 newtype InstrumentedHandler =
   InstrumentedHandler { create :: Hooks -> GrpcHandler }
