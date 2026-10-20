@@ -96,7 +96,13 @@ data BuckArgs =
     isBinary :: Bool,
     interp :: IsInterpreted,
     unitBuckArgsPath :: Maybe String,
-    depUnitsPath :: Maybe String
+    depUnitsPath :: Maybe String,
+    -- | Expression to evaluate in eval mode.
+    expr :: Maybe String,
+    -- | Name used to tag log output for the eval-mode target.
+    evalTargetName :: Maybe String,
+    -- | Interpret an @IO (Int, Int)@ result of 'expr' as @(total, failed)@, failing the evaluation if @failed /= 0@.
+    evalCountFailures :: Bool
   }
   deriving stock (Eq, Show)
 
@@ -135,7 +141,10 @@ emptyBuckArgs env =
     isBinary = False,
     interp = Compiled,
     unitBuckArgsPath = Nothing,
-    depUnitsPath = Nothing
+    depUnitsPath = Nothing,
+    expr = Nothing,
+    evalTargetName = Nothing,
+    evalCountFailures = False
   }
 
 options :: Map String ([String] -> BuckArgs -> Either String ([String], BuckArgs))
