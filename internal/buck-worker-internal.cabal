@@ -95,6 +95,7 @@ library
                       Internal.Error
                       Internal.Executor.CallbackHandle
                       Internal.Executor.Client
+                      Internal.Executor.Lifecycle
                       Internal.Executor.Output
                       Internal.Json
                       Internal.Log
