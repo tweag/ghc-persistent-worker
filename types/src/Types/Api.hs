@@ -151,12 +151,16 @@ data OutputStream =
   deriving stock (Eq, Ord, Show, Generic)
   deriving anyclass (Binary, FromJSON, ToJSON)
 
+-- | Describe the action that should be performed for a given target in 'TaskTrigger'.
 data TaskKind =
   Metadata
   |
   Build { rebuild :: Bool }
   |
-  Execute
+  -- | Execute bytecode in eligible modules addressed by the target.
+  --
+  -- If 'executor' is specified, execute in a subprocess.
+  Execute { executor :: Maybe ExecutorId }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary, FromJSON, ToJSON)
 

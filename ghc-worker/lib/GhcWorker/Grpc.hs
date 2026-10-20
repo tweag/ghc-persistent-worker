@@ -73,7 +73,7 @@ triggerTask = \case
     pure (ApiFailure "Cannot trigger metadata")
   TaskTrigger {task = Build _rebuild} ->
     pure (ApiFailure "Cannot trigger build")
-  TaskTrigger {task = Execute} ->
+  TaskTrigger {task = Execute {}} ->
     pure (ApiFailure "Cannot trigger execute")
 
 -- | Flip a single 'Feature' in 'WorkerState', shared by both 'GhcWorker.Grpc.apiRequest' and
