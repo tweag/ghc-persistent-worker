@@ -3,7 +3,8 @@
 -- process, and 'GhcServer.Build.Executor' for the parent-side spawn\/dispatch\/terminate logic.
 module Types.State.Executor where
 
-import Control.Concurrent.QSemN (QSemN, newQSemN)
+import Control.Concurrent.QSemN (QSemN, newQSemN, signalQSemN, waitQSemN)
+import Control.Exception (bracket_)
 import System.IO (Handle)
 import System.OsPath (OsPath)
 import System.Process (ProcessHandle)
@@ -15,6 +16,11 @@ maxConcurrentCalls = 64
 
 newCallLock :: IO QSemN
 newCallLock = newQSemN maxConcurrentCalls
+
+-- | Run a call to the executor, concurrently with other calls, but not while 'withoutCalls' runs.
+withCall :: ExecutorHandle -> IO a -> IO a
+withCall handle =
+  bracket_ (waitQSemN handle.calls 1) (signalQSemN handle.calls 1)
 
 -- | A running persistent executor child process: its OS process handle (for termination), the Unix socket
 -- path on which it serves the @Executor@ gRPC service, and the write end of its stdin pipe. The child exits when
