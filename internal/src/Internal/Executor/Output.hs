@@ -31,7 +31,7 @@ import Data.Text.Encoding.Error (lenientDecode)
 import Internal.Executor.CallbackHandle (Stdio (..))
 import qualified System.IO as IO
 import Types.Api (OutputStream (..), RequestId)
-import Types.Executor.Protocol (ExecutorEvent (..))
+import Types.Executor.Protocol (ExecutorEvent (..), OutputLine (..))
 
 -- | The buffers for one stream of one owner.
 data Lane =
@@ -115,3 +115,7 @@ splitLines bytes = (rest, Char8.lines complete)
 
 decode :: ByteString -> Text
 decode = Text.decodeUtf8With lenientDecode
+
+publishLines :: OutputRouter -> Owner -> OutputStream -> [ByteString] -> IO ()
+publishLines router owner stream =
+  traverse_ \ bytes -> publish router (OutputEvent OutputLine {task = owner.task, stream, line = decode bytes})
