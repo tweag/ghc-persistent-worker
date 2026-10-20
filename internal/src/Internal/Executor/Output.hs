@@ -28,7 +28,7 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
 import Data.Text.Encoding.Error (lenientDecode)
-import Internal.Executor.CallbackHandle (Stdio (..), writeBytes)
+import Internal.Executor.CallbackHandle (Stdio (..), withStdioCallback, writeBytes)
 import qualified System.IO as IO
 import Types.Api (OutputStream (..), RequestId)
 import Types.Executor.Protocol (ExecutorEvent (..), OutputLine (..))
@@ -133,3 +133,7 @@ route router original stream chunk = do
   completed <- completeLines (selectLane stream owner) chunk
   publishLines router owner stream completed
   writeBytes (selectHandle stream original) chunk
+
+-- | Replace @stdout@ and @stderr@ for the duration of the action.
+withOutputRouter :: OutputRouter -> IO a -> IO a
+withOutputRouter router = withStdioCallback (route router)
