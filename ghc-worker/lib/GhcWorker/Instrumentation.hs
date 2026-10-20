@@ -45,21 +45,47 @@ hooksNoop =
     instrumentLogger = const id
   }
 
+data EvalStatus =
+  -- | A GHC exception was handled by the logger.
+  EvalException
+  |
+  EvalFailed { message :: String }
+  |
+  EvalFinished { success :: Bool }
+  deriving stock (Eq, Show)
+
+evalExitCode :: Num a => EvalStatus -> a
+evalExitCode = \case
+  EvalException -> 1
+  EvalFailed _ -> 1
+  EvalFinished False -> 1
+  EvalFinished True -> 0
+
+evalStderr :: EvalStatus -> String
+evalStderr = \case
+  EvalException -> ""
+  EvalFailed {message} -> message
+  EvalFinished False -> ""
+  EvalFinished True -> ""
+
 -- | The outcome of an eval request.
 data EvalReport =
   EvalReport {
-    -- | An error message for a failure to evaluate, as opposed to a successful evaluation of a failing test.
-    outcome :: Either String Bool,
+    status :: EvalStatus,
     -- | The return value of the evaluated expression produced.
     result :: Maybe String,
     -- | Memory usage of the executor, if the evaluation ran in one.
     maxMemory :: Maybe MemoryUsage
   }
 
+evalReport :: EvalStatus -> EvalReport
+evalReport status =
+  EvalReport {status, result = Nothing, maxMemory = Nothing}
+
 -- | The report for an evaluation that failed with an error message.
 failedEval :: String -> EvalReport
 failedEval err =
-  EvalReport {outcome = Left err, result = Nothing, maxMemory = Nothing}
+  EvalReport {status = EvalFailed err, result = Nothing, maxMemory = Nothing}
 
 -- | Publish an event that doesn't depend on the request.
 publishEvent :: Hooks -> Event -> IO ()
@@ -69,15 +95,15 @@ publishEvent hooks event =
 -- | Run an evaluation, publishing 'CompileStart' and 'CompileEnd' before and after.
 --
 -- TODO finally?
-reportEval :: Hooks -> Target -> Bool -> IO EvalReport -> IO EvalReport
-reportEval hooks target process run = do
+evalWithEvents :: Hooks -> Target -> Bool -> IO EvalReport -> IO EvalReport
+evalWithEvents hooks target process run = do
   hooks.events.publish \ requestId -> CompileStart {target, debuggable = False, process, requestId}
   report <- run
   hooks.events.publish \ requestId ->
     CompileEnd {
       target,
-      exitCode = either (const 1) (\ ok -> if ok then 0 else 1) report.outcome,
-      stderr = either id (const "") report.outcome,
+      exitCode = evalExitCode report.status,
+      stderr = evalStderr report.status,
       result = report.result,
       maxMemory = report.maxMemory,
       noMain = False,

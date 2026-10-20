@@ -3,42 +3,54 @@
 module GhcWorker.GhcHandler where
 
 import Common.Grpc (GrpcHandler (..))
+import Control.Applicative ((<|>))
 import Control.Concurrent (MVar)
 import Control.Exception (throwIO, try)
-#ifdef __DEBUG__
 import Control.Monad (when)
-#endif
 import Data.Coerce (coerce)
+import Data.Foldable (for_, traverse_)
 import Data.Functor ((<&>))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Int (Int32)
-#ifdef GHC_DEBUG
-import GHC.Debug.Stub (withGhcDebugUnix)
-#endif
+import Data.Maybe (fromMaybe, isNothing)
 import GHC (DynFlags (..), Ghc, ModIface, getSession)
 import GHC.Driver.DynFlags (GhcMode (..))
 import GHC.Driver.Monad (reflectGhc, reifyGhc)
 import GhcWorker.CompileResult (CompileResult (..), usedDepFiles, writeResult)
-import GhcWorker.Instrumentation (Hooks (..), InstrumentedHandler (..))
+import GhcWorker.Instrumentation (
+  EvalReport (..),
+  EvalStatus (..),
+  Hooks (..),
+  InstrumentedHandler (..),
+  evalReport,
+  evalWithEvents,
+  )
 import Internal.AbiHash (AbiHash (..), showAbiHash)
 import Internal.Compile.Make (compileModuleWithDepsInHpt)
-#ifdef GHC_DEBUG
-import Internal.Debug (debugSocketPath)
-#endif
 import Internal.DynFlags (modifyGlobalFlags)
+import Internal.Evaluate (TupleMode (..), evaluateExpr)
 import Internal.Log (newLogger)
 import Internal.Metadata (computeMetadata)
 import Internal.Session (withGhcMakeModule, withGhcMakeSource)
 import Prelude hiding (log)
+import System.OsPath.Extra (fromOsPath)
+import Types.Api (targetFromWorkerSpec)
 import Types.Args (Args (..))
 import qualified Types.BuckArgs
-import Types.BuckArgs (BuckArgs, IsInterpreted (..), Mode (..), parseBuckArgs, toGhcArgs)
+import Types.BuckArgs (BuckArgs, IsInterpreted (..), Mode (..), checkModuleTarget, parseBuckArgs, toGhcArgs)
 import Types.Env (Env (..))
-import Types.Settings (Settings (..))
 import Types.Grpc (RequestArgs (..))
 import Types.Log (Logger (..), TraceId, newLog)
+import Types.Settings (Settings (..))
 import Types.State (WorkerState (..))
-import Types.Target (TargetSpec (..), renderTargetSpec)
+import Types.Target (ModuleTarget, TargetSpec (..), renderTargetSpec)
+
+#ifdef GHC_DEBUG
+
+import GHC.Debug.Stub (withGhcDebugUnix)
+import Internal.Debug (debugSocketPath)
+
+#endif
 
 #if __DEBUG__
 
@@ -67,6 +79,78 @@ compileAndReadAbiHash ghcMode compile args target = do
       depFiles = usedDepFiles hsc_env iface
     pure CompileResult {abiHash, depFiles}
 
+-- | Ensure that the CLI args @--module@, @--unit@ and @--expr@ were specified.
+checkEvalArgs ::
+  Env ->
+  BuckArgs ->
+  IO (Either (Int32, Maybe TargetSpec) (ModuleTarget, String))
+checkEvalArgs env args = do
+  result <$> checkTarget <*> checkExpr
+  where
+    result (Just moduleTarget) (Just expr) =
+      Right (moduleTarget, expr)
+    result target _ =
+      Left (1, targetFallback target)
+
+    checkTarget = do
+      target <- checkModuleTarget args
+      when (isNothing target) do
+        env.log.fatal "worker: No module specified for evaluation"
+      pure target
+
+    checkExpr = do
+      when (isNothing args.expr) do
+        env.log.fatal "worker: No expression specified for evaluation"
+      pure args.expr
+
+    targetFallback modTarget = (TargetModule <$> modTarget) <|> noTarget
+
+    noTarget = TargetUnknown <$> args.evalTargetName
+
+-- TODO use structured types for all return values all the way into the call graph
+dispatchEval ::
+  Hooks ->
+  Env ->
+  BuckArgs ->
+  ModuleTarget ->
+  String ->
+  IO (Int32, Maybe TargetSpec)
+dispatchEval hooks env args modTarget expr = do
+  report <- eval args.evalTargetName
+  case report.status of
+    EvalException ->
+      pure (1, Just targetFallback)
+    EvalFailed err -> do
+      env.log.info ("worker: Evaluation failed: " ++ err)
+      pure (1, Just targetFallback)
+    EvalFinished {success} ->
+      pure (if success then 0 else 1, Just targetFallback)
+  where
+    eval mname = do
+      for_ mname \ name -> env.log.setTarget (TargetUnknown name)
+      withReport False evalInProcess
+
+    -- Publish events for the evaluation of the module's target.
+    withReport process =
+      case targetFromWorkerSpec (TargetModule modTarget) of
+        Just target -> evalWithEvents hooks target process
+        Nothing -> id
+
+    evalInProcess = do
+      let mode = if args.evalCountFailures then TupleFailureCount else TuplePlain
+      r <- withGhcMakeModule Interpreted modTarget Nothing env \ _ ->
+        Just <$> evaluateExpr env (fromOsPath <$> args.homeUnit) modTarget mode expr
+      case r of
+        Nothing -> pure (evalReport EvalException)
+        Just (Left message) -> pure (evalReport (EvalFailed {message}))
+        Just (Right (success, result)) -> do
+          traverse_ env.log.info result
+          pure EvalReport {status = EvalFinished {success}, result, maxMemory = Nothing}
+
+    targetFallback = TargetUnknown targetName
+
+    targetName = fromMaybe "unknown" args.evalTargetName
+
 -- | Process a worker request based on the operational mode specified in the request arguments, either compiling a
 -- single module for 'ModeCompile' (@-c@), or computing and writing the module graph to a JSON file for 'ModeMetadata'
 -- (@-M@).
@@ -86,6 +170,8 @@ dispatch hooks env args =
     Just ModeMetadata -> do
       (success, target) <- computeMetadata hooks.events env
       pure (if success then 0 else 1, target)
+    Just ModeEval ->
+      either pure (uncurry (dispatchEval hooks env args)) =<< checkEvalArgs env args
     Just m -> error ("worker: mode not implemented: " ++ show m)
     Nothing -> error "worker: no mode specified"
   where
