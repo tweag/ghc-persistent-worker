@@ -34,3 +34,11 @@ setupEvaluationSession env (Just homeUnit) target = do
   dflags <- getSessionDynFlags
   setInteractiveDynFlags dflags
   pure (Just hsc_env)
+
+-- | The Finder's possible failure reasons.
+data ModuleLookupError =
+  ModuleNotFound
+  |
+  ModulePackageNotFound
+  |
+  ModuleAmbiguous
