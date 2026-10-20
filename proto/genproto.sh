@@ -3,9 +3,11 @@
 # Get the directory of the script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# TODO: This script is not mentioned anywhere, so it is unclear when and how to
+# use it.
 protoc --plugin=protoc-gen-haskell=$(which proto-lens-protoc) \
   -I="$SCRIPT_DIR" --haskell_out="$SCRIPT_DIR/src" \
-  "$SCRIPT_DIR/worker.proto"
+  "$SCRIPT_DIR/worker.proto" "$SCRIPT_DIR/executor.proto"
 
 # Imports are generated with re-exported modules, which we currently don't support in the buck2 build.
 # Remove the re-exported module prefixes so the original modules are imported.
