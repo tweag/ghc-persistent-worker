@@ -182,6 +182,9 @@ options =
     withArg "--close-input" \z a -> z {closeInput = Just a},
     withArg "--close-output" \z a -> z {closeOutput = Just a},
     flag "--interp" \ z -> z {interp = Interpreted},
+    withArg "--expr" \ z a -> z {expr = Just a},
+    withArg "--eval-target-name" \ z a -> z {evalTargetName = Just a},
+    flag "--eval-count-failures" \ z -> z {evalCountFailures = True},
     ("-c", \ rest z -> Right (rest, z {mode = Just ModeCompile})),
     ("-M", \ rest z -> Right (rest, z {mode = Just ModeMetadata}))
   ]
