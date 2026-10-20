@@ -43,6 +43,7 @@ newLog traceId =
 data Logger =
   Logger {
     setTarget :: TargetSpec -> IO (),
+    -- TODO change to Text
     debug :: String -> IO (),
     debugD :: SDoc -> IO (),
     info :: String -> IO (),
