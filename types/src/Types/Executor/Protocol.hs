@@ -4,7 +4,7 @@ module Types.Executor.Protocol where
 import Data.Aeson (FromJSON, ToJSON, Value)
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import Types.Api (ExecutorStatus, OutputStream, RequestId)
+import Types.Api (ExecutorStatus, OutputStream, MemoryUsage, RequestId)
 
 -- | Event type for executor requests.
 --
@@ -79,4 +79,17 @@ data Captured =
     stderr :: Text
   }
   deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
+-- | The result of the @Execute@ method of the gRPC service @executor@.
+data CallResult =
+  CallResult {
+    captured :: Captured,
+    -- | Messages the handler sent to the 'Types.Log.Logger'.
+    logMessages :: [Text],
+    -- | The maximum memory usage during the task's runtime.
+    maxMemory :: MemoryUsage,
+    outcome :: Either SetupError EvalOutcome
+  }
+  deriving stock (Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
