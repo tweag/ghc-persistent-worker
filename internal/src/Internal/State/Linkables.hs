@@ -105,17 +105,25 @@ lazyLoadByteCode logger stateVar hsc_env hmi = do
     loadBytecode location iface = loadCachedByteCodeFrom hsc_env location iface (hm_details hmi)
 
     insertBytecode state bytecode = do
-      let hm_iface = hmi.hm_iface
-          new = hmi {hm_iface, hm_linkable = hmi.hm_linkable {homeMod_bytecode = Just bytecode}}
-          unit = moduleUnitId (mi_module hm_iface)
-      traverse_ (insertIntoHpt new) (unitEnv_lookup_maybe unit state.make.hug)
-      pure (state, Just bytecode)
-
-    insertIntoHpt new hue = addHomeModInfoToHpt new (homeUnitEnv_hpt hue)
+      state' <- insertIntoHpt state hmi bytecode
+      pure (state', Just bytecode)
 
     homeUnit = hsc_home_unit hsc_env
 
     module_ = mi_module hmi.hm_iface
+
+-- | Overwrite a 'HomeModInfo''s bytecode with the given 'Linkable' and insert the updated entry into the HPT of
+-- whichever unit it belongs to, per the 'WorkerState''s currently persisted 'HomeUnitGraph'. Shared by
+-- 'lazyLoadByteCode' (Core-based reconstruction) and 'loadImportedByteCode' (externally supplied bytecode), both of
+-- which need to make a freshly obtained 'Linkable' visible to the rest of the HPT immediately.
+insertIntoHpt :: WorkerState -> HomeModInfo -> Linkable -> IO WorkerState
+insertIntoHpt state hmi bytecode = do
+  traverse_ insertOne (unitEnv_lookup_maybe unit state.make.hug)
+  pure state
+  where
+    new = hmi {hm_linkable = hmi.hm_linkable {homeMod_bytecode = Just bytecode}}
+    unit = moduleUnitId (mi_module hmi.hm_iface)
+    insertOne hue = addHomeModInfoToHpt new (homeUnitEnv_hpt hue)
 
 loadDLL_ :: HscEnv -> Interp -> [FilePath] -> String -> IO ()
 loadDLL_ hsc_env interp lib_paths lib = do
