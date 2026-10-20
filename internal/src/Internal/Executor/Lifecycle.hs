@@ -3,9 +3,13 @@
 -- and the executor's socket name.
 module Internal.Executor.Lifecycle where
 
-import Control.Concurrent.MVar (MVar)
+import Control.Concurrent.MVar (MVar, modifyMVar)
+import Control.Monad (when)
 import Data.Char (isAlphaNum)
+import Data.Foldable (traverse_)
+import qualified Data.Map.Strict as Map
 import qualified Data.Text as Text
+import Internal.Executor.Client (awaitExecutor, stopExecutor, watchExecutor)
 import Types.Api (Event, ExecutorId (..))
 import Types.Executor.Transport (ExecutorTransport)
 import Types.State (WorkerState (..))
@@ -26,3 +30,22 @@ data ExecutorEnv =
 executorSocketName :: ExecutorId -> String
 executorSocketName executorId =
   "executor-" ++ [if isAlphaNum c || c == '-' then c else '_' | c <- Text.unpack executorId.text] ++ ".sock"
+
+-- | Return the registered executor if the predicate accepts it, otherwise stop it and register a new one.
+-- A new process is observed for status events, which are published with 'ExecutorEnv.emit'.
+acquireExecutor :: (ExecutorHandle -> IO Bool) -> ExecutorEnv -> ExecutorId -> IO ExecutorHandle
+acquireExecutor reuse env executorId = do
+  (handle, spawned) <- modifyMVar env.stateVar \ state -> do
+    let existing = Map.lookup executorId state.executors
+    reusable <- maybe (pure False) reuse existing
+    case existing of
+      Just handle | reusable -> pure (state, (handle, False))
+      _ -> do
+        traverse_ stopExecutor existing
+        spawned <- env.spawn executorId
+        -- Keep the call lock, so that callers still holding it stay in sync with the new process.
+        let handle = maybe spawned (\ old -> spawned {calls = old.calls, incarnation = old.incarnation + 1}) existing
+        pure (state {executors = Map.insert executorId handle state.executors}, (handle, True))
+  awaitExecutor handle
+  when spawned (watchExecutor env.transport env.emit env.stateVar executorId handle)
+  pure handle
