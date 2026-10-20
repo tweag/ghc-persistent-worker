@@ -37,6 +37,7 @@
           "optparse-applicative"
           "os-string"
           "process"
+          "silently"
           "text"
           "time"
         ];
