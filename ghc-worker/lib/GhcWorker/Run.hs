@@ -97,9 +97,11 @@ executorRtsParser =
 cliOptionsParser :: Parser CliOptions
 cliOptionsParser = do
   serve <- serverSocketFromPath . toOsPath <$> strOption (long "serve" <> metavar "SOCKET" <> help "Socket path for the GHC server")
-  features0 <- featureFlagsParser
+  settings <- featureFlagsParser
+  captureStdio <- captureStdioParser
   maxBytecode <- maxBytecodeParser
-  pure CliOptions {serve, settings = features0 {lazyByteCodeCacheLimit = maxBytecode}}
+  executorRts <- executorRtsParser
+  pure CliOptions {serve, settings = (captureStdio settings) {lazyByteCodeCacheLimit = maxBytecode, executorRts}}
 
 cliOptionsParserInfo :: ParserInfo CliOptions
 cliOptionsParserInfo =
