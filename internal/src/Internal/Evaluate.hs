@@ -19,8 +19,10 @@ import GHC.Hs.Extension (GhcPs)
 import GHC.Hs.ImpExp (simpleImportDecl)
 import GHC.Iface.Load (loadSrcInterface)
 import GHC.Runtime.Context (InteractiveContext (..), InteractiveImport (..))
+import GHC.Runtime.Eval (execOptions, exprType, setContext)
 import GHC.Runtime.Eval.Types (ExecOptions (..), isStep)
-import GHC.Runtime.Interpreter (evalStmt)
+import GHC.Runtime.Interpreter (evalStmt, wormhole)
+import GHC.Tc.Module (TcRnExprMode (..))
 import GHC.Tc.Utils.TcType (tcSplitIOType_maybe)
 import GHC.Types.Avail (AvailInfo (..))
 import GHC.Types.Name (nameOccName)
@@ -30,7 +32,7 @@ import GHC.Unit (moduleUnitId)
 import GHC.Unit.Finder (findImportedModule)
 import GHC.Unit.Finder.Types (FindResult (..))
 import GHC.Unit.Module.ModIface (mi_exports)
-import GHC.Unit.Types (IsBootInterface (..))
+import GHC.Unit.Types (IsBootInterface (..), moduleName)
 import GHC.Utils.Outputable (text)
 import GHCi.Message (EvalResult (..), EvalStatus_ (..))
 import GHCi.RemoteTypes (ForeignHValue, HValueRef)
@@ -45,6 +47,7 @@ import Types.Env (Env (..))
 import Types.State (WorkerState (..))
 import Types.State.Make (EModuleGraph (..), MakeState (..))
 import Types.Target (ModuleTarget (..))
+import Unsafe.Coerce (unsafeCoerce)
 
 -- | Load a target's home unit into the current session, activate its unit id, and refresh interactive
 -- 'DynFlags' so subsequent evaluation runs against the freshly loaded state. Returns 'Nothing' when no home
@@ -167,8 +170,7 @@ qualifiedPrelude =
 evalStmt' :: GhcMonad m => GhciLStmt GhcPs -> String -> ExecOptions -> m (EvalStatus_ [ForeignHValue] [HValueRef])
 evalStmt' stmt _stmt_text ExecOptions{..} = do
     hsc_env <- getSession
-    let interp = hscInterp hsc_env
-        -- Turn off -fwarn-unused-local-binds when running a statement, to hide warnings about the implicit bindings
+    let -- Turn off -fwarn-unused-local-binds when running a statement, to hide warnings about the implicit bindings
         -- introduced by the statement's own desugaring.
         idflags' = ic_dflags hsc_env.hsc_IC `wopt_unset` Opt_WarnUnusedLocalBinds
         hsc_env' = mkInteractiveHscEnv hsc_env {hsc_IC = hsc_env.hsc_IC {ic_dflags = idflags'}}
@@ -177,7 +179,7 @@ evalStmt' stmt _stmt_text ExecOptions{..} = do
       Nothing -> pure (EvalComplete 0 (EvalSuccess []))
       Just (_ids, hval, _fix_env) -> liftIO do
         let eval_opts = initEvalOpts idflags' (isStep execSingleStep)
-        evalStmt interp eval_opts (execWrap hval)
+        evalStmt (hscInterp hsc_env) eval_opts (execWrap hval)
 
 -- | Run a statement in the current interactive context.
 evalStmtCustom ::
@@ -218,3 +220,23 @@ statementText expr = \case
   _ -> "execResult <- (" ++ expr ++ ")"
   where
     shown = "execResult <- Prelude.fmap Prelude.show (" ++ expr ++ ")"
+
+-- | Interpret an expression in the context of the target module.
+--
+-- Return whether evaluation succeeded and, if possible, the return value of the expression.
+--
+-- TODO refactor
+runExpression :: TupleMode -> HscEnv -> ModuleTarget -> String -> Ghc (Bool, Maybe String)
+runExpression mode hsc_env target expr = do
+  setContext [IIModule (moduleName target.module_), qualifiedPrelude]
+  mty <- exprType TM_Inst expr
+  let mkind = classifyMainResultType mty
+  evalStmtCustom (statementText expr mkind) execOptions >>= \case
+    EvalComplete _ (EvalSuccess (fhv : _)) -> do
+      mResultStr <- case mkind of
+        Nothing -> pure Nothing
+        Just _ -> do
+          hv <- liftIO (wormhole (hscInterp hsc_env) fhv)
+          pure (Just (unsafeCoerce hv :: String))
+      pure (resultSucceeded mode mkind mResultStr, mResultStr)
+    _ -> pure (False, Nothing)
