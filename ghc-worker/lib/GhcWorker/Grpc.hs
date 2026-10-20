@@ -94,6 +94,8 @@ apiRequest stateVar = \case
     pure (ApiFailure "Cleaning not supported")
   ToggleFeature {feature} ->
     ApiSuccess () <$ toggleFeature stateVar feature
+  TerminateExecutor {} ->
+    pure (ApiFailure "Executor subprocesses not supported by this worker")
 
 -- | Implementation of the @Api@ method: decodes the JSON payload, runs it via the supplied dispatcher, and
 -- JSON-encodes the resulting response.
