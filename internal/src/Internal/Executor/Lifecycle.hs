@@ -3,7 +3,7 @@
 -- and the executor's socket name.
 module Internal.Executor.Lifecycle where
 
-import Control.Concurrent.MVar (MVar, modifyMVar)
+import Control.Concurrent.MVar (MVar, modifyMVar, readMVar)
 import Control.Monad (when)
 import Data.Char (isAlphaNum)
 import Data.Foldable (traverse_)
@@ -13,7 +13,7 @@ import Internal.Executor.Client (awaitExecutor, isRunning, stopExecutor, watchEx
 import Types.Api (Event, ExecutorId (..))
 import Types.Executor.Transport (ExecutorTransport)
 import Types.State (WorkerState (..))
-import Types.State.Executor (ExecutorHandle (..))
+import Types.State.Executor (ExecutorHandle (..), withoutCalls)
 
 -- | What the lifecycle functions need from their host: the worker state, the sink for status events, the transport
 -- for observing executors and the way to launch a new executor process for an id.
@@ -36,6 +36,23 @@ executorSocketName executorId =
 ensureExecutor :: ExecutorEnv -> ExecutorId -> IO ExecutorHandle
 ensureExecutor =
   acquireExecutor isRunning
+
+-- | Replace the executor for the given id with a fresh process, e.g. when its session can't serve a request, and
+-- wait until it serves its socket.
+--
+-- The incarnation is that of the handle the caller saw failing. If the registered executor is a newer, running one,
+-- another task has replaced it already and it is kept, since stopping it would kill that task's calls.
+-- Waits for calls in flight on the old process (see 'withoutCalls') before stopping it.
+respawnExecutor :: ExecutorEnv -> ExecutorId -> Int -> IO ExecutorHandle
+respawnExecutor env executorId failed =
+  (Map.lookup executorId . (.executors) <$> readMVar env.stateVar) >>= \case
+    Just handle -> withoutCalls handle replace
+    Nothing -> replace
+  where
+    replace = acquireExecutor replaced env executorId
+    replaced handle
+      | handle.incarnation == failed = pure False
+      | otherwise = isRunning handle
 
 -- | Return the registered executor if the predicate accepts it, otherwise stop it and register a new one.
 -- A new process is observed for status events, which are published with 'ExecutorEnv.emit'.
