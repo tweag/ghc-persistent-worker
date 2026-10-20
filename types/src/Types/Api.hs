@@ -247,6 +247,8 @@ data Event =
   CompileStart {
     target :: Target,
     debuggable :: Bool,
+    -- | Whether this task is running (or about to run) in a self-relaunched subprocess rather than in-process.
+    process :: Bool,
     requestId :: RequestId
   }
   |
