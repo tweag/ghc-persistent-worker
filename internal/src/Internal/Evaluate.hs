@@ -17,6 +17,7 @@ import GHC.Unit.Finder.Types (FindResult (..))
 import Internal.Cache.Hpt (loadHomeUnit)
 import Language.Haskell.Syntax.Module.Name (ModuleName (..))
 import System.OsPath.Extra (toOsPath)
+import Text.Read (readMaybe)
 import Types.Args (Args (..))
 import Types.Env (Env (..))
 import Types.State (WorkerState (..))
@@ -106,3 +107,12 @@ classifyMainResultType ty = do
     else if any (eqType resTy) ([intTy, integerTy, doubleTy, floatTy, charTy, boolTy] :: [Type])
       then Just ResultShowable
       else Nothing
+
+-- | Whether a completed evaluation counts as a success: always, unless the result is a @(total, failed)@ pair
+-- that is to be interpreted as such. An unparseable pair is a failure.
+resultSucceeded :: TupleMode -> Maybe MainResultKind -> Maybe String -> Bool
+resultSucceeded TupleFailureCount (Just ResultCounts) mResultStr =
+  case mResultStr >>= readMaybe @(Int, Int) of
+    Just (_total, failed) -> failed == 0
+    Nothing -> False
+resultSucceeded _ _ _ = True
