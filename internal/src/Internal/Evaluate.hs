@@ -38,6 +38,7 @@ import GHC.Utils.Outputable (text)
 import GHCi.Message (EvalResult (..), EvalStatus_ (..))
 import GHCi.RemoteTypes (ForeignHValue, HValueRef)
 import Internal.Cache.Hpt (loadHomeUnit)
+import Internal.Log (logTimed)
 import Language.Haskell.Syntax.Expr (GhciLStmt)
 import Language.Haskell.Syntax.ImpExp (ImportDecl (..), ImportDeclQualifiedStyle (..))
 import Language.Haskell.Syntax.Module.Name (ModuleName (..), mkModuleName)
@@ -256,3 +257,9 @@ withTargetModule label env mHomeUnit target use =
       liftIO (resolveTargetModule hsc_env modname pkgqual) >>= \case
         Left err -> pure (Left (label ++ ": " ++ renderModuleLookupError modname err))
         Right () -> Right <$> use hsc_env
+
+-- | Evaluate expression in the context of the target module.
+evaluateExpr :: Env -> Maybe String -> ModuleTarget -> TupleMode -> String -> Ghc (Either String (Bool, Maybe String))
+evaluateExpr env mHomeUnit target mode expr =
+  logTimed env.log "evaluateExpr is called" do
+    withTargetModule "evaluateExpr" env mHomeUnit target \ hsc_env -> runExpression mode hsc_env target expr
