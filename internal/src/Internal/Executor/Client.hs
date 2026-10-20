@@ -5,7 +5,7 @@ import Control.Exception (SomeException, throwIO, try)
 import Control.Monad (void)
 import System.Directory.OsPath (removeFile)
 import System.OsPath.Extra (OsPath, fromOsPath)
-import System.Process (CreateProcess (..), StdStream (..), createProcess, proc)
+import System.Process (CreateProcess (..), StdStream (..), createProcess, getProcessExitCode, proc)
 import Types.Settings (Settings (..))
 import Types.State.Executor (ExecutorHandle (..), newCallLock)
 
@@ -41,3 +41,7 @@ spawnExecutorWith exe extraArgs socket = do
 removeIfExists :: OsPath -> IO ()
 removeIfExists path =
   void (try @SomeException (removeFile path))
+
+isRunning :: ExecutorHandle -> IO Bool
+isRunning handle =
+  null <$> getProcessExitCode handle.process
