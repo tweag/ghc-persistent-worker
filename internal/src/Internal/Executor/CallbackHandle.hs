@@ -87,3 +87,7 @@ data Stdio =
     out :: Handle,
     err :: Handle
   }
+
+-- | Write bytes to a handle and flush it.
+writeBytes :: Handle -> ByteString -> IO ()
+writeBytes h bytes = ByteString.hPut h bytes >> hFlush h
