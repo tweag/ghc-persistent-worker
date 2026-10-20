@@ -249,8 +249,10 @@
       library = {
         enable = true;
         dependencies = [
+          "aeson"
           "buck-worker-types"
           "buck-worker-proto"
+          "bytestring"
           "containers"
           "grapesy"
           "text"
