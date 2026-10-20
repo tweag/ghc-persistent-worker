@@ -80,3 +80,10 @@ installHandle target source = do
   pure do
     hFlush target
     modifyMVar_ (handleVar target) \ _ -> pure old
+
+-- | A process's standard handles.
+data Stdio =
+  Stdio {
+    out :: Handle,
+    err :: Handle
+  }
