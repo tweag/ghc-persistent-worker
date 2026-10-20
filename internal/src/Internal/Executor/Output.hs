@@ -141,3 +141,6 @@ withOutputRouter router = withStdioCallback (route router)
 -- | Registers the current thread as a writer for a task while running an action.
 -- This is for threads that run code on behalf of a task other than the one that started it.
 newtype Attach = Attach (forall b. IO b -> IO b)
+
+withAttached :: Attach -> IO b -> IO b
+withAttached (Attach attach) = attach
