@@ -1,11 +1,12 @@
 -- | Executor logic.
 module GhcWorker.Executor.Child where
 
+import Data.IORef (IORef, readIORef)
 import Data.Text (pack)
 import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats, getRTSStatsEnabled)
 import Internal.Log (newLogger)
 import System.Mem (performMajorGC)
-import Types.Api (MemoryUsage (..))
+import Types.Api (ExecutorStatus (..), MemoryUsage (..))
 import Types.Executor.Protocol (CallResult (..), Captured (..), EvalOutcome, SetupError (..))
 import Types.Log (Logger (..), newLog)
 
@@ -57,3 +58,10 @@ setupFailure err = do
 -- | Interval between two status snapshots published by 'statusEvents', in microseconds.
 statusIntervalUs :: Int
 statusIntervalUs = 1_000_000
+
+-- | Snapshot the executor's memory usage and its number of active calls.
+currentStatus :: IORef Int -> IO ExecutorStatus
+currentStatus active = do
+  activeTasks <- readIORef active
+  memory <- memoryUsage
+  pure ExecutorStatus {memory, activeTasks}
