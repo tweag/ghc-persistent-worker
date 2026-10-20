@@ -35,7 +35,7 @@ import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..))
 import GHC.Unit.Home.PackageTable (addHomeModInfoToHpt)
 import GHC.Unit.Module.Location (ModLocation)
 import GHC.Unit.Module.ModIface (mi_module)
-import GHC.Unit.Types (toUnitId)
+import GHC.Unit.Types (moduleName, toUnitId)
 import GHC.Utils.Outputable (parens, ppr, text, (<+>))
 import Internal.Cache.Bytecode (touchBcoCache)
 import Internal.Cache.Hpt (loadCachedByteCodeFrom, reloadIfaceFromDisk)
@@ -124,6 +124,35 @@ insertIntoHpt state hmi bytecode = do
     new = hmi {hm_linkable = hmi.hm_linkable {homeMod_bytecode = Just bytecode}}
     unit = moduleUnitId (mi_module hmi.hm_iface)
     insertOne hue = addHomeModInfoToHpt new (homeUnitEnv_hpt hue)
+
+-- | Consult 'MakeState.bytecodeImport' for the given module's bytecode before reconstructing it from Core
+-- ('lazyLoadByteCode'). A hit rehydrates the entry via the closure the caller installed (e.g.
+-- 'GhcServer.Build.SharedBytecode', mirrored bytecode imported from a parent process over shared memory), inserts
+-- it into the HPT the same way 'lazyLoadByteCode' would, and removes the entry from the map -- once inserted, the
+-- module's 'HomeModLinkable.homeMod_bytecode' is no longer 'Nothing', so 'addLazyByteCode' will never look it up
+-- again. A miss falls through to 'lazyLoadByteCode' unchanged.
+loadImportedByteCode ::
+  Logger ->
+  MVar WorkerState ->
+  HscEnv ->
+  HomeModInfo ->
+  IO (Maybe Linkable)
+loadImportedByteCode logger stateVar hsc_env hmi = do
+  imported <- modifyMVar stateVar \ state ->
+    case M.lookup key state.make.bytecodeImport of
+      Nothing -> pure (state, Nothing)
+      Just rehydrate -> do
+        bytecode <- rehydrate hsc_env module_
+        state' <- insertIntoHpt state hmi bytecode
+        pure (state' {make = state'.make {bytecodeImport = M.delete key state'.make.bytecodeImport}}, Just bytecode)
+  case imported of
+    Just bytecode -> do
+      logger.debugD ("Restored imported bytecode for " <+> ppr module_)
+      pure (Just bytecode)
+    Nothing -> lazyLoadByteCode logger stateVar hsc_env hmi
+  where
+    module_ = mi_module hmi.hm_iface
+    key = (moduleUnitId module_, moduleName module_)
 
 loadDLL_ :: HscEnv -> Interp -> [FilePath] -> String -> IO ()
 loadDLL_ hsc_env interp lib_paths lib = do
