@@ -263,3 +263,24 @@ evaluateExpr :: Env -> Maybe String -> ModuleTarget -> TupleMode -> String -> Gh
 evaluateExpr env mHomeUnit target mode expr =
   logTimed env.log "evaluateExpr is called" do
     withTargetModule "evaluateExpr" env mHomeUnit target \ hsc_env -> runExpression mode hsc_env target expr
+
+-- | Interpret a module's @main@ function.
+--
+-- Meaning of the return values:
+--
+-- - @'Left' error@: Module couldn't be resolved.
+-- - @'Right' 'Nothing'@: Module doesn't export @main@.
+--   This is not an error because a target can address a whole unit, with the intent of running only a single module.
+-- - @'Right' ('Just' (success, result))@: The success and return value of the evaluation.
+--
+-- TODO use sum type for return value
+executeMain :: Env -> Maybe String -> ModuleTarget -> Ghc (Either String (Maybe (Bool, Maybe String)))
+executeMain env mHomeUnit target =
+  logTimed env.log "executeMain is called" do
+    withTargetModule "executeMain" env mHomeUnit target \ hsc_env -> do
+      let pkgqual = ThisPkg (homeUnitId (hsc_home_unit hsc_env))
+      liftIO (moduleHasMain hsc_env (moduleName target.module_) pkgqual) >>= \case
+        True ->
+          Just <$> runExpression TuplePlain hsc_env target "main"
+        False ->
+          pure Nothing
