@@ -1,6 +1,7 @@
 -- | Executor logic.
 module GhcWorker.Executor.Child where
 
+import BuckWorkerProto ()
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (withAsync)
 import Control.Concurrent.Chan (readChan, writeChan)
@@ -17,7 +18,9 @@ import Internal.Executor.Output (Attach, OutputRouter, scopedTask, withSubscript
 import Internal.Log (newLogger)
 import Network.GRPC.Common (NextElem (..))
 import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
-import Proto.Executor (Empty, Encoded)
+import Network.GRPC.Server.Protobuf (ProtobufMethodsOf)
+import Network.GRPC.Server.StreamType (Methods, mkNonStreaming, mkServerStreaming, simpleMethods)
+import Proto.Executor (Empty, Encoded, Executor)
 import qualified Proto.Executor_Fields as Fields
 import qualified System.IO as IO
 import System.Mem (performMajorGC)
@@ -135,3 +138,13 @@ awaitStdinEof =
   whileM do
     void $ IO.hGetLine IO.stdin
     not <$> IO.hIsEOF IO.stdin
+
+executorMethods ::
+  OutputRouter ->
+  IORef Int ->
+  (Attach -> ExecutorCall -> IO CallResult) ->
+  Methods IO (ProtobufMethodsOf Executor)
+executorMethods router active handler =
+  simpleMethods
+  (mkServerStreaming (statusEvents router active))
+  (mkNonStreaming (executeCall router active handler))
