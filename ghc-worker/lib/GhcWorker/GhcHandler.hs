@@ -96,7 +96,7 @@ dispatch hooks env args =
           env.log.setTarget (TargetModuleInterp target)
         else
           env.log.setTarget (TargetModule target)
-        withGhcMakeModule args.interp target env (withTarget compileHpt)
+        withGhcMakeModule args.interp target env Nothing (withTarget compileHpt)
       Nothing ->
         withGhcMakeSource env (withTarget compileHpt . TargetSource)
 
