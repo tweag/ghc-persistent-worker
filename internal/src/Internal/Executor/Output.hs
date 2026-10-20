@@ -14,7 +14,7 @@
 -- TODO refactor, reword, make optional. maybe not necessary to include in the initial set of changes
 module Internal.Executor.Output where
 
-import Control.Concurrent (ThreadId)
+import Control.Concurrent (ThreadId, myThreadId)
 import Control.Concurrent.Chan (Chan, newChan, writeChan)
 import Control.Exception (bracket_)
 import Data.ByteString (ByteString)
@@ -119,3 +119,9 @@ decode = Text.decodeUtf8With lenientDecode
 publishLines :: OutputRouter -> Owner -> OutputStream -> [ByteString] -> IO ()
 publishLines router owner stream =
   traverse_ \ bytes -> publish router (OutputEvent OutputLine {task = owner.task, stream, line = decode bytes})
+
+-- | The owner of the current thread's output.
+currentOwner :: OutputRouter -> IO Owner
+currentOwner router = do
+  thread <- myThreadId
+  Map.findWithDefault router.unattributed thread <$> readIORef router.threads
