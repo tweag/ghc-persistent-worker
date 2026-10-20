@@ -12,17 +12,18 @@
 module GhcWorker.Executor.Child where
 
 import BuckWorkerProto ()
+import Common.Grpc (runGrpcServer)
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (withAsync)
+import Control.Concurrent.Async (race_, withAsync)
 import Control.Concurrent.Chan (readChan, writeChan)
 import Control.Exception (bracket_)
 import Control.Monad (forever)
 import qualified Data.Aeson as Aeson
 import Data.ByteString (toStrict)
-import Data.IORef (IORef, atomicModifyIORef', readIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.Text (pack)
 import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats, getRTSStatsEnabled)
-import Internal.Executor.Output (Attach, OutputRouter, scopedTask, withSubscription)
+import Internal.Executor.Output (Attach, OutputRouter, newOutputRouter, scopedTask, withOutputRouter, withSubscription)
 import Internal.Log (newLogger)
 import Network.GRPC.Common (NextElem (..))
 import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
@@ -32,6 +33,7 @@ import Proto.Executor (Empty, Encoded, Executor)
 import qualified Proto.Executor_Fields as Fields
 import qualified System.IO as IO
 import System.Mem (performMajorGC)
+import System.OsPath.Extra (OsPath)
 import Types.Api (ExecutorStatus (..), ProcessStats (..))
 import Types.Log (Logger (..), newLog)
 import Types.Executor.Protocol (
@@ -129,6 +131,22 @@ awaitStdinEof =
   IO.hIsEOF IO.stdin >>= \case
     True -> pure ()
     False -> IO.hGetLine IO.stdin >> awaitStdinEof
+
+-- | Serve the @Executor@ service on the given socket with a handler for the calls of @Execute@, until stdin closes.
+--
+-- If capturing is enabled, the process-global stdout and stderr are replaced for that time, to attribute their output
+-- to the calls by thread (see 'Internal.Executor.Output'). Otherwise the calls' output goes to the process' stdio and
+-- their 'Captured' is empty.
+serveExecutor :: Bool -> OsPath -> (Attach -> ExecutorCall -> IO CallResult) -> IO ()
+serveExecutor capture socket handler = do
+  active <- newIORef 0
+  router <- newOutputRouter
+  installRouter router $
+    race_ awaitStdinEof (runGrpcServer socket (executorMethods router active handler))
+  where
+    installRouter router
+      | capture = withOutputRouter router
+      | otherwise = id
 
 -- | The generated method list is alphabetical: @events@, @execute@.
 executorMethods ::
