@@ -67,3 +67,14 @@ resolveTargetModule hsc_env modname pkgqual =
     NoPackage _ -> Left ModulePackageNotFound
     FoundMultiple _ -> Left ModuleAmbiguous
     NotFound {} -> Left ModuleNotFound
+
+-- | How an execution result of @IO (Int, Int)@ is interpreted, to accomodate the approach used in the Buck rules.
+--
+-- TODO do we actually need this? Ask Ian.
+data TupleMode =
+  -- | The pair is @(total, failed)@, and the evaluation fails if @failed /= 0@.
+  TupleFailureCount
+  |
+  -- | No special treatment.
+  TuplePlain
+  deriving stock (Eq, Show)
