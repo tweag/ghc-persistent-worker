@@ -6,6 +6,7 @@
 module Internal.Executor.CallbackHandle where
 
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, readMVar)
+import Control.Exception (bracket)
 import qualified Data.ByteString as ByteString
 import Data.ByteString (ByteString)
 import Data.Word (Word8)
@@ -14,9 +15,11 @@ import GHC.IO.Buffer (newByteBuffer)
 import GHC.IO.BufferedIO (BufferedIO (..), readBuf, readBufNonBlocking, writeBuf, writeBufNonBlocking)
 import GHC.IO.Device (IODevice (..), IODeviceType (Stream), RawIO (..))
 import GHC.IO.Encoding (getLocaleEncoding)
+import GHC.IO.Handle (hDuplicate)
 import GHC.IO.Handle.Internals (mkFileHandle)
 import GHC.IO.Handle.Types (Handle (..), Handle__, Newline (..), NewlineMode (..))
-import System.IO (BufferMode (..), IOMode (..), hFlush, hSetBuffering)
+import System.IO (BufferMode (..), IOMode (..), hFlush, hSetBuffering, stderr, stdout)
+import Types.Api (OutputStream (..))
 
 -- | A device whose reads and writes are delegated to callbacks.
 data CallbackDevice =
@@ -88,6 +91,22 @@ data Stdio =
     out :: Handle,
     err :: Handle
   }
+
+-- | Run an action with @stdout@ and @stderr@ redirected to a callback.
+--
+-- The callback is called in the writing thread and receives the original handles, which it can use for output from
+-- threads that are not accounted for.
+withStdioCallback :: (Stdio -> OutputStream -> ByteString -> IO ()) -> IO a -> IO a
+withStdioCallback sink action = do
+  original <- Stdio <$> hDuplicate stdout <*> hDuplicate stderr
+  outSink <- sinkHandle (sink original Stdout)
+  errSink <- sinkHandle (sink original Stderr)
+  bracket (install outSink errSink) id (const action)
+  where
+    install outSink errSink = do
+      restoreOut <- installHandle stdout outSink
+      restoreErr <- installHandle stderr errSink
+      pure (restoreErr >> restoreOut)
 
 -- | Write bytes to a handle and flush it.
 writeBytes :: Handle -> ByteString -> IO ()
