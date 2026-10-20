@@ -5,9 +5,10 @@
 -- Used by the @ghc-server@ ('GhcServer.Build.Executor') and by the worker's eval mode ('GhcWorker.Eval.Executor').
 module Internal.Executor.Client where
 
+import Control.Concurrent (threadDelay)
 import Control.Exception (SomeException, throwIO, try)
 import Control.Monad (void)
-import System.Directory.OsPath (removeFile)
+import System.Directory.OsPath (doesFileExist, removeFile)
 import System.OsPath.Extra (OsPath, fromOsPath)
 import System.Process (CreateProcess (..), StdStream (..), createProcess, getProcessExitCode, proc)
 import Types.Settings (Settings (..))
@@ -47,3 +48,17 @@ removeIfExists path =
 isRunning :: ExecutorHandle -> IO Bool
 isRunning handle =
   null <$> getProcessExitCode handle.process
+
+-- | Poll until the executor has bound its socket, failing if it exits beforehand or takes longer than 10 seconds.
+awaitExecutor :: ExecutorHandle -> IO ()
+awaitExecutor handle =
+  check (100 :: Int)
+  where
+    check 0 = throwIO (userError "Executor did not open its socket within 10 seconds")
+    check n =
+      isRunning handle >>= \case
+        False -> throwIO (userError "Executor exited during startup")
+        True ->
+          doesFileExist handle.socket >>= \case
+            True -> pure ()
+            False -> threadDelay 100_000 >> check (n - 1)
