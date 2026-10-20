@@ -8,7 +8,7 @@ import GhcWorker.Grpc (mkStats)
 import GhcWorker.LogEvents (instrumentLoggerWith)
 import Internal.Log (dbg)
 import Prelude hiding (log)
-import Types.Api (Event (..), Events (..), MemoryUsage, RequestId, eventsForRequest, eventsNoop)
+import Types.Api (Event (..), Events (..), MemoryUsage, RequestId, Target, eventsForRequest, eventsNoop)
 import Types.Log (Logger)
 import Types.State (WorkerState)
 
@@ -65,6 +65,25 @@ failedEval err =
 publishEvent :: Hooks -> Event -> IO ()
 publishEvent hooks event =
   hooks.events.publish \ (_ :: RequestId) -> event
+
+-- | Run an evaluation, publishing 'CompileStart' and 'CompileEnd' before and after.
+--
+-- TODO finally?
+reportEval :: Hooks -> Target -> Bool -> IO EvalReport -> IO EvalReport
+reportEval hooks target process run = do
+  hooks.events.publish \ requestId -> CompileStart {target, debuggable = False, process, requestId}
+  report <- run
+  hooks.events.publish \ requestId ->
+    CompileEnd {
+      target,
+      exitCode = either (const 1) (\ ok -> if ok then 0 else 1) report.outcome,
+      stderr = either id (const "") report.outcome,
+      result = report.result,
+      maxMemory = report.maxMemory,
+      noMain = False,
+      requestId
+    }
+  pure report
 
 -- | A request handler that is aware of instrumentation.
 newtype InstrumentedHandler =
