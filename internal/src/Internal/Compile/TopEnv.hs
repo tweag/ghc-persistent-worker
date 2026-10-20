@@ -5,8 +5,9 @@
 module Internal.Compile.TopEnv where
 
 import Control.Monad.IO.Class (liftIO)
-import Data.IORef (IORef, writeIORef)
-import GHC.Driver.Plugins (Plugin (typeCheckResultAction), defaultPlugin)
+import Data.IORef (IORef, newIORef, writeIORef)
+import GHC.Driver.Env (HscEnv (..))
+import GHC.Driver.Plugins (Plugin (..), PluginWithArgs (..), Plugins (..), StaticPlugin (..), defaultPlugin)
 import GHC.Tc.Types (ImportUserSpec, TcGblEnv (..))
 import GHC.Types.Name.Reader (GlobalRdrEnv)
 
@@ -30,3 +31,15 @@ captureTopEnvPlugin ref =
       liftIO $ writeIORef ref (Just CapturedTopEnv {rdrEnv = tcg_rdr_env, importDecls = tcg_import_decls})
       pure tc_gbl
   }
+
+-- | Add the @TopEnv@ plugin to the session's static plugins and return an 'IORef' that exfiltrates the env.
+--
+-- TODO Move to @internal@
+withCaptureTopEnv :: HscEnv -> IO (HscEnv, IORef (Maybe CapturedTopEnv))
+withCaptureTopEnv hsc_env = do
+  ref <- newIORef Nothing
+  pure (hsc_env {hsc_plugins = plugins {staticPlugins = plugin ref : staticPlugins plugins}}, ref)
+  where
+    plugins = hsc_env.hsc_plugins
+
+    plugin ref = StaticPlugin (PluginWithArgs (captureTopEnvPlugin ref) [])
