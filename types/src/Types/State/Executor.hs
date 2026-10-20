@@ -1,6 +1,6 @@
 module Types.State.Executor where
 
-import Control.Concurrent.QSemN (QSemN)
+import Control.Concurrent.QSemN (QSemN, newQSemN)
 import System.IO (Handle)
 import System.OsPath (OsPath)
 import System.Process (ProcessHandle)
@@ -11,6 +11,9 @@ import Types.Api (MemoryUsage)
 -- TODO unclear, reword later
 maxConcurrentCalls :: Int
 maxConcurrentCalls = 64
+
+newCallLock :: IO QSemN
+newCallLock = newQSemN maxConcurrentCalls
 
 -- | Resources and state for an executor process.
 --
