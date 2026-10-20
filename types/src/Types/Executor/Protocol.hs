@@ -8,6 +8,16 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 import Types.Api (ExecutorStatus, OutputStream, RequestId)
 
+-- | The payload of the executor's @Execute@ RPC: a call, and the task on whose behalf it runs, to which the child
+-- attributes the output written during the call.
+data ExecutorRequest =
+  ExecutorRequest {
+    requestId :: RequestId,
+    call :: ExecutorCall
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
 -- | A line the executor's process wrote to stdout or stderr, with the task it was attributed to, if any.
 data OutputLine =
   OutputLine {
