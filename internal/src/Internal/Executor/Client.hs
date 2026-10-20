@@ -5,9 +5,11 @@
 -- Used by the @ghc-server@ ('GhcServer.Build.Executor') and by the worker's eval mode ('GhcWorker.Eval.Executor').
 module Internal.Executor.Client where
 
-import Control.Concurrent (threadDelay)
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.MVar (MVar, readMVar)
 import Control.Exception (SomeException, throwIO, try)
-import Control.Monad (void)
+import Control.Monad (unless, void, when)
+import qualified Data.Map.Strict as Map
 import System.Directory.OsPath (doesFileExist, removeFile)
 import System.IO (hClose)
 import System.OsPath.Extra (OsPath, fromOsPath)
@@ -15,12 +17,17 @@ import System.Process (
   CreateProcess (..),
   StdStream (..),
   createProcess,
+  getPid,
   getProcessExitCode,
   proc,
   terminateProcess,
   waitForProcess,
   )
+import Types.Api (Event (..), ExecutorId)
+import Types.Executor.Protocol (ExecutorEvent (..), OutputLine (..))
+import Types.Executor.Transport (ExecutorTransport (..))
 import Types.Settings (Settings (..))
+import Types.State (WorkerState (..))
 import Types.State.Executor (ExecutorHandle (..), newCallLock)
 
 -- | Wrap RTS options in @+RTS ... -RTS@, or nothing if there are none.
@@ -80,3 +87,36 @@ stopExecutor handle = do
   terminateProcess handle.process
   void (waitForProcess handle.process)
   removeIfExists handle.socket
+
+-- | Forward the status snapshots and the output an executor publishes via the transport as 'ExecutorUpdate' and
+-- 'ExecutorOutput' events, and publish
+-- 'ExecutorGone' when the stream ends, unless a newer process has been registered for the id in the meantime.
+--
+-- The watcher is never cancelled: stopping the process ends the stream, which ends the watcher.
+-- (Cancelling a thread blocked in a gRPC read would block until the connection drops.)
+watchExecutor :: ExecutorTransport -> (Event -> IO ()) -> MVar WorkerState -> ExecutorId -> ExecutorHandle -> IO ()
+watchExecutor transport emit stateVar executorId handle =
+  void $ forkIO do
+    pid <- fmap fromIntegral <$> getPid handle.process
+    subscribe pid (20 :: Int)
+    announceGone
+  where
+    -- The socket file exists slightly before the child accepts connections, so connecting is retried.
+    subscribe pid retries =
+      try @SomeException (streamStatus pid) >>= \case
+        Left _ | retries > 0 -> do
+          running <- isRunning handle
+          when running (threadDelay 100_000 >> subscribe pid (retries - 1))
+        _ -> pure ()
+
+    streamStatus pid =
+      transport.subscribe handle.socket (publish pid)
+
+    publish pid = \case
+      StatusEvent status -> emit ExecutorUpdate {executor = executorId, pid, status}
+      OutputEvent OutputLine {task, stream, line} -> emit ExecutorOutput {executor = executorId, task, stream, line}
+
+    announceGone = do
+      current <- Map.lookup executorId . (.executors) <$> readMVar stateVar
+      unless (any (\ newer -> newer.incarnation > handle.incarnation) current) $
+        emit ExecutorGone {executor = executorId}
