@@ -4,8 +4,12 @@ import Control.Concurrent (withMVar)
 import Control.Monad.IO.Class (liftIO)
 import Data.Functor ((<&>))
 import GHC (Ghc, getSession, getSessionDynFlags, moduleNameString, setInteractiveDynFlags, setSession)
+import GHC.Builtin.Types (boolTy, charTy, doubleTy, floatTy, intTy, integerTy, mkBoxedTupleTy, stringTy)
+import GHC.Core.TyCo.Compare (eqType)
+import GHC.Core.Type (Type)
 import GHC.Driver.Env (hscSetActiveUnitId)
 import GHC.Driver.Env.Types (HscEnv, hsc_mod_graph)
+import GHC.Tc.Utils.TcType (tcSplitIOType_maybe)
 import GHC.Types.PkgQual (PkgQual)
 import GHC.Unit (moduleUnitId)
 import GHC.Unit.Finder (findImportedModule)
@@ -98,3 +102,17 @@ data MainResultKind =
   -- 'TupleFailureCount'.
   ResultCounts
   deriving stock (Eq, Show)
+
+-- | Inspect the result type of the main function for an evaluation task.
+--
+-- If it has the type @IO a@, try to classify it as one of the variants of 'MainResultKind'.
+classifyMainResultType :: Type -> Maybe MainResultKind
+classifyMainResultType ty = do
+  (_ioTyCon, resTy) <- tcSplitIOType_maybe ty
+  if eqType resTy stringTy
+    then Just ResultString
+    else if eqType resTy (mkBoxedTupleTy [intTy, intTy])
+      then Just ResultCounts
+    else if any (eqType resTy) ([intTy, integerTy, doubleTy, floatTy, charTy, boolTy] :: [Type])
+      then Just ResultShowable
+      else Nothing
