@@ -3,9 +3,17 @@
 -- execute-task children.
 module Types.Executor.Protocol where
 
-import Data.Aeson (FromJSON, ToJSON)
+import Data.Aeson (FromJSON, ToJSON, Value)
 import Data.Text (Text)
 import GHC.Generics (Generic)
+
+-- | The payload of the executor's @Execute@ RPC.
+data ExecutorCall =
+  -- | Restore a unit from the cache and run a module like a one-shot child.
+  -- The payload is opaque to the generic executor code and decoded by the host that handles module calls.
+  CallModule Value
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | The result of running the entry, once the child was set up to do so.
 data EvalOutcome =
