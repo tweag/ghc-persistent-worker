@@ -40,6 +40,8 @@ data Mode =
   |
   ModeMetadata
   |
+  ModeEval
+  |
   ModeUnknown String
   deriving stock (Eq, Show)
 
