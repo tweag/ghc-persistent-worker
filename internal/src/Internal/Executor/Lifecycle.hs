@@ -9,7 +9,7 @@ import Data.Char (isAlphaNum)
 import Data.Foldable (traverse_)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as Text
-import Internal.Executor.Client (awaitExecutor, stopExecutor, watchExecutor)
+import Internal.Executor.Client (awaitExecutor, isRunning, stopExecutor, watchExecutor)
 import Types.Api (Event, ExecutorId (..))
 import Types.Executor.Transport (ExecutorTransport)
 import Types.State (WorkerState (..))
@@ -30,6 +30,12 @@ data ExecutorEnv =
 executorSocketName :: ExecutorId -> String
 executorSocketName executorId =
   "executor-" ++ [if isAlphaNum c || c == '-' then c else '_' | c <- Text.unpack executorId.text] ++ ".sock"
+
+-- | Return the running executor for the given id, spawning (or respawning, if it died) one if necessary, and wait
+-- until it serves its socket.
+ensureExecutor :: ExecutorEnv -> ExecutorId -> IO ExecutorHandle
+ensureExecutor =
+  acquireExecutor isRunning
 
 -- | Return the registered executor if the predicate accepts it, otherwise stop it and register a new one.
 -- A new process is observed for status events, which are published with 'ExecutorEnv.emit'.
