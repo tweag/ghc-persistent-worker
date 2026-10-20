@@ -78,3 +78,23 @@ data TupleMode =
   -- | No special treatment.
   TuplePlain
   deriving stock (Eq, Show)
+
+-- | Classifies a module's @main@ result type.
+-- For 'IO a', where @a@ is a stringly or numeric type, the result is propagated to the events stream, for clients to
+-- display or process.
+--
+-- TODO check that these are true. Also move the documentation of the result action to where it happens
+data MainResultKind =
+  -- | @main :: IO String@
+  -- Printed directly with 'putStr'.
+  ResultString
+  |
+  -- | @main :: IO a@ for another stringly/numeric @a@
+  -- Printed with 'print' (using 'Show').
+  ResultShowable
+  |
+  -- | @IO (Int, Int)@
+  -- Shown like 'ResultShowable', and additionally interpreted as @(total, failed)@ if the caller asks for it with
+  -- 'TupleFailureCount'.
+  ResultCounts
+  deriving stock (Eq, Show)
