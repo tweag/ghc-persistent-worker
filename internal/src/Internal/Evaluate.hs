@@ -6,7 +6,10 @@ import Control.Monad.IO.Class (liftIO)
 import GHC (Ghc, getSession, getSessionDynFlags, moduleNameString, setInteractiveDynFlags, setSession)
 import GHC.Driver.Env (hscSetActiveUnitId)
 import GHC.Driver.Env.Types (HscEnv, hsc_mod_graph)
+import GHC.Types.PkgQual (PkgQual)
 import GHC.Unit (moduleUnitId)
+import GHC.Unit.Finder qualified as Finder
+import GHC.Unit.Finder.Types (FindResult (..))
 import Internal.Cache.Hpt (loadHomeUnit)
 import Language.Haskell.Syntax.Module.Name (ModuleName (..))
 import System.OsPath.Extra (toOsPath)
@@ -48,3 +51,15 @@ renderModuleLookupError modname = \case
   ModuleNotFound -> "module not found: " ++ moduleNameString modname
   ModulePackageNotFound -> "package not found for module " ++ moduleNameString modname
   ModuleAmbiguous -> "multiple candidate modules found for " ++ moduleNameString modname
+
+-- | Confirm that a target module can actually be located by GHC's finder within the given package qualifier.
+-- Callers only need the yes/no answer (they already have the 'ModuleName' they're resolving), so the located
+-- 'GHC.Unit.Finder.Types.FindResult' payload is discarded.
+resolveTargetModule :: HscEnv -> ModuleName -> PkgQual -> IO (Either ModuleLookupError ())
+resolveTargetModule hsc_env modname pkgqual = do
+  result <- Finder.findImportedModule hsc_env modname pkgqual
+  pure case result of
+    Found _ _ -> Right ()
+    NoPackage _ -> Left ModulePackageNotFound
+    FoundMultiple _ -> Left ModuleAmbiguous
+    NotFound {} -> Left ModuleNotFound
