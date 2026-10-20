@@ -40,6 +40,9 @@ data Mode =
   |
   ModeMetadata
   |
+  -- | Evaluate an expression in the context of a module as bytecode.
+  ModeEval
+  |
   ModeUnknown String
   deriving stock (Eq, Show)
 
