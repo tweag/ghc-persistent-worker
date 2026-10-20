@@ -80,6 +80,7 @@ library
     containers,
     deepseq,
     directory,
+    extra,
     file-io,
     ghc,
     grapesy >=1.0.1,

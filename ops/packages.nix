@@ -30,6 +30,7 @@
           "containers"
           "deepseq"
           "directory"
+          "extra"
           "file-io"
           "ghc"
           "ghc-debug-stub"

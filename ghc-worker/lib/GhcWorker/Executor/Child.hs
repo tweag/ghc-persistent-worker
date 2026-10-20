@@ -6,8 +6,10 @@ import Control.Concurrent.Async (withAsync)
 import Control.Concurrent.Chan (readChan, writeChan)
 import Control.Exception (bracket_)
 import Control.Monad (forever)
+import Control.Monad.Extra (whileM)
 import qualified Data.Aeson as Aeson
 import Data.ByteString (toStrict)
+import Data.Functor (void)
 import Data.IORef (IORef, atomicModifyIORef', readIORef)
 import Data.Text (pack)
 import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats, getRTSStatsEnabled)
@@ -17,6 +19,7 @@ import Network.GRPC.Common (NextElem (..))
 import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
 import Proto.Executor (Empty, Encoded)
 import qualified Proto.Executor_Fields as Fields
+import qualified System.IO as IO
 import System.Mem (performMajorGC)
 import Types.Api (ExecutorStatus (..), MemoryUsage (..))
 import Types.Executor.Protocol (
@@ -125,3 +128,10 @@ executeCall router active handler request = do
       pure result {captured}
 
     bump n = atomicModifyIORef' active \ count -> (count + n, ())
+
+-- | Block until stdin is closed.
+awaitStdinEof :: IO ()
+awaitStdinEof =
+  whileM do
+    void $ IO.hGetLine IO.stdin
+    not <$> IO.hIsEOF IO.stdin
