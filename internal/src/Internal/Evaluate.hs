@@ -2,10 +2,14 @@ module Internal.Evaluate where
 
 import Control.Concurrent (withMVar)
 import Control.Monad.IO.Class (liftIO)
+import Data.Functor ((<&>))
 import GHC (Ghc, getSession, getSessionDynFlags, moduleNameString, setInteractiveDynFlags, setSession)
 import GHC.Driver.Env (hscSetActiveUnitId)
 import GHC.Driver.Env.Types (HscEnv, hsc_mod_graph)
+import GHC.Types.PkgQual (PkgQual)
 import GHC.Unit (moduleUnitId)
+import GHC.Unit.Finder (findImportedModule)
+import GHC.Unit.Finder.Types (FindResult (..))
 import Internal.Cache.Hpt (loadHomeUnit)
 import Language.Haskell.Syntax.Module.Name (ModuleName (..))
 import System.OsPath.Extra (toOsPath)
@@ -52,3 +56,14 @@ renderModuleLookupError modName err =
       ModuleNotFound -> "Module not found: "
       ModulePackageNotFound -> "Package not found for module "
       ModuleAmbiguous -> "Multiple candidate modules found for "
+
+-- | Verify that a module is present in the finder for the given pachage qualifier.
+--
+-- TODO Maybe, rename when clarified
+resolveTargetModule :: HscEnv -> ModuleName -> PkgQual -> IO (Either ModuleLookupError ())
+resolveTargetModule hsc_env modname pkgqual =
+  findImportedModule hsc_env modname pkgqual <&> \case
+    Found _ _ -> Right ()
+    NoPackage _ -> Left ModulePackageNotFound
+    FoundMultiple _ -> Left ModuleAmbiguous
+    NotFound {} -> Left ModuleNotFound
