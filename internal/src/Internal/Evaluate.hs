@@ -38,6 +38,7 @@ import GHC.Utils.Outputable (text)
 import GHCi.Message (EvalResult (..), EvalStatus_ (..))
 import GHCi.RemoteTypes (ForeignHValue, HValueRef)
 import Internal.Cache.Hpt (loadHomeUnit)
+import Internal.Log (logTimed)
 import Language.Haskell.Syntax.Expr (GhciLStmt)
 import Language.Haskell.Syntax.ImpExp (ImportDecl (ideclQualified), ImportDeclQualifiedStyle (QualifiedPre))
 import Language.Haskell.Syntax.Module.Name (ModuleName (..), mkModuleName)
@@ -115,6 +116,13 @@ withTargetModule label env mHomeUnit target use =
       liftIO (resolveTargetModule hsc_env modname pkgqual) >>= \case
         Left err -> pure (Left (label ++ ": " ++ renderModuleLookupError modname err))
         Right () -> Right <$> use hsc_env
+
+-- | Evaluate an arbitrary @IO a@ expression in the context of the target module (the worker's @--expr@ mode).
+-- The result is handled exactly like @main@'s in 'executeMain', see 'runExpression'.
+evaluateExpr :: Env -> Maybe String -> ModuleTarget -> TupleMode -> String -> Ghc (Either String (Bool, Maybe String))
+evaluateExpr env mHomeUnit target mode expr =
+  logTimed env.log "evaluateExpr is called" do
+    withTargetModule "evaluateExpr" env mHomeUnit target \ hsc_env -> runExpression mode hsc_env target expr
 
 -- | Classifies a module's @main@ result type for return-value propagation. 'IO a' where @a@ is a stringly or
 -- numeric type has its value surfaced (via 'ResultString'/'ResultShowable', see 'executeMain'); any other result
