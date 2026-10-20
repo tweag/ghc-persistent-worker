@@ -188,6 +188,7 @@
           "ghc"
           "ghc-boot"
           "hashable"
+          "process"
           "text"
           "time"
           "transformers"
