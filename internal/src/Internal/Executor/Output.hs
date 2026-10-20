@@ -32,7 +32,7 @@ import Data.Text.Encoding.Error (lenientDecode)
 import Internal.Executor.CallbackHandle (Stdio (..), withStdioCallback, writeBytes)
 import qualified System.IO as IO
 import Types.Api (OutputStream (..), RequestId)
-import Types.Executor.Protocol (ExecutorEvent (..), OutputLine (..))
+import Types.Executor.Protocol (Captured (..), ExecutorEvent (..), OutputLine (..))
 
 -- | The buffers for one stream of one owner.
 data Lane =
@@ -163,3 +163,17 @@ flushPartial router owner stream = do
 collectedText :: Lane -> IO Text
 collectedText lane =
   maybe "" (decode . ByteString.concat . reverse) <$> traverse readIORef lane.collected
+
+-- | Run the body for a task, with the current thread registered as its writer.
+-- The body receives an 'Attach' for threads it hands work to.
+-- Returns what the task wrote.
+scopedTask :: OutputRouter -> RequestId -> (Attach -> IO a) -> IO (Captured, a)
+scopedTask router requestId body = do
+  owner <- newOwner (Just requestId)
+  let attach = attachTo router owner
+  result <- withAttached attach (body attach)
+  flushPartial router owner Stdout
+  flushPartial router owner Stderr
+  stdout <- collectedText owner.out
+  stderr <- collectedText owner.err
+  pure (Captured {stdout, stderr}, result)
