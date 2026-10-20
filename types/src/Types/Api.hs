@@ -183,6 +183,9 @@ data ApiRequest a where
   Clean :: { target :: Target } -> ApiRequest ()
   -- | Toggle a single 'Feature', sent by the @ghc-ui@ feature-flags panel when a checkbox is toggled.
   ToggleFeature :: { feature :: Feature } -> ApiRequest ()
+  -- | Terminate a persistent executor subprocess (see 'GhcServer.Build.Executor.terminateExecutor'), sent by the
+  -- @ghc-ui@ executors panel. A no-op (successful) if no executor with the given id is currently running.
+  TerminateExecutor :: { executor :: ExecutorId } -> ApiRequest ()
 
 deriving stock instance Eq (ApiRequest a)
 deriving stock instance Show (ApiRequest a)
@@ -200,6 +203,8 @@ instance ToJSON SomeApiRequest where
       tagged "Clean" ["target" .= toJSON target]
     ToggleFeature {feature} ->
       tagged "ToggleFeatureFlag" ["feature" .= toJSON feature]
+    TerminateExecutor {executor} ->
+      tagged "TerminateExecutor" ["executor" .= toJSON executor]
     where
       tagged (tag :: Text) fields = object $ ("tag" .= tag) : fields
 
@@ -219,6 +224,9 @@ instance FromJSON SomeApiRequest where
         "ToggleFeatureFlag" -> do
           feature <- o .: "feature"
           pure (SomeApiRequest ToggleFeature {feature})
+        "TerminateExecutor" -> do
+          executor <- o .: "executor"
+          pure (SomeApiRequest TerminateExecutor {executor})
         tag ->
           fail (unpack ("Invalid tag: " <> tag))
 
