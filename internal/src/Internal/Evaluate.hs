@@ -155,6 +155,38 @@ classifyMainResultType ty = do
       then Just ResultShowable
       else Nothing
 
+-- | Execute a module's exported @main@ binding via GHC's statement-evaluation machinery, mirroring the worker's
+-- @--expr@ mode (see 'GhcWorker.GhcHandler.dispatch'\'s @ModeEval@ branch). Unlike 'evaluate' (which unsafely
+-- coerces its statement's bound value to a fixed test-harness type, @(Int, Int)@), this coerces to 'String' --
+-- see 'classifyMainResultType' for how the statement text is chosen so that the bound value's runtime
+-- representation actually is a 'String' whenever a result is exfiltrated at all.
+--
+-- Distinguishes two categories of non-execution, which used to be conflated in a single 'Nothing' result
+-- (see the mitigation for the "silent failure" gap documented in @kb-instrument-ui@'s execute-feature section):
+--
+-- * 'Left' reason -- a genuine setup failure: the module's home unit could not be resolved, or
+--   'GHC.Unit.Finder.findImportedModule' could not locate the target module at all. These are real,
+--   actionable problems that the caller ('GhcServer.Build.Execute.executeModuleTask') should surface as a
+--   failed task, not a silent skip.
+-- * 'Right' 'Nothing' -- the module was found but does not export a binding named @main@. This remains a
+--   deliberate, silent skip (not an error): plenty of modules in a project have no @main@, and that is not a
+--   failure worth reporting.
+-- * 'Right' ('Just' (success, mResult)) -- @main@ was actually invoked; @success@ reports whether the
+--   statement evaluation completed, and @mResult@ carries the exfiltrated result value when @main@'s result
+--   type was recognized by 'classifyMainResultType' (via @main@ directly for 'ResultString', or via
+--   @fmap show main@ for 'ResultShowable' -- letting GHC's own typechecker perform the 'Show' dispatch rather
+--   than reflecting on the runtime value ourselves).
+executeMain :: Env -> Maybe String -> ModuleTarget -> Ghc (Either String (Maybe (Bool, Maybe String)))
+executeMain env mHomeUnit target =
+  logTimed env.log "executeMain is called" do
+    withTargetModule "executeMain" env mHomeUnit target \ hsc_env -> do
+      let modname = moduleName target.module_
+          pkgqual = ThisPkg (homeUnitId (hsc_home_unit hsc_env))
+      hasMain <- liftIO (moduleHasMain hsc_env modname pkgqual)
+      if hasMain
+        then Just <$> runExpression TuplePlain hsc_env target "main"
+        else pure Nothing
+
 -- | The statement that runs an expression and binds its result to @execResult@, for 'runExpression'.
 -- It is a bind statement ('execResult <- ...'), not a bare expression statement: GHC's interactive
 -- statement typechecker ('GHC.Tc.Module.tcUserStmt') unconditionally attempts to print the result
