@@ -2,6 +2,7 @@
 
 module Internal.Compile.Make where
 
+import Data.IORef (readIORef)
 import qualified GHC
 import GHC (
   DynFlags (..),
@@ -33,8 +34,8 @@ import GHC.Utils.Panic (throwGhcExceptionIO)
 import GHC.Utils.TmpFs (TmpFs, cleanCurrentModuleTempFiles, keepCurrentModuleTempFiles)
 import Internal.Compat.GHC914 (hscModuleGraph)
 import Internal.Compile.Phase (withPhaseEvents, withTaskEvents)
+import Internal.Compile.TopEnv (patchTopEnv, withCaptureTopEnv)
 import Internal.Debug (pprModuleFull)
-import Internal.DynFlags (mkTargetAsInterpreted)
 import Internal.Error (eitherMessages, noteGhc)
 import Internal.Log (logTimedD)
 import System.OsPath.Extra (fromOsPath)
@@ -139,15 +140,28 @@ compileModuleWithDepsInHpt logger events target =
     hsc_env <- getSession
     hmi <- liftIO $ withTaskEvents logger events target do
       summary <- ensureSummary logger hsc_env target
-      let hsc_env'
-            | TargetModuleInterp _ <- target = mkTargetAsInterpreted (ms_mod summary) hsc_env
-            | otherwise = hsc_env
+      (hsc_env', captured) <- prepareCapture hsc_env
       result <- compileOne (withPhaseEvents events target hsc_env') (forceRecomp summary) 1 100000 Nothing (HomeModLinkable Nothing Nothing)
       cleanCurrentModuleTempFilesMaybe (hsc_logger hsc_env') (hsc_tmpfs hsc_env') summary.ms_hspp_opts
-      pure result
+      applyCapture captured result
     liftIO $ hscInsertHPT hmi hsc_env
     pure (Just hmi.hm_iface)
   where
     -- This bypasses another recompilation check in 'compileOne'
     forceRecomp summary =
       summary {ms_hspp_opts = gopt_set summary.ms_hspp_opts Opt_ForceRecomp}
+
+    -- For 'TargetModuleInterp', install a static plugin that captures the module's real top-level environment during
+    -- typechecking, so it can be used to patch @mi_top_env@ on the resulting interface after compilation.
+    --
+    -- TODO Move these two to top level, probably in the @TopEnv@ module
+    prepareCapture hsc_env
+      | TargetModuleInterp _ <- target = fmap Just <$> withCaptureTopEnv hsc_env
+      | otherwise = pure (hsc_env, Nothing)
+
+    applyCapture captured hmi =
+      case captured of
+        Just ref -> do
+          topEnv <- readIORef ref
+          pure $ maybe hmi (\ env -> hmi {hm_iface = patchTopEnv env hmi.hm_iface}) topEnv
+        Nothing -> pure hmi
