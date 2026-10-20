@@ -3,11 +3,12 @@ module Internal.Evaluate where
 
 import Control.Concurrent (withMVar)
 import Control.Monad.IO.Class (liftIO)
-import GHC (Ghc, getSession, getSessionDynFlags, setInteractiveDynFlags, setSession)
+import GHC (Ghc, getSession, getSessionDynFlags, moduleNameString, setInteractiveDynFlags, setSession)
 import GHC.Driver.Env (hscSetActiveUnitId)
 import GHC.Driver.Env.Types (HscEnv, hsc_mod_graph)
 import GHC.Unit (moduleUnitId)
 import Internal.Cache.Hpt (loadHomeUnit)
+import Language.Haskell.Syntax.Module.Name (ModuleName (..))
 import System.OsPath.Extra (toOsPath)
 import Types.Args (Args (..))
 import Types.Env (Env (..))
@@ -40,3 +41,10 @@ data ModuleLookupError
   = ModuleNotFound
   | ModulePackageNotFound
   | ModuleAmbiguous
+
+-- | Render a 'ModuleLookupError' into a human-readable message naming the module that could not be resolved.
+renderModuleLookupError :: ModuleName -> ModuleLookupError -> String
+renderModuleLookupError modname = \case
+  ModuleNotFound -> "module not found: " ++ moduleNameString modname
+  ModulePackageNotFound -> "package not found for module " ++ moduleNameString modname
+  ModuleAmbiguous -> "multiple candidate modules found for " ++ moduleNameString modname
