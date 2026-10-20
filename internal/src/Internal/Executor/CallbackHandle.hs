@@ -10,6 +10,10 @@ import Foreign.Ptr (Ptr)
 import GHC.IO.Buffer (newByteBuffer)
 import GHC.IO.BufferedIO (BufferedIO (..), readBuf, readBufNonBlocking, writeBuf, writeBufNonBlocking)
 import GHC.IO.Device (IODevice (..), IODeviceType (Stream), RawIO (..))
+import GHC.IO.Encoding (getLocaleEncoding)
+import GHC.IO.Handle.Internals (mkFileHandle)
+import GHC.IO.Handle.Types (Handle (..), Newline (..), NewlineMode (..))
+import System.IO (IOMode (..))
 
 -- | A device whose reads and writes are delegated to callbacks.
 data CallbackDevice =
@@ -37,3 +41,9 @@ instance BufferedIO CallbackDevice where
   fillReadBuffer0 = readBufNonBlocking
   flushWriteBuffer = writeBuf
   flushWriteBuffer0 = writeBufNonBlocking
+
+-- | Create a handle from a device, using the locale encoding and no newline translation.
+mkCallbackHandle :: CallbackDevice -> IOMode -> IO Handle
+mkCallbackHandle dev mode = do
+  enc <- getLocaleEncoding
+  mkFileHandle dev "callback" mode (Just enc) (NewlineMode LF LF)
