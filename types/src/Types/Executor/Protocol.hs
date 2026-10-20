@@ -7,6 +7,20 @@ import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
+-- | The result of running the entry, once the child was set up to do so.
+data EvalOutcome =
+  -- | The entry ran to completion, optionally carrying the value that it exfiltrated (see
+  -- 'Internal.Evaluate.executeMain').
+  EvalSucceeded (Maybe Text)
+  |
+  -- | The module has no entry; the scheduler treats this as a skip rather than a failure.
+  EvalNoEntry
+  |
+  -- | Evaluation was attempted and failed (session setup, a precondition, or the entry itself).
+  EvalFailed Text
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
 -- | Reasons for which the child couldn't attempt to run the entry.
 data SetupError =
   -- | The call could not be decoded.
