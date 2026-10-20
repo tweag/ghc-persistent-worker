@@ -93,6 +93,7 @@ library
                       Internal.DynFlags.Update
                       Internal.Env
                       Internal.Error
+                      Internal.Evaluate
                       Internal.Executor.CallbackHandle
                       Internal.Executor.Client
                       Internal.Executor.Lifecycle
