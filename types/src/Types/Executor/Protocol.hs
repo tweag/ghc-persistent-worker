@@ -95,3 +95,12 @@ data CallResult =
   }
   deriving stock (Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
+
+-- | Why the parent has no 'CallResult'.
+data CallError =
+  -- | The call failed, e.g. because the executor died.
+  Unreachable Text
+  |
+  -- | The child's answer could not be decoded.
+  Undecodable Text
+  deriving stock (Eq, Show)
