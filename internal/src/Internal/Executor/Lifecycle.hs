@@ -1,7 +1,7 @@
 -- | Lifecycle management for executor processes.
 module Internal.Executor.Lifecycle where
 
-import Control.Concurrent.MVar (MVar, modifyMVar)
+import Control.Concurrent.MVar (MVar, modifyMVar, readMVar)
 import Control.Monad (when)
 import Data.Char (isAlphaNum)
 import qualified Data.Map.Strict as Map
@@ -10,7 +10,7 @@ import Internal.Executor.Client (awaitExecutor, isRunning, stopExecutor, watchEx
 import Types.Api (Event, ExecutorId (..))
 import Types.Executor.Transport (ExecutorTransport)
 import Types.State (WorkerState (..))
-import Types.State.Executor (ExecutorHandle (..))
+import Types.State.Executor (ExecutorHandle (..), withoutCalls)
 
 -- | Resources for executor lifecycle management.
 data ExecutorEnv =
@@ -64,3 +64,22 @@ acquireExecutor canReuse env executorId = do
 ensureExecutor :: ExecutorEnv -> ExecutorId -> IO ExecutorHandle
 ensureExecutor =
   acquireExecutor isRunning
+
+-- | Replace the executor for the given id with a fresh process and wait until it serves its socket.
+--
+-- The incarnation is that of the handle the caller saw failing. If the registered executor is a newer, running one,
+-- another task has replaced it already and it is kept, since stopping it would kill that task's calls.
+-- Waits for calls in flight on the old process (see 'withoutCalls') before stopping it.
+--
+-- TODO unclear, revisit later
+respawnExecutor :: ExecutorEnv -> ExecutorId -> Int -> IO ExecutorHandle
+respawnExecutor env executorId failed =
+  (Map.lookup executorId . (.executors) <$> readMVar env.stateVar) >>= \case
+    Just handle -> withoutCalls handle replace
+    Nothing -> replace
+  where
+    replace = acquireExecutor replaced env executorId
+
+    replaced handle
+      | handle.incarnation == failed = pure False
+      | otherwise = isRunning handle
