@@ -5,6 +5,19 @@ import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
+-- | The result of executing a module in an executor process.
+data EvalOutcome =
+  -- | Success with an optional return value.
+  EvalSucceeded { result :: Maybe Text }
+  |
+  -- | The module is unknown to the executor.
+  EvalNoEntry
+  |
+  -- | Failure.
+  EvalFailed { message :: Text }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
 -- | Reasons for which an executor couldn't start a task.
 data SetupError =
   -- | The call could not be decoded.
