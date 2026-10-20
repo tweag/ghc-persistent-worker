@@ -22,6 +22,11 @@ withCall :: ExecutorHandle -> IO a -> IO a
 withCall handle =
   bracket_ (waitQSemN handle.calls 1) (signalQSemN handle.calls 1)
 
+-- | Run an action while no call is in flight and none is started, e.g. to replace the process.
+withoutCalls :: ExecutorHandle -> IO a -> IO a
+withoutCalls handle =
+  bracket_ (waitQSemN handle.calls maxConcurrentCalls) (signalQSemN handle.calls maxConcurrentCalls)
+
 -- | A running persistent executor child process: its OS process handle (for termination), the Unix socket
 -- path on which it serves the @Executor@ gRPC service, and the write end of its stdin pipe. The child exits when
 -- its stdin reaches EOF, so the handle must be kept alive (and is closed on termination).
