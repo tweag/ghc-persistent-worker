@@ -61,6 +61,7 @@ library
   hs-source-dirs: lib
   exposed-modules:
     GhcWorker.CompileResult
+    GhcWorker.Executor.Child
     GhcWorker.GhcHandler
     GhcWorker.Grpc
     GhcWorker.Instrumentation
