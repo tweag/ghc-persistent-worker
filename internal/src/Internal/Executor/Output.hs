@@ -19,6 +19,7 @@ import Data.IORef (IORef)
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
 import Data.Text.Encoding.Error (lenientDecode)
+import Types.Api (RequestId)
 
 -- | The buffers for one stream of one owner.
 data Lane =
@@ -27,6 +28,14 @@ data Lane =
     partial :: IORef ByteString,
     -- | All chunks in reverse order, for tasks only.
     collected :: Maybe (IORef [ByteString])
+  }
+
+-- | A task, or the unattributed output if there's no task.
+data Owner =
+  Owner {
+    task :: Maybe RequestId,
+    out :: Lane,
+    err :: Lane
   }
 
 -- | The remainder and the complete lines of the bytes.
