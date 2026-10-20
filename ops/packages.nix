@@ -255,6 +255,7 @@
           "buck-worker-proto"
           "bytestring"
           "containers"
+          "extra"
           "grapesy"
           "text"
         ];

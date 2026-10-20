@@ -34,5 +34,6 @@ library
     buck-worker-types,
     bytestring,
     containers,
+    extra,
     grapesy,
     text
