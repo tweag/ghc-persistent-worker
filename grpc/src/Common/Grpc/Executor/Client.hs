@@ -19,6 +19,10 @@ import qualified Proto.Executor_Fields as Fields
 import System.OsPath.Extra (OsPath, fromOsPath)
 import Types.Api (RequestId)
 import Types.Executor.Protocol (CallError (..), CallResult, ExecutorCall, ExecutorEvent, ExecutorRequest (..))
+import Types.Executor.Transport (ExecutorTransport (..))
+
+grpcTransport :: ExecutorTransport
+grpcTransport = ExecutorTransport {call = callExecutorJson, subscribe = subscribeEvents}
 
 -- | Send one call to an executor via its @Execute@ RPC, as JSON.
 --
