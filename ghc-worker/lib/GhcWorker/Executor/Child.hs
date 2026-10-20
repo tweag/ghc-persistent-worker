@@ -4,13 +4,14 @@ module GhcWorker.Executor.Child where
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (withAsync)
 import Control.Concurrent.Chan (readChan, writeChan)
+import Control.Exception (bracket_)
 import Control.Monad (forever)
 import qualified Data.Aeson as Aeson
 import Data.ByteString (toStrict)
-import Data.IORef (IORef, readIORef)
+import Data.IORef (IORef, atomicModifyIORef', readIORef)
 import Data.Text (pack)
 import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats, getRTSStatsEnabled)
-import Internal.Executor.Output (OutputRouter, withSubscription)
+import Internal.Executor.Output (Attach, OutputRouter, scopedTask, withSubscription)
 import Internal.Log (newLogger)
 import Network.GRPC.Common (NextElem (..))
 import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
@@ -18,7 +19,15 @@ import Proto.Executor (Empty, Encoded)
 import qualified Proto.Executor_Fields as Fields
 import System.Mem (performMajorGC)
 import Types.Api (ExecutorStatus (..), MemoryUsage (..))
-import Types.Executor.Protocol (CallResult (..), Captured (..), EvalOutcome, ExecutorEvent (..), SetupError (..))
+import Types.Executor.Protocol (
+  CallResult (..),
+  Captured (..),
+  EvalOutcome,
+  ExecutorCall (..),
+  ExecutorEvent (..),
+  ExecutorRequest (..),
+  SetupError (..),
+  )
 import Types.Log (Logger (..), newLog)
 
 memoryUsageZero :: MemoryUsage
@@ -97,3 +106,22 @@ statusEvents router active _ callback =
         threadDelay statusIntervalUs
 
     encodeEvent event = defMessage & Fields.payload .~ toStrict (Aeson.encode event)
+
+-- | Handler for the gRPC method @Execute@ of the service @executor@.
+executeCall ::
+  OutputRouter ->
+  IORef Int ->
+  (Attach -> ExecutorCall -> IO CallResult) ->
+  Proto Encoded ->
+  IO (Proto Encoded)
+executeCall router active handler request = do
+  result <- case Aeson.eitherDecodeStrict' request.payload of
+    Left err -> setupFailure (InvalidCall (pack err))
+    Right ExecutorRequest {requestId, call} -> bracket_ (bump 1) (bump (-1)) (run requestId call)
+  pure (defMessage & Fields.payload .~ toStrict (Aeson.encode result))
+  where
+    run requestId call = do
+      (captured, result) <- scopedTask router requestId \ attach -> handler attach call
+      pure result {captured}
+
+    bump n = atomicModifyIORef' active \ count -> (count + n, ())
