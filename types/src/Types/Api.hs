@@ -34,6 +34,12 @@ newtype ModuleName =
   deriving stock (Eq, Show)
   deriving newtype (IsString, Ord, Binary, FromJSON, ToJSON)
 
+-- | Identifier for an executor (subprocess for bytecode execution).
+newtype ExecutorId =
+  ExecutorId { text :: Text }
+  deriving stock (Eq, Ord, Show)
+  deriving newtype (IsString, Binary, FromJSON, ToJSON)
+
 fromGhcModuleName :: GHC.ModuleName -> ModuleName
 fromGhcModuleName name =
   ModuleName (Text.pack (moduleNameString name))
