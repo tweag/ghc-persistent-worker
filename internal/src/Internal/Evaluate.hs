@@ -9,7 +9,7 @@ import GHC.Core.TyCo.Compare (eqType)
 import GHC.Core.Type (Type)
 import GHC.Driver.Config (initEvalOpts)
 import GHC.Driver.DynFlags (wopt_unset)
-import GHC.Driver.Env (hscInterp, hscSetActiveUnitId, hsc_interp, mkInteractiveHscEnv, runInteractiveHsc)
+import GHC.Driver.Env (hscInterp, hscSetActiveUnitId, hsc_home_unit, hsc_interp, mkInteractiveHscEnv, runInteractiveHsc)
 import GHC.Driver.Env.Types (HscEnv (hsc_IC), hsc_mod_graph)
 import GHC.Driver.Errors.Types (hoistTcRnMessage)
 import GHC.Driver.Flags (WarningFlag (Opt_WarnUnusedLocalBinds))
@@ -27,10 +27,11 @@ import GHC.Tc.Utils.TcType (tcSplitIOType_maybe)
 import GHC.Types.Avail (AvailInfo (..))
 import GHC.Types.Name (nameOccName)
 import GHC.Types.Name.Occurrence (mkVarOcc)
-import GHC.Types.PkgQual (PkgQual)
+import GHC.Types.PkgQual (PkgQual (ThisPkg))
 import GHC.Unit (moduleUnitId)
 import GHC.Unit.Finder qualified as Finder
 import GHC.Unit.Finder.Types (FindResult (..))
+import GHC.Unit.Home (homeUnitId)
 import GHC.Unit.Module.ModIface (mi_exports)
 import GHC.Unit.Types (IsBootInterface (..), moduleName)
 import GHC.Utils.Outputable (text)
@@ -101,6 +102,19 @@ data TupleMode
   | -- | The pair is an ordinary showable result, like any other.
     TuplePlain
   deriving stock (Eq, Show)
+
+-- | Load the target's home unit, resolve the target module and run the continuation in the resulting session.
+-- 'Left' carries a setup failure (no home unit, module not found); see 'executeMain' and 'evaluateExpr'.
+withTargetModule :: String -> Env -> Maybe String -> ModuleTarget -> (HscEnv -> Ghc a) -> Ghc (Either String a)
+withTargetModule label env mHomeUnit target use =
+  setupEvaluationSession env mHomeUnit target >>= \case
+    Nothing -> pure (Left (label ++ ": no home unit configured for execute target"))
+    Just hsc_env -> do
+      let modname = moduleName target.module_
+          pkgqual = ThisPkg (homeUnitId (hsc_home_unit hsc_env))
+      liftIO (resolveTargetModule hsc_env modname pkgqual) >>= \case
+        Left err -> pure (Left (label ++ ": " ++ renderModuleLookupError modname err))
+        Right () -> Right <$> use hsc_env
 
 -- | Classifies a module's @main@ result type for return-value propagation. 'IO a' where @a@ is a stringly or
 -- numeric type has its value surfaced (via 'ResultString'/'ResultShowable', see 'executeMain'); any other result
