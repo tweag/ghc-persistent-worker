@@ -10,3 +10,8 @@ rtsArgs :: [String] -> [String]
 rtsArgs = \case
   [] -> []
   opts -> ["+RTS"] ++ opts ++ ["-RTS"]
+
+-- | Argument that makes an executor attribute its stdout and stderr to the calls, see
+-- 'Types.Settings.Settings.executorCaptureStdio'.
+captureStdioArg :: String
+captureStdioArg = "--capture-stdio"
