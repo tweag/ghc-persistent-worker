@@ -180,6 +180,7 @@
           "containers"
           "directory"
           "exceptions"
+          "extra"
           "flatparse"
           "filepath"
           "file-io"
