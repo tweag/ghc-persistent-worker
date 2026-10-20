@@ -9,6 +9,10 @@ import System.OsPath (OsPath)
 import System.Process (ProcessHandle)
 import Types.Api (ProcessStats)
 
+-- | The number of calls that can hold an executor's 'ExecutorHandle.calls' at the same time.
+maxConcurrentCalls :: Int
+maxConcurrentCalls = 64
+
 -- | A running persistent executor child process: its OS process handle (for termination), the Unix socket
 -- path on which it serves the @Executor@ gRPC service, and the write end of its stdin pipe. The child exits when
 -- its stdin reaches EOF, so the handle must be kept alive (and is closed on termination).
