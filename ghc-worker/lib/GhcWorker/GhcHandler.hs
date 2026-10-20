@@ -79,7 +79,7 @@ dispatch hooks env args =
   case args.mode of
     Just ModeCompile -> do
       compile >>= \case
-        Nothing -> pure (1, Nothing)
+        Nothing -> pure (1, failedTarget)
         Just (CompileResult {abiHash, depFiles}, target) -> do
           writeResult args abiHash depFiles
           pure (0, Just target)
@@ -89,6 +89,10 @@ dispatch hooks env args =
     Just m -> error ("worker: mode not implemented: " ++ show m)
     Nothing -> error "worker: no mode specified"
   where
+    -- The target of a failed compilation, so that the failure can be reported.
+    failedTarget =
+      (if args.interp == Interpreted then TargetModuleInterp else TargetModule) <$> env.args.moduleTarget
+
     compile = case env.args.moduleTarget of
       Just target -> do
         if args.interp == Interpreted
