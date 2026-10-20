@@ -35,7 +35,7 @@ import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..))
 import GHC.Unit.Home.PackageTable (addHomeModInfoToHpt)
 import GHC.Unit.Module.Location (ModLocation)
 import GHC.Unit.Module.ModIface (mi_module)
-import GHC.Unit.Types (toUnitId)
+import GHC.Unit.Types (moduleName, toUnitId)
 import GHC.Utils.Outputable (parens, ppr, text, (<+>))
 import Internal.Cache.Bytecode (touchBcoCache)
 import Internal.Cache.Hpt (loadCachedByteCodeFrom, reloadIfaceFromDisk)
@@ -123,6 +123,34 @@ lazyLoadByteCode logger stateVar hsc_env hmi = do
     homeUnit = hsc_home_unit hsc_env
 
     module_ = mi_module hmi.hm_iface
+
+-- | Load bytecode for the given module from 'bytecodeImport' if present, or compile it from interface Core if not.
+-- 'bytecodeImport' is used in executor processes, where bytecode is transferred from the main process in some
+-- intermediate form that is reified when the function stored in 'bytecodeImport' is called.
+--
+-- TODO Refactor, probably abstract away for executors
+loadImportedByteCode ::
+  Logger ->
+  MVar WorkerState ->
+  HscEnv ->
+  HomeModInfo ->
+  IO (Maybe Linkable)
+loadImportedByteCode logger stateVar hsc_env hmi = do
+  imported <- modifyMVar stateVar \ state ->
+    case M.lookup key state.make.bytecodeImport of
+      Nothing -> pure (state, Nothing)
+      Just rehydrate -> do
+        bytecode <- rehydrate hsc_env module_
+        state' <- insertIntoHpt state hmi bytecode
+        pure (state' {make = state'.make {bytecodeImport = M.delete key state'.make.bytecodeImport}}, Just bytecode)
+  case imported of
+    Just bytecode -> do
+      logger.debugD ("Restored imported bytecode for " <+> ppr module_)
+      pure (Just bytecode)
+    Nothing -> lazyLoadByteCode logger stateVar hsc_env hmi
+  where
+    module_ = mi_module hmi.hm_iface
+    key = (moduleUnitId module_, moduleName module_)
 
 loadDLL_ :: HscEnv -> Interp -> [FilePath] -> String -> IO ()
 loadDLL_ hsc_env interp lib_paths lib = do
