@@ -18,6 +18,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Char8 as Char8
 import Data.IORef (IORef, newIORef)
+import Data.Maybe (isJust)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
@@ -54,6 +55,12 @@ newLane keep = do
   partial <- newIORef ""
   collected <- if keep then Just <$> newIORef [] else pure Nothing
   pure Lane {partial, collected}
+
+newOwner :: Maybe RequestId -> IO Owner
+newOwner task = do
+  out <- newLane (isJust task)
+  err <- newLane (isJust task)
+  pure Owner {task, out, err}
 
 -- | The remainder and the complete lines of the bytes.
 splitLines :: ByteString -> (ByteString, [ByteString])
