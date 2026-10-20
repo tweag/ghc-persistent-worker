@@ -36,7 +36,7 @@ import GHC.Utils.Panic (panic, pprPanic)
 import GHC.Utils.TmpFs (TempDir (..), cleanTempDirs, cleanTempFiles, initTmpFs)
 import Internal.Cache.Hpt (depsFromModuleGraph, loadCachedDeps, loadHomeUnit)
 import Internal.Compat.GHC914 (hscSetModuleGraph)
-import Internal.DynFlags (buckLocation, initDynFlags, mkTargetAsInterpreted, parseFlags, setupPath, updateGlobalFlags)
+import Internal.DynFlags (buckLocation, initDynFlags, parseFlags, setupPath, updateGlobalFlags)
 import Internal.Env (withDebugLog)
 import Internal.Error (handleExceptions)
 import Internal.Log (logDebugD)
@@ -216,10 +216,11 @@ withGhcMakeSource env =
 withGhcMakeModule ::
   IsInterpreted ->
   ModuleTarget ->
+  Maybe (HscEnv -> IO ()) ->
   Env ->
   (TargetSpec -> Ghc (Maybe a)) ->
   IO (Maybe a)
-withGhcMakeModule interp target =
+withGhcMakeModule interp target sharedBytecodeHook =
   withGhc \ env srcs run -> do
     dflags0 <- getSessionDynFlags
     ensureNoArgs srcs
@@ -230,12 +231,16 @@ withGhcMakeModule interp target =
   where
     setup env dflags0 (state0, hsc_env0) =
       foldM @[] (&) (state0, hsc_env0) [
-        pure . fmap setTarget,
         restoreCachedHomeUnit env dflags0,
         setSessionModuleGraph,
         setActiveUnit,
-        restoreCachedModules env
+        restoreCachedModules env,
+        installSharedBytecode
       ]
+
+    installSharedBytecode (state, hsc_env) = do
+      traverse_ ($ hsc_env) sharedBytecodeHook
+      pure (state, hsc_env)
 
     restoreCachedHomeUnit env dflags0 =
       maybeArg env.args.homeUnit $
@@ -254,6 +259,8 @@ withGhcMakeModule interp target =
     maybeArg :: Maybe a -> (b -> a -> IO b) -> b -> IO b
     maybeArg arg f z = fromMaybe z <$> traverse (liftIO . f z) arg
 
-    (targetSpec, setTarget)
-      | Interpreted <- interp = (TargetModuleInterp, mkTargetAsInterpreted target.module_)
-      | otherwise = (TargetModule, id)
+    -- TODO "Session: Make withGhcMakeModule accept an optional capture" removed @setTarget@ here, which seems to be
+    -- unrelated
+    targetSpec
+      | Interpreted <- interp = TargetModuleInterp
+      | otherwise = TargetModule
