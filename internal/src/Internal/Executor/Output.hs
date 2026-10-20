@@ -28,7 +28,7 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
 import Data.Text.Encoding.Error (lenientDecode)
-import Types.Api (RequestId)
+import Types.Api (OutputStream (..), RequestId)
 import Types.Executor.Protocol (ExecutorEvent (..))
 
 -- | The buffers for one stream of one owner.
@@ -87,6 +87,11 @@ withSubscription router use = do
   bracket_ (modify (chan :)) (modify (filter (/= chan))) (use chan)
   where
     modify f = atomicModifyIORef' router.subscribers \ chans -> (f chans, ())
+
+selectLane :: OutputStream -> Owner -> Lane
+selectLane = \case
+  Stdout -> (.out)
+  Stderr -> (.err)
 
 -- | The remainder and the complete lines of the bytes.
 splitLines :: ByteString -> (ByteString, [ByteString])
