@@ -144,3 +144,11 @@ newtype Attach = Attach (forall b. IO b -> IO b)
 
 withAttached :: Attach -> IO b -> IO b
 withAttached (Attach attach) = attach
+
+attachTo :: OutputRouter -> Owner -> Attach
+attachTo router owner =
+  Attach \ action -> do
+    thread <- myThreadId
+    bracket_ (modify (Map.insert thread owner)) (modify (Map.delete thread)) action
+  where
+    modify f = atomicModifyIORef' router.threads \ threads -> (f threads, ())
