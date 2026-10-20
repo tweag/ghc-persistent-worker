@@ -2,8 +2,9 @@
 module GhcWorker.Executor.Child where
 
 import BuckWorkerProto ()
+import Common.Grpc (runGrpcServer)
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (withAsync)
+import Control.Concurrent.Async (race_, withAsync)
 import Control.Concurrent.Chan (readChan, writeChan)
 import Control.Exception (bracket_)
 import Control.Monad (forever)
@@ -11,10 +12,10 @@ import Control.Monad.Extra (whileM)
 import qualified Data.Aeson as Aeson
 import Data.ByteString (toStrict)
 import Data.Functor (void)
-import Data.IORef (IORef, atomicModifyIORef', readIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.Text (pack)
 import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats, getRTSStatsEnabled)
-import Internal.Executor.Output (Attach, OutputRouter, scopedTask, withSubscription)
+import Internal.Executor.Output (Attach, OutputRouter, newOutputRouter, scopedTask, withOutputRouter, withSubscription)
 import Internal.Log (newLogger)
 import Network.GRPC.Common (NextElem (..))
 import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
@@ -24,6 +25,7 @@ import Proto.Executor (Empty, Encoded, Executor)
 import qualified Proto.Executor_Fields as Fields
 import qualified System.IO as IO
 import System.Mem (performMajorGC)
+import System.OsPath.Extra (OsPath)
 import Types.Api (ExecutorStatus (..), MemoryUsage (..))
 import Types.Executor.Protocol (
   CallResult (..),
@@ -148,3 +150,17 @@ executorMethods router active handler =
   simpleMethods
   (mkServerStreaming (statusEvents router active))
   (mkNonStreaming (executeCall router active handler))
+
+-- | Serve the @executor@ service on the given socket.
+--
+-- If capturing is enabled, stdio is rerouted to the @Events@ stream.
+serveExecutor :: Bool -> OsPath -> (Attach -> ExecutorCall -> IO CallResult) -> IO ()
+serveExecutor capture socket handler = do
+  active <- newIORef 0
+  router <- newOutputRouter
+  installRouter router do
+    race_ awaitStdinEof (runGrpcServer socket (executorMethods router active handler))
+  where
+    installRouter router
+      | capture = withOutputRouter router
+      | otherwise = id
