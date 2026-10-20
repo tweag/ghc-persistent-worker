@@ -5,15 +5,17 @@
 -- output to a task, which allows concurrent evaluations to have their output captured separately.
 module Internal.Executor.CallbackHandle where
 
+import qualified Data.ByteString as ByteString
+import Data.ByteString (ByteString)
 import Data.Word (Word8)
-import Foreign.Ptr (Ptr)
+import Foreign.Ptr (Ptr, castPtr)
 import GHC.IO.Buffer (newByteBuffer)
 import GHC.IO.BufferedIO (BufferedIO (..), readBuf, readBufNonBlocking, writeBuf, writeBufNonBlocking)
 import GHC.IO.Device (IODevice (..), IODeviceType (Stream), RawIO (..))
 import GHC.IO.Encoding (getLocaleEncoding)
 import GHC.IO.Handle.Internals (mkFileHandle)
 import GHC.IO.Handle.Types (Handle (..), Newline (..), NewlineMode (..))
-import System.IO (IOMode (..))
+import System.IO (BufferMode (..), IOMode (..), hSetBuffering)
 
 -- | A device whose reads and writes are delegated to callbacks.
 data CallbackDevice =
@@ -47,3 +49,16 @@ mkCallbackHandle :: CallbackDevice -> IOMode -> IO Handle
 mkCallbackHandle dev mode = do
   enc <- getLocaleEncoding
   mkFileHandle dev "callback" mode (Just enc) (NewlineMode LF LF)
+
+-- | A write-only handle that passes the (copied) encoded bytes of every write to the callback.
+--
+-- It is unbuffered, so the callback runs in the thread that performed the write, as opposed to whichever thread
+-- happens to flush a shared buffer.
+sinkHandle :: (ByteString -> IO ()) -> IO Handle
+sinkHandle sink = do
+  h <- mkCallbackHandle CallbackDevice {cbRead = \ _ _ -> pure 0, cbWrite} WriteMode
+  hSetBuffering h NoBuffering
+  pure h
+  where
+    cbWrite ptr len = ByteString.packCStringLen (castBytes ptr, len) >>= sink
+    castBytes = castPtr
