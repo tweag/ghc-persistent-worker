@@ -17,6 +17,7 @@ import System.Environment (lookupEnv)
 import System.OsPath.Extra (toOsPath)
 import Types.Settings (Settings (..))
 import Types.Log (Logger (..))
+import qualified Types.State
 import Types.State (BinPath (..), WorkerState (..))
 import Types.State.Make (
   EModuleGraph (..),
@@ -48,7 +49,8 @@ newState settings = do
       bcoCache = M.empty,
       bcoAccessCounter = 0
     },
-    targetArgs = mempty
+    targetArgs = mempty,
+    executors = Types.State.emptyExecutors
   }
 
 modifyMakeState :: MVar WorkerState -> (MakeState -> IO (MakeState, a)) -> IO a
