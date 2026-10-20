@@ -23,6 +23,11 @@ withCall :: ExecutorHandle -> IO a -> IO a
 withCall handle =
   bracket_ (waitQSemN handle.calls 1) (signalQSemN handle.calls 1)
 
+-- | Run an action while no call is in flight and none is started, e.g. to replace the process.
+withoutCalls :: ExecutorHandle -> IO a -> IO a
+withoutCalls handle =
+  bracket_ (waitQSemN handle.calls maxConcurrentCalls) (signalQSemN handle.calls maxConcurrentCalls)
+
 -- | Resources and state for an executor process.
 --
 -- TODO split in resources and state?
