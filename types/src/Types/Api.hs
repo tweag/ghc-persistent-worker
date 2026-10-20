@@ -189,7 +189,16 @@ data TaskKind =
   |
   Build { rebuild :: Bool }
   |
-  Execute
+  -- | Run this target's execute tasks via a persistent, gRPC-addressable subprocess (see
+  -- 'GhcServer.Build.Executor') identified by 'ExecutorId', instead of in-process. 'Nothing' runs in-process.
+  --
+  -- TODO: This documentation needs to link to explanations of the concepts in question.
+  --    * What is a persistent, gRPC-addressable subprocess?
+  --    * What means running "in-process"?
+  --    * What is a target?
+  --    * What is a target's execute task?
+  -- TODO: 'GhcServer.Build.Executor' does not exist.
+  Execute { executor :: Maybe ExecutorId }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (Binary, FromJSON, ToJSON)
 
