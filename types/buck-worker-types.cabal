@@ -47,6 +47,7 @@ library
     Types.CachedDeps
     Types.Compat.GHC914
     Types.Env
+    Types.Executor.Protocol
     Types.FeatureFlags
     Types.BuildPlan.Incremental
     Types.Grpc
