@@ -30,13 +30,14 @@ import Options.Applicative (
   option,
   progDesc,
   strOption,
+  value,
   (<**>),
   )
 import System.OsPath.Extra (toOsPath)
 import Types.FeatureFlags (Feature (..), parseFeatureFlag)
 import Types.Log (TraceId (..))
 import Types.Orchestration (ServerSocketPath (..), serverSocketFromPath)
-import Types.Settings (Settings (..), defaultSettings, featureOn, parseByteSize, setFeature)
+import Types.Settings (Settings (..), defaultExecutorRts, defaultSettings, featureOn, parseByteSize, setFeature)
 import Types.State (WorkerState (..))
 
 -- | Global options for the worker, passed when the process is started, in contrast to request options stored in
@@ -83,6 +84,16 @@ maxBytecodeParser =
       <> metavar "NUM[k|M|G]"
       <> help "Maximum number of BCOs in the loader state (enables eviction)"
       )
+    )
+
+-- | Parser for '--executor-rts', the RTS options of persistent executor subprocesses.
+executorRtsParser :: Parser [String]
+executorRtsParser =
+  words <$> strOption (
+    long "executor-rts"
+    <> metavar "OPTS"
+    <> help "RTS options for persistent executor subprocesses, separated by spaces"
+    <> value (unwords defaultExecutorRts)
     )
 
 cliOptionsParser :: Parser CliOptions
