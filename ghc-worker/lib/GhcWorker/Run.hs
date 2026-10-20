@@ -19,6 +19,7 @@ import Options.Applicative (
   ParserInfo,
   eitherReader,
   execParser,
+  flag,
   fullDesc,
   header,
   help,
@@ -64,6 +65,14 @@ featureFlagsParser =
     flagOption enabled = do
       feature <- eitherReader (first unpack . parseFeatureFlag . pack)
       pure (feature, enabled)
+
+-- | Parser for '--executor-capture-stdio', which sets 'Types.Settings.Settings.executorCaptureStdio'.
+captureStdioParser :: Parser (Settings -> Settings)
+captureStdioParser =
+  flag id (\ settings -> settings {executorCaptureStdio = True}) (
+    long "executor-capture-stdio"
+    <> help "Attribute the stdout and stderr of persistent executors to their tasks"
+    )
 
 -- | Parser for '--max-bytecode', bounding the loader state size.
 maxBytecodeParser :: Parser (Maybe Int)
