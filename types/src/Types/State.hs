@@ -27,7 +27,12 @@ data WorkerState =
     -- | Runtime feature flags, initialized from the worker's CLI options/build config and mutable at runtime via
     -- the @ToggleFeature@ API request.
     settings :: Settings,
-    targetArgs :: Map TargetSpec (CommandEnv, RequestArgs)
+    targetArgs :: Map TargetSpec (CommandEnv, RequestArgs),
+
+    -- | Persistent execute-task subprocesses, keyed by the client-specified 'ExecutorId'. Populated lazily by
+    -- 'GhcServer.Build.Executor.ensureExecutor' the first time a given id is dispatched to, and reused for every
+    -- subsequent execute task naming the same id, until explicitly terminated (@TerminateExecutor@ API request).
+    executors :: Map ExecutorId ExecutorHandle
   }
 
 -- | The empty executor map, for constructing a fresh 'WorkerState'.
