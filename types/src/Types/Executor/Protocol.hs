@@ -1,10 +1,19 @@
 -- | The wire protocol between a GHC server and an executor subprocess.
 module Types.Executor.Protocol where
 
-import Data.Aeson (FromJSON, ToJSON)
+import Data.Aeson (FromJSON, ToJSON, Value)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Types.Api (ExecutorStatus, OutputStream, RequestId)
+
+-- | Event type for executor requests.
+--
+-- TODO This is a weird encoding.
+data ExecutorCall =
+  -- | Execute a module.
+  CallModule Value
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
 
 -- | A line written to stdio by an executor process.
 -- If possible, the corresponding task is determined by thread ID.
