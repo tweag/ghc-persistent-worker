@@ -9,10 +9,10 @@ import GHC.Core.TyCo.Compare (eqType)
 import GHC.Core.Type (Type)
 import GHC.Driver.Config (initEvalOpts)
 import GHC.Driver.DynFlags (wopt_unset)
-import GHC.Driver.Env (hscInterp, hscSetActiveUnitId, mkInteractiveHscEnv)
+import GHC.Driver.Env (hscInterp, hscSetActiveUnitId, mkInteractiveHscEnv, runInteractiveHsc)
 import GHC.Driver.Env.Types (HscEnv (hsc_IC), hsc_mod_graph)
 import GHC.Driver.Flags (WarningFlag (Opt_WarnUnusedLocalBinds))
-import GHC.Driver.Main (hscParsedStmt)
+import GHC.Driver.Main (hscParseStmtWithLocation, hscParsedStmt)
 import GHC.Driver.Monad (GhcMonad)
 import GHC.Hs.Extension (GhcPs)
 import GHC.Hs.ImpExp (simpleImportDecl)
@@ -136,6 +136,20 @@ resultSucceeded TupleFailureCount (Just ResultCounts) mResultStr =
     Just (_total, failed) -> failed == 0
     Nothing -> False
 resultSucceeded _ _ _ = True
+
+-- | Run a statement in the current interactive context.
+evalStmtCustom ::
+  GhcMonad m =>
+  -- | a statement (bind or expression)
+  String ->
+  ExecOptions ->
+  m (EvalStatus_ [ForeignHValue] [HValueRef])
+evalStmtCustom input exec_opts@ExecOptions{..} = do
+    hsc_env <- getSession
+    liftIO (runInteractiveHsc hsc_env (hscParseStmtWithLocation execSourceFile execLineNumber input)) >>= \case
+      -- Empty statement / comment: nothing to run, so trivially succeed with no bound values.
+      Nothing -> pure (EvalComplete 0 (EvalSuccess []))
+      Just stmt -> evalStmt' stmt input exec_opts
 
 -- | Evaluate a single parsed statement outside of GHCi's full REPL loop. Unlike
 -- 'GHC.Runtime.Eval.execStmt'', this does not update the session's 'InteractiveContext' with the statement's
