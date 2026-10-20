@@ -1,0 +1,36 @@
+-- | Handles backed by IO callbacks, and a way to install them as @stdout@ and @stderr@.
+-- This is used to associate stdio with the executor task that emitted it.
+module Internal.Executor.CallbackHandle where
+
+import Data.Word (Word8)
+import Foreign.Ptr (Ptr)
+import GHC.IO.Buffer (newByteBuffer)
+import GHC.IO.BufferedIO (BufferedIO (..), readBuf, readBufNonBlocking, writeBuf, writeBufNonBlocking)
+import GHC.IO.Device (IODevice (..), IODeviceType (Stream), RawIO (..))
+
+-- | A device whose reads and writes are delegated to callbacks.
+data CallbackDevice =
+  CallbackDevice {
+    -- | Fill the buffer with at most the given number of bytes and return the number of bytes written; 0 is EOF.
+    cbRead :: Ptr Word8 -> Int -> IO Int,
+    -- | Consume the given number of bytes from the buffer.
+    cbWrite :: Ptr Word8 -> Int -> IO ()
+  }
+
+instance RawIO CallbackDevice where
+  read CallbackDevice {cbRead} p _ n = cbRead p n
+  readNonBlocking CallbackDevice {cbRead} p _ n = Just <$> cbRead p n
+  write CallbackDevice {cbWrite} p _ n = cbWrite p n
+  writeNonBlocking CallbackDevice {cbWrite} p _ n = n <$ cbWrite p n
+
+instance IODevice CallbackDevice where
+  ready _ _ _ = pure True
+  close _ = pure ()
+  devType _ = pure Stream
+
+instance BufferedIO CallbackDevice where
+  newBuffer _ = newByteBuffer 8192
+  fillReadBuffer = readBuf
+  fillReadBuffer0 = readBufNonBlocking
+  flushWriteBuffer = writeBuf
+  flushWriteBuffer0 = writeBufNonBlocking
