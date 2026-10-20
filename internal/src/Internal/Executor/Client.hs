@@ -5,6 +5,10 @@
 -- Used by the @ghc-server@ ('GhcServer.Build.Executor') and by the worker's eval mode ('GhcWorker.Eval.Executor').
 module Internal.Executor.Client where
 
+import Control.Exception (SomeException, try)
+import Control.Monad (void)
+import System.Directory.OsPath (removeFile)
+import System.OsPath.Extra (OsPath)
 import Types.Settings (Settings (..))
 
 -- | Wrap RTS options in @+RTS ... -RTS@, or nothing if there are none.
@@ -22,3 +26,7 @@ captureStdioArg = "--capture-stdio"
 captureStdioArgs :: Settings -> [String]
 captureStdioArgs settings =
   [captureStdioArg | settings.executorCaptureStdio]
+
+removeIfExists :: OsPath -> IO ()
+removeIfExists path =
+  void (try @SomeException (removeFile path))
