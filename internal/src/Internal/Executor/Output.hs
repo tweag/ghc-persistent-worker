@@ -155,3 +155,7 @@ flushPartial :: OutputRouter -> Owner -> OutputStream -> IO ()
 flushPartial router owner stream = do
   rest <- atomicModifyIORef' (selectLane stream owner).partial \ partial -> ("", partial)
   unless (ByteString.null rest) (publishLines router owner stream [rest])
+
+collectedText :: Lane -> IO Text
+collectedText lane =
+  maybe "" (decode . ByteString.concat . reverse) <$> traverse readIORef lane.collected
