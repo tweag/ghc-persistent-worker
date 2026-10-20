@@ -17,9 +17,19 @@ module Internal.Executor.Output where
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Char8 as Char8
+import Data.IORef (IORef)
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
 import Data.Text.Encoding.Error (lenientDecode)
+
+-- | The buffers for one stream of one owner.
+data Lane =
+  Lane {
+    -- | The bytes after the last newline, which are published once the line is complete.
+    partial :: IORef ByteString,
+    -- | All chunks in reverse order, for tasks only.
+    collected :: Maybe (IORef [ByteString])
+  }
 
 -- | The remainder and the complete lines of the bytes.
 splitLines :: ByteString -> (ByteString, [ByteString])
