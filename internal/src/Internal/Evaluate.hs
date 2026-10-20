@@ -3,7 +3,7 @@ module Internal.Evaluate where
 import Control.Concurrent (withMVar)
 import Control.Monad.IO.Class (liftIO)
 import Data.Functor ((<&>))
-import GHC (Ghc, getSession, getSessionDynFlags, moduleNameString, setInteractiveDynFlags, setSession)
+import GHC (Ghc, getSession, getSessionDynFlags, moduleNameString, runTcInteractive, setInteractiveDynFlags, setSession)
 import GHC.Builtin.Types (boolTy, charTy, doubleTy, floatTy, intTy, integerTy, mkBoxedTupleTy, stringTy)
 import GHC.Core.TyCo.Compare (eqType)
 import GHC.Core.Type (Type)
@@ -11,19 +11,27 @@ import GHC.Driver.Config (initEvalOpts)
 import GHC.Driver.DynFlags (wopt_unset)
 import GHC.Driver.Env (hscInterp, hscSetActiveUnitId, mkInteractiveHscEnv, runInteractiveHsc)
 import GHC.Driver.Env.Types (HscEnv (hsc_IC), hsc_mod_graph)
+import GHC.Driver.Errors.Types (hoistTcRnMessage)
 import GHC.Driver.Flags (WarningFlag (Opt_WarnUnusedLocalBinds))
-import GHC.Driver.Main (hscParseStmtWithLocation, hscParsedStmt)
+import GHC.Driver.Main (hscParseStmtWithLocation, hscParsedStmt, ioMsgMaybe)
 import GHC.Driver.Monad (GhcMonad)
 import GHC.Hs.Extension (GhcPs)
 import GHC.Hs.ImpExp (simpleImportDecl)
+import GHC.Iface.Load (loadSrcInterface)
 import GHC.Runtime.Context (InteractiveContext (..), InteractiveImport (..))
 import GHC.Runtime.Eval.Types (ExecOptions (..), isStep)
 import GHC.Runtime.Interpreter (evalStmt)
 import GHC.Tc.Utils.TcType (tcSplitIOType_maybe)
+import GHC.Types.Avail (AvailInfo (..))
+import GHC.Types.Name (nameOccName)
+import GHC.Types.Name.Occurrence (mkVarOcc)
 import GHC.Types.PkgQual (PkgQual)
 import GHC.Unit (moduleUnitId)
 import GHC.Unit.Finder (findImportedModule)
 import GHC.Unit.Finder.Types (FindResult (..))
+import GHC.Unit.Module.ModIface (mi_exports)
+import GHC.Unit.Types (IsBootInterface (..))
+import GHC.Utils.Outputable (text)
 import GHCi.Message (EvalResult (..), EvalStatus_ (..))
 import GHCi.RemoteTypes (ForeignHValue, HValueRef)
 import Internal.Cache.Hpt (loadHomeUnit)
@@ -184,3 +192,18 @@ evalStmtCustom input exec_opts@ExecOptions{..} = do
       -- Empty statement / comment
       Nothing -> pure (EvalComplete 0 (EvalSuccess []))
       Just stmt -> evalStmt' stmt input exec_opts
+
+-- | Check whether a module's interface exports a binding named @main@.
+moduleHasMain :: HscEnv -> ModuleName -> PkgQual -> IO Bool
+moduleHasMain hsc_env modname pkgqual = do
+  iface <-
+    runInteractiveHsc hsc_env $
+    ioMsgMaybe $
+    hoistTcRnMessage $
+    GHC.runTcInteractive hsc_env $
+    loadSrcInterface (text "checking for main") modname NotBoot pkgqual
+  pure (any isMain (mi_exports iface))
+  where
+    isMain = \case
+      Avail n -> nameOccName n == mkVarOcc "main"
+      AvailTC _ _ -> False
