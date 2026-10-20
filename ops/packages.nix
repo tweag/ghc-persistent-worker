@@ -231,6 +231,7 @@
           "ghc"
           "ghc-paths"
           "os-string"
+          "process"
           "split"
           "text"
         ];
