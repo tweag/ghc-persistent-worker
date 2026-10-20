@@ -34,6 +34,15 @@ newtype ModuleName =
   deriving stock (Eq, Show)
   deriving newtype (IsString, Ord, Binary, FromJSON, ToJSON)
 
+-- | Identifier for a persistent execute-task subprocess (see 'Types.State.WorkerState.executors' and
+-- 'GhcServer.Build.Executor'), specified by the client/UI when triggering an execute task. The @ghc-ui@ default
+-- is the target unit's name (see 'Ghc.Ui.Event.Main'), but any text is accepted, allowing multiple executors per
+-- unit or one executor shared across units.
+newtype ExecutorId =
+  ExecutorId { text :: Text }
+  deriving stock (Eq, Ord, Show)
+  deriving newtype (IsString, Binary, FromJSON, ToJSON)
+
 fromGhcModuleName :: GHC.ModuleName -> ModuleName
 fromGhcModuleName name =
   ModuleName (Text.pack (moduleNameString name))
