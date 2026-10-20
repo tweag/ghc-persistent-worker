@@ -26,10 +26,13 @@ library
   hs-source-dirs: src
   exposed-modules:
     Common.Grpc
+    Common.Grpc.Executor.Client
   build-depends:
+    aeson,
     base ==4.*,
     buck-worker-proto,
     buck-worker-types,
+    bytestring,
     containers,
     grapesy,
     text
