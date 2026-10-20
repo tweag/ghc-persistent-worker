@@ -1,13 +1,24 @@
 -- | Executor logic.
 module GhcWorker.Executor.Child where
 
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (withAsync)
+import Control.Concurrent.Chan (readChan, writeChan)
+import Control.Monad (forever)
+import qualified Data.Aeson as Aeson
+import Data.ByteString (toStrict)
 import Data.IORef (IORef, readIORef)
 import Data.Text (pack)
 import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats, getRTSStatsEnabled)
+import Internal.Executor.Output (OutputRouter, withSubscription)
 import Internal.Log (newLogger)
+import Network.GRPC.Common (NextElem (..))
+import Network.GRPC.Common.Protobuf (Proto, defMessage, (&), (.~))
+import Proto.Executor (Empty, Encoded)
+import qualified Proto.Executor_Fields as Fields
 import System.Mem (performMajorGC)
 import Types.Api (ExecutorStatus (..), MemoryUsage (..))
-import Types.Executor.Protocol (CallResult (..), Captured (..), EvalOutcome, SetupError (..))
+import Types.Executor.Protocol (CallResult (..), Captured (..), EvalOutcome, ExecutorEvent (..), SetupError (..))
 import Types.Log (Logger (..), newLog)
 
 memoryUsageZero :: MemoryUsage
@@ -65,3 +76,24 @@ currentStatus active = do
   activeTasks <- readIORef active
   memory <- memoryUsage
   pure ExecutorStatus {memory, activeTasks}
+
+-- | Handler for the streaming gRPC method @Events@ of the service @executor@.
+--
+-- Subscribes to the executor's event channel and forwards each event to the gRPC stream.
+-- In a second thread, reads the current status every second and publishes a 'StatusEvent'.
+--
+-- TODO why is the third arg unused?
+-- TODO how does this terminate? readChan throws an exception?
+statusEvents :: OutputRouter -> IORef Int -> Proto Empty -> (NextElem (Proto Encoded) -> IO ()) -> IO ()
+statusEvents router active _ callback =
+  withSubscription router \ events ->
+    withAsync (publishStatus events) \ _ ->
+      forever (readChan events >>= callback . NextElem . encodeEvent)
+  where
+    publishStatus events =
+      forever do
+        status <- currentStatus active
+        writeChan events (StatusEvent status)
+        threadDelay statusIntervalUs
+
+    encodeEvent event = defMessage & Fields.payload .~ toStrict (Aeson.encode event)
