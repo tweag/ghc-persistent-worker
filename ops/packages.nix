@@ -278,7 +278,6 @@
           "directory"
           "exceptions"
           "extra"
-          "exceptions"
           "file-io"
           "filepath"
           "generic-lens"
