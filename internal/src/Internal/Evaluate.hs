@@ -9,7 +9,7 @@ import GHC.Core.TyCo.Compare (eqType)
 import GHC.Core.Type (Type)
 import GHC.Driver.Config (initEvalOpts)
 import GHC.Driver.DynFlags (wopt_unset)
-import GHC.Driver.Env (hscInterp, hscSetActiveUnitId, mkInteractiveHscEnv, runInteractiveHsc)
+import GHC.Driver.Env (hscInterp, hscSetActiveUnitId, hsc_home_unit, mkInteractiveHscEnv, runInteractiveHsc)
 import GHC.Driver.Env.Types (HscEnv (hsc_IC), hsc_mod_graph)
 import GHC.Driver.Errors.Types (hoistTcRnMessage)
 import GHC.Driver.Flags (WarningFlag (Opt_WarnUnusedLocalBinds))
@@ -27,10 +27,11 @@ import GHC.Tc.Utils.TcType (tcSplitIOType_maybe)
 import GHC.Types.Avail (AvailInfo (..))
 import GHC.Types.Name (nameOccName)
 import GHC.Types.Name.Occurrence (mkVarOcc)
-import GHC.Types.PkgQual (PkgQual)
+import GHC.Types.PkgQual (PkgQual (..))
 import GHC.Unit (moduleUnitId)
 import GHC.Unit.Finder (findImportedModule)
 import GHC.Unit.Finder.Types (FindResult (..))
+import GHC.Unit.Home (homeUnitId)
 import GHC.Unit.Module.ModIface (mi_exports)
 import GHC.Unit.Types (IsBootInterface (..), moduleName)
 import GHC.Utils.Outputable (text)
@@ -240,3 +241,18 @@ runExpression mode hsc_env target expr = do
           pure (Just (unsafeCoerce hv :: String))
       pure (resultSucceeded mode mkind mResultStr, mResultStr)
     _ -> pure (False, Nothing)
+
+-- | Set up an evaluation session for the given target, ensure that its module exists, and run the given action in this
+-- GHC session.
+--
+-- TODO refactor, use Text or FastString
+withTargetModule :: String -> Env -> Maybe String -> ModuleTarget -> (HscEnv -> Ghc a) -> Ghc (Either String a)
+withTargetModule label env mHomeUnit target use =
+  setupEvaluationSession env mHomeUnit target >>= \case
+    Nothing -> pure (Left (label ++ ": no home unit configured for execute target"))
+    Just hsc_env -> do
+      let modname = moduleName target.module_
+          pkgqual = ThisPkg (homeUnitId (hsc_home_unit hsc_env))
+      liftIO (resolveTargetModule hsc_env modname pkgqual) >>= \case
+        Left err -> pure (Left (label ++ ": " ++ renderModuleLookupError modname err))
+        Right () -> Right <$> use hsc_env
