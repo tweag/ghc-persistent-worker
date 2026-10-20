@@ -48,6 +48,7 @@ library
     Types.Compat.GHC914
     Types.Env
     Types.Executor.Protocol
+    Types.Executor.Transport
     Types.FeatureFlags
     Types.BuildPlan.Incremental
     Types.Grpc
