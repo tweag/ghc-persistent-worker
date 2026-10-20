@@ -82,9 +82,12 @@ toggleFeature :: MVar WorkerState -> Feature -> IO ()
 toggleFeature stateVar feature =
   modifyMVar_ stateVar \ state -> pure state {State.settings = toggleFlag feature state.settings}
 
--- | Dispatch a single decoded 'ApiRequest' to the appropriate handler.
--- The worker doesn't support bytecode eviction yet.
-apiRequest :: MVar WorkerState -> ApiRequest a -> IO (ApiResponse a)
+-- | Dispatch a single decoded 'Command' to the appropriate handler, producing the 'Response'
+-- to be JSON-encoded back into the @Send@ RPC's 'Instr.CommandResponse'.
+apiRequest ::
+  MVar WorkerState ->
+  ApiRequest a ->
+  IO (ApiResponse a)
 apiRequest stateVar = \case
   TriggerTask trigger ->
     triggerTask trigger
