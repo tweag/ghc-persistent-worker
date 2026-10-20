@@ -51,6 +51,7 @@ parseMode = \case
   "compile" -> ModeCompile
   "link" -> ModeLink
   "metadata" -> ModeMetadata
+  "eval" -> ModeEval
   mode -> ModeUnknown mode
 
 data IsInterpreted =
