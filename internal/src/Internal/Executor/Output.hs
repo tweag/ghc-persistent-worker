@@ -26,7 +26,7 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
 import Data.Text.Encoding.Error (lenientDecode)
-import Internal.Executor.CallbackHandle (Stdio (..))
+import Internal.Executor.CallbackHandle (Stdio (..), writeBytes)
 import qualified System.IO as IO
 import Types.Api (OutputStream (..), RequestId)
 import Types.Executor.Protocol (ExecutorEvent (..), OutputLine (..))
@@ -121,3 +121,11 @@ currentOwner :: OutputRouter -> IO Owner
 currentOwner router = do
   thread <- myThreadId
   Map.findWithDefault router.unattributed thread <$> readIORef router.threads
+
+-- | The callback for the replaced handles: runs in the writing thread.
+route :: OutputRouter -> Stdio -> OutputStream -> ByteString -> IO ()
+route router original stream chunk = do
+  owner <- currentOwner router
+  completed <- completeLines (selectLane stream owner) chunk
+  publishLines router owner stream completed
+  writeBytes (selectHandle stream original) chunk
