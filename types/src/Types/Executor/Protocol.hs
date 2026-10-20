@@ -3,6 +3,7 @@ module Types.Executor.Protocol where
 
 import Data.Aeson (FromJSON, ToJSON, Value)
 import Data.Text (Text)
+import qualified Data.Text as Text
 import GHC.Generics (Generic)
 import Types.Api (ExecutorStatus, OutputStream, MemoryUsage, RequestId)
 
@@ -104,3 +105,9 @@ data CallError =
   -- | The child's answer could not be decoded.
   Undecodable Text
   deriving stock (Eq, Show)
+
+-- TODO String
+displayCallError :: CallError -> String
+displayCallError = \case
+  Unreachable err -> "Executor unreachable: " ++ Text.unpack err
+  Undecodable err -> "Could not decode the child's result: " ++ Text.unpack err
