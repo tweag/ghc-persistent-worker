@@ -359,16 +359,21 @@ data Event =
 data Events =
   Events {
     publish :: (RequestId -> Event) -> IO ()
+    ,
+    -- | The id that 'publish' passes to events, to identify the request in other channels (like executor calls).
+    requestId :: RequestId
   }
 
 eventsNoop :: Events
 eventsNoop =
   Events {
-    publish = \ _ -> pure ()
+    publish = \ _ -> pure (),
+    requestId = RequestId 0
   }
 
 eventsForRequest :: RequestId -> (Event -> IO ()) -> Events
 eventsForRequest requestId publish =
   Events {
-    publish = \ event -> publish (event requestId)
+    publish = \ event -> publish (event requestId),
+    requestId
   }
