@@ -13,11 +13,12 @@
 module Internal.Executor.Output where
 
 import Control.Concurrent (ThreadId)
-import Control.Concurrent.Chan (Chan)
+import Control.Concurrent.Chan (Chan, writeChan)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Char8 as Char8
-import Data.IORef (IORef, newIORef)
+import Data.Foldable (traverse_)
+import Data.IORef (IORef, newIORef, readIORef)
 import Data.Maybe (isJust)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -69,6 +70,10 @@ newOutputRouter = do
   subscribers <- newIORef []
   unattributed <- newOwner Nothing
   pure OutputRouter {threads, subscribers, unattributed}
+
+publish :: OutputRouter -> ExecutorEvent -> IO ()
+publish router event =
+  readIORef router.subscribers >>= traverse_ (`writeChan` event)
 
 -- | The remainder and the complete lines of the bytes.
 splitLines :: ByteString -> (ByteString, [ByteString])
