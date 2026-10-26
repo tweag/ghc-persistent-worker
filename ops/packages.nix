@@ -169,6 +169,7 @@
 
     buck-worker-internal = {
       src = ../internal;
+      cabal.default-extensions = ["NoFieldSelectors"];
       library = {
         enable = true;
         dependencies = [
